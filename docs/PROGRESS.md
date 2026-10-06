@@ -29,7 +29,7 @@
 | T4 | **各 agent 实测闭环未做；`external` 表未源码级核实** | 表里除 Claude Code 外「适用版本」全空、未实测 ⇒ **不得作为实现依据** | 每家按 `features/verification.md` 跑一次（进上下文 + 压缩不丢），并补齐适用版本与出处 |
 | T5 | **真源里删掉的文档要不要从目标目录清掉** | 「加删自由」（A5）要求删除也生效，但同步器要能区分「我方曾同步过的」与「用户自己的」 | 定方案（如落一份 manifest 记录我方同步过的文件），写进 `features/dir-sync.md` |
 | T6 | **各 agent hooks 配置落点待查证** | `features/hook-injection.md` 表里 CodeBuddy / Codex / WorkBuddy 三项「待补」，且该表属**外部事实**，应迁入 `design/external/` | 查证后新建 `external/` 文档并标适用版本，原表改为引用 |
-| T7 | **npm 包名占用待复核** | 「`rulemux` 未被占用」是会变化的外部事实，无核实日期与来源 | 发布前重新核实，记录日期与来源（结论不写进 architecture，只记进度） |
+| T7 | **正式发版前要加 `files` 字段**（包名已占位） | ✅ `rulemux@0.0.1` 空包已发布占位。但 tarball 把 `AGENTS.md` / `RULES.md` / `PROGRESS*.md` / `worklog/` 全打进去了（18.7 kB） | `package.json` 加 `files: ["dist", "README.md", "LICENSE"]`，只发产物 |
 
 ---
 
