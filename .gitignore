@@ -1,0 +1,29 @@
+# 本机 / 编辑器
+.DS_Store
+
+# 各 agent 的工作区目录 —— 本机状态 + rulemux 的同步产物，都不入库
+#
+# 为什么排除：rulemux 做的事就是把「中央真源」同步进这些目录下的 rules/，
+# 所以这些目录里的内容是**派生产物**，真源在别处 ⇒ 产物入库就会出现两份副本、
+# 必然有一份过期（见 docs/README.md §六 硬规则）。
+.codebuddy/
+.trae/
+.claude/
+.cursor/
+.windsurf/
+.codex/
+.opencode/
+.gemini/
+.continue/
+
+# Node
+node_modules/
+dist/
+lib/
+*.tsbuildinfo
+*.log
+*.tgz
+
+# 环境变量
+.env
+.env.local

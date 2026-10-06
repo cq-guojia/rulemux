@@ -1,0 +1,21 @@
+{
+  "name": "rulemux",
+  "version": "0.0.1",
+  "description": "一份中央真源规则 → 同步到各家 AI coding agent 的工作区规则目录；效果与 token 与直接写 AGENTS.md 一致。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cq-guojia/rulemux.git"
+  },
+  "keywords": [
+    "agents",
+    "rules",
+    "agents-md",
+    "claude-code",
+    "codebuddy",
+    "trae",
+    "codex",
+    "opencode",
+    "prompt-caching"
+  ]
+}
