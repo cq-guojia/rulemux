@@ -26,7 +26,7 @@
 | T1 | **Trae / CodeBuddy `.mdc` 的 frontmatter 怎么写才无条件常驻** | `.mdc` 带 frontmatter（`alwaysApply` / `globs` / `description`）。写法不对 ⇒ 规则只在命中 glob 时生效，达不到「等价 `AGENTS.md`」 | 逐家查证 frontmatter 语义（要读到实现，不猜），结论回写 `external/agent-rules-dirs.md` |
 | T2 | **Codex（单文件）/ OpenCode（配置列表）的分支处理** | 这两家不扫描目录：Codex 只认单文件 `AGENTS.md`，OpenCode 要在 `opencode.json` 显式列 instruction 文件 | 退化为：Codex 拼接进 `AGENTS.md` 的**受管区**；OpenCode 改 `opencode.json` 列文件。需先定**受管区标记格式**，避免覆盖用户自己写的内容 |
 | T3 | **DeepSeek Harness 的规则目录未确认** | 目录 / 扩展名 / 是否读目录全部均未知，阻塞该 agent 接入 | 查证后补进 `external/agent-rules-dirs.md` |
-| T4 | **各 agent 实测闭环未做；`external` 表未源码级核实** | 表里除 Claude Code 外「适用版本」全空、未实测 ⇒ **不得作为实现依据** | 每家按 `features/verification.md` 跑一次（进上下文 + 压缩不丢），并补齐适用版本与出处 |
+| T4 | **各 agent 核实未完成** | Claude Code 已于 2026-10-07 经官方文档核实（hooks + 加载时机，见 `design/external/agent-rules-dirs.md` §三）；CodeBuddy 源码核查中；Trae / Codex / OpenCode / WorkBuddy / DeepSeek 🔴 待补 ⇒ **除已核实项外不得作实现依据** | 其余各家按 `features/verification.md` 跑实测闭环，并补齐适用版本与出处 |
 | T5 | **真源里删掉的文档要不要从目标目录清掉** | 「加删自由」（A5）要求删除也生效，但同步器要能区分「我方曾同步过的」与「用户自己的」 | 定方案（如落一份 manifest 记录我方同步过的文件），写进 `features/dir-sync.md` |
 | T6 | **各 agent hooks 配置落点待查证** | `features/hook-injection.md` 表里 CodeBuddy / Codex / WorkBuddy 三项「待补」，且该表属**外部事实**，应迁入 `design/external/` | 查证后新建 `external/` 文档并标适用版本，原表改为引用 |
 | T7 | **正式发版前要加 `files` 字段**（包名已占位） | ✅ `rulemux@0.0.1` 空包已发布占位。但 tarball 把 `AGENTS.md` / `RULES.md` / `PROGRESS*.md` / `worklog/` 全打进去了（18.7 kB） | `package.json` 加 `files: ["dist", "README.md", "LICENSE"]`，只发产物 |

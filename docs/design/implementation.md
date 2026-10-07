@@ -15,18 +15,20 @@
 
 ## 一、总体形态
 
-### 1. 实现语言与构建 ⬜
-- **问题**：用 Node/TS 还是 Go/Rust 单二进制？构建产物形态（`dist/` + `bin`）。
+### 1. 实现语言与构建 ✅ 已定
+- **问题**：Node/TS 还是 Go/Rust 单二进制？
 - **关联**：PROGRESS 下一步第 4 条（技术选型，结论进 `architecture.md`）。
-- **待定**：语言、打包器、是否单文件分发。
+- **结论**：**Go 单二进制**。已核实 Claude Code 的 SessionStart hook 可经 exec 形式直接 spawn PATH 上的编译二进制（见 `external/agent-rules-dirs.md` §三），故**零运行时依赖**（无 Node/VM）可行；Go 比 Rust 更直白易读、三平台交叉编译容易、体积小吃得开。若你改主意要 Rust 说一声。（按你上条表态：可读性 OK + 零依赖即选之）
+- **待定**：具体构建脚本（`go build` 交叉编译）、产物命名。
 
 ### 2. CLI 形态与 bin 名 ⬜
 - **问题**：单命令 + 子命令（`rulemux sync` / `init` / `doctor` / `verify`）？还是单一可执行 + flags？`bin` 名是否就叫 `rulemux`。
 - **待定**：子命令集合、`init` 是否生成示例配置。
 
-### 3. 分发与平台 ⬜
-- **问题**：npm 全局安装 / `npx rulemux`；是否保证 win / mac / linux 跨平台。
-- **待定**：最低 Node 版本、是否发预编译二进制。
+### 3. 分发与平台 ✅ 已定
+- **问题**：npm 全局安装 / `npx rulemux` / 预编译二进制？
+- **结论**：**交叉编译的 Go 原生二进制**为主分发形态；`npm i -g rulemux` 仅作为把二进制放进 PATH 的便捷通道（或直接 GitHub Release 下载）。零运行时，win/mac/linux 通吃。Windows 发 `rulemux.exe`（exec 形式 hook 可直接 spawn）。
+- **待定**：是否仍保留 npm 包作为分发入口（包内不含运行时，只搬运二进制）。
 
 ## 二、中央真源
 
@@ -45,17 +47,19 @@
 - **问题**：自动探测本机已装 agent？还是读一份配置文件（`.rulemux.toml` / `.rulemux.json`）显式列出 agent + workspace 路径。
 - **待定**：配置格式、是否支持多 workspace。
 
-### 7. 各 agent 规则目录事实 ⬜
-- **问题**：Claude Code / CodeBuddy / Trae / Codex / OpenCode / WorkBuddy / DeepSeek 各自的规则目录、扩展名、是否读**全部** `.md`、frontmatter 语义——目前 🔴 未核实。
+### 7. 各 agent 规则目录事实 ⬜（Claude Code 已核实，其余待补）
+- **问题**：Claude Code / CodeBuddy / Trae / Codex / OpenCode / WorkBuddy / DeepSeek 各自的规则目录、扩展名、是否读**全部** `.md`、frontmatter 语义。
 - **关联**：T1 / T3 / T4 / T6。
-- **待定**：逐家源码级核实后回写 `external/agent-rules-dirs.md`。
+- **进度**：**Claude Code ✅ 2026-10-07 官方文档核实**（见 `external/agent-rules-dirs.md` §三）——含「hook 可 exec 二进制」与「规则会话开始加载、`/compact` 重读」两命门；CodeBuddy 源码核查中；Trae / Codex / OpenCode / WorkBuddy / DeepSeek 🔴 待补。
+- **待定**：其余各家逐家核实后回写 `external/agent-rules-dirs.md`。
 
 ## 四、同步与适配
 
-### 8. 同步触发方式 ⬜
-- **问题**：手动 `rulemux sync`？git hook / pre-commit？CI？还是依赖各 agent 的 SessionStart hook 触发？「永不淡出 / 不累积」靠什么机制保证。
-- **关联**：T4（实测闭环）。
-- **待定**：触发模型、是否常驻。
+### 8. 同步触发方式 ✅ 已定
+- **问题**：怎么触发同步？要不要常驻进程？
+- **结论**：**无守护进程**；由各 agent 的 **SessionStart hook 调起 `rulemux sync`**（exec 形式直接 spawn 二进制）。文件**持久化**在原生规则目录 ⇒ 每个新会话（及 `/compact` 后）必加载，满足 Tier-1 / A1–A3。中央规则变更后的「同会话即时新鲜度」非保证，以 **PreCompact 再 copy 一次**兜底，或重开会话。
+- **依据**：`external/agent-rules-dirs.md` §三（Claude Code 官方 hooks/memory 文档 2026-10-07）。
+- **待定**：无（机制已定）；各 agent 具体 hook 安装路径归第 12 条。
 
 ### 9. 逐 agent 格式适配 ⬜
 - **问题**：中央 `.md` → 各 agent 期望格式（文件名、扩展名、frontmatter、单文件 vs 多文件）。是否给每个 agent 注入不同头尾标记（如 `AGENTS.md` 的 `RULES BEGIN/END`）。
