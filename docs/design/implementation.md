@@ -51,23 +51,26 @@
 
 ### 6. targets 与配置来源 ✅ 已定
 - **问题**：targets 怎么来？配置格式？配置放哪？
-- **结论**：读一份 **TOML 配置**（默认 `~/.rulemux/config.toml`，位置可任意指定，非必须工作区——因 rulemux 由 hook 在 agent 调用中拉起，读的是自己的配置而非工作区）。字段：
-  - `workspace`（可选，顶层）：工作区根目录。**留空 = 用「当前工作目录」**——钩子调起 rulemux 时 agent 的 cwd 天然就是工作区，所以通常不用配。优先级：`--workspace` 命令行 > 配置里的 `workspace` > cwd。
-  - `[[source]]`：一条投递规则，含
-    - `path`：源文件路径（磁盘任意位置），**单个字符串或数组都支持**（数组里的同一批文件共享下面的 `agents`）；
-    - `agents`：投递给哪些 agent，取值 `claude / codebuddy / workbuddy / trae / codex / opencode`，**省略 = 全部**。
-  各 agent 适配器按自身规则目录落地。
+- **结论**：读一份 **TOML 配置**（默认 `~/.rulemux/config.toml`，位置可任意指定，非必须工作区——因 rulemux 由 hook 在 agent 调用中拉起，读的是自己的配置而非工作区）。每条 `[[source]]` 三个字段，**每个都支持「单个字符串」或「数组」两种写法**：
+  - `path`：源文件路径（磁盘任意位置）。
+  - `agents`：投递给哪些 agent，取值 `claude / codebuddy / workbuddy / trae / codex / opencode`，**省略 = 全部 agent**。
+  - `workspace`：适用于哪些工作区，**省略 / `"*"` / `"all"` = 所有工作区**。
+- **会话开始时的匹配流程**（即「先算全部匹配条目 → 合并成文件 list → 再决定增删」）：
+  1. 钩子触发 ⇒ 当前工作区 = 会话所在工作区（命令行 `--workspace` 可覆盖）。
+  2. 逐条 `[[source]]` 判断：agent 命中 **且** 工作区命中 ⇒ 收进结果。
+  3. 命中的条目展平成**文件 list**（共用同一规则目录的 agent 会合并计算，按路径去重）。
+  4. `engine.Sync`：带前缀但不在 list 里 ⇒ **删**；list 里缺失或内容不同 ⇒ **copy**；内容相同 ⇒ 跳过。
 - **示例**：
   ```toml
-  workspace = "/path/to/project"   # 可选；省略则用当前工作目录
-
   [[source]]
-  path = ["C:/rules/a.md", "C:/rules/b.md"]   # 数组：一批文件共享 agents
+  path = ["C:/rules/a.md", "C:/rules/b.md"]
   agents = ["claude", "codex"]
+  # workspace 省略 = 所有工作区都适用
 
   [[source]]
-  path = "D:/notes/c.txt"                     # 单个字符串也支持
+  path = "D:/notes/c.txt"
   agents = ["trae"]
+  workspace = ["/path/to/proj-a", "/path/to/proj-b"]   # 只在这两个工作区生效
   ```
 - **依据**：用户 2026-10-07 决策（TOML 定；配置目录可任意）。
 - **待定**：无（配置形态已定）；多 workspace 支持留作实现细节。

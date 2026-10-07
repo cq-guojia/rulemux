@@ -11,9 +11,7 @@ import (
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.toml")
-	content := `workspace = "/tmp/proj"
-
-# rulemux 配置
+	content := `# rulemux 配置
 [[source]]
 path = ["C:/rules/a.md", "C:/rules/style.md"]
 agents = ["claude", "codex"]
@@ -27,9 +25,6 @@ path = 'D:/notes/b.txt'
 	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if c.Workspace != "/tmp/proj" {
-		t.Fatalf("workspace 解析错误：%q", c.Workspace)
 	}
 	if len(c.Sources) != 2 {
 		t.Fatalf("期望 2 条 source，实得 %d", len(c.Sources))
@@ -70,11 +65,63 @@ func TestSourcesFor(t *testing.T) {
 		{Paths: []string{"a"}, Agents: []string{"claude"}},
 		{Paths: []string{"b"}},
 	}}
-	if got := c.SourcesFor("claude"); len(got) != 2 {
+	if got := c.SourcesFor("claude", "/any"); len(got) != 2 {
 		t.Fatalf("claude 应命中 2 条（显式 + 全部），实得 %d", len(got))
 	}
-	if got := c.SourcesFor("trae"); len(got) != 1 {
+	if got := c.SourcesFor("trae", "/any"); len(got) != 1 {
 		t.Fatalf("trae 应只命中「全部」那 1 条，实得 %d", len(got))
+	}
+}
+
+// TestWorkspaceMatching 校验 workspace 过滤：
+// 省略 / "*" / "all" = 所有工作区；单个或数组按路径匹配。
+func TestWorkspaceMatching(t *testing.T) {
+	c := &Config{Sources: []Source{
+		{Paths: []string{"omit"}},                                 // 省略 = 所有
+		{Paths: []string{"star"}, Workspaces: []string{"*"}},       // * = 所有
+		{Paths: []string{"word"}, Workspaces: []string{"all"}},     // all = 所有
+		{Paths: []string{"single"}, Workspaces: []string{"/tmp/proj1"}},
+		{Paths: []string{"multi"}, Workspaces: []string{"/tmp/p2", "/tmp/p3"}},
+	}}
+
+	// /tmp/proj1：omit + star + word + single = 4 条，multi 不命中
+	if got := c.SourcesFor("claude", "/tmp/proj1"); len(got) != 4 {
+		t.Fatalf("/tmp/proj1 应命中 4 条，实得 %d", len(got))
+	}
+	// /tmp/p3：omit + star + word + multi = 4 条，single 不命中
+	if got := c.SourcesFor("claude", "/tmp/p3"); len(got) != 4 {
+		t.Fatalf("/tmp/p3 应命中 4 条，实得 %d", len(got))
+	}
+	// /tmp/other：只有 omit + star + word = 3 条
+	if got := c.SourcesFor("claude", "/tmp/other"); len(got) != 3 {
+		t.Fatalf("/tmp/other 应命中 3 条，实得 %d", len(got))
+	}
+}
+
+// TestWorkspaceConfigParsing 校验 workspace 单值与数组都能解析。
+func TestWorkspaceConfigParsing(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `[[source]]
+path = "a.md"
+workspace = "/one/path"
+
+[[source]]
+path = "b.md"
+workspace = ["/two/path", "/three/path"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Sources[0].Workspaces) != 1 || c.Sources[0].Workspaces[0] != "/one/path" {
+		t.Fatalf("单值 workspace 解析错误：%v", c.Sources[0].Workspaces)
+	}
+	if len(c.Sources[1].Workspaces) != 2 || c.Sources[1].Workspaces[1] != "/three/path" {
+		t.Fatalf("数组 workspace 解析错误：%v", c.Sources[1].Workspaces)
 	}
 }
 

@@ -29,8 +29,7 @@ func Sync(args []string) int {
 		return 1
 	}
 
-	// 工作区：--workspace > 配置里的 workspace > 当前工作目录
-	ws, err := workspaceWith(wsFlag, cfg.Workspace)
+	ws, err := workspace(wsFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
 		return 1
@@ -52,7 +51,7 @@ func Sync(args []string) int {
 		dir := a.RulesDirAbs(ws)
 		// 共用同一目录的 agent（如 codebuddy/workbuddy）合并计算源，
 		// 避免其中一个把另一个的文件当残留删掉。
-		srcs := unionSources(cfg, agents.ByRulesDir(a.RulesDir))
+		srcs := unionSources(cfg, agents.ByRulesDir(a.RulesDir), ws)
 		res, err := engine.Sync(dir, srcs)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "rulemux: 同步 %s 失败: %v\n", a.ID, err)
@@ -85,12 +84,12 @@ func targetAgents(id string) []agents.Agent {
 	return out
 }
 
-// unionSources 合并多个 agent 的源列表，按源的文件列表去重。
-func unionSources(cfg *config.Config, list []agents.Agent) []config.Source {
+// unionSources 合并多个 agent 的源规则，按文件列表去重；并按当前工作区过滤。
+func unionSources(cfg *config.Config, list []agents.Agent, workspace string) []config.Source {
 	seen := map[string]bool{}
 	var out []config.Source
 	for _, a := range list {
-		for _, s := range cfg.SourcesFor(a.ID) {
+		for _, s := range cfg.SourcesFor(a.ID, workspace) {
 			key := strings.Join(s.Paths, "|")
 			if seen[key] {
 				continue

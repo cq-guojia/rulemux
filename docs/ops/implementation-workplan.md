@@ -78,7 +78,7 @@ rulemux sync --agent X   /   rulemux inject --agent X
 | W6 | Go 源码：init / doctor / verify 子命令 + 钩子安装 | P0 | ✅ |
 | W7 | **编译出二进制** | P0 | ✅ Go 1.27.1 编译通过，`go vet` 无告警 |
 | W8 | 核心引擎单测（命名/比对/删残留/幂等）+ 冒烟脚本 | P1 | ✅ `go test ./...` 通过 + `scripts/smoke.sh` 10/10 |
-| W9 | canary 实测：点文件 / CodeBuddy 结构 / 钩子时序 / Codex 注入 | P1 | 🚧 链路已搭好，待新会话判定 |
+| W9 | canary 实测：点文件 / CodeBuddy 结构 / 钩子时序 / Codex 注入 | P1 | 🚧 **CodeBuddy 已坐实 ✅**（点文件会读 + 目录结构对 + 钩子先于读）；trae / claude / codex / opencode 仍待 |
 | W10 | 据实测校准未核实项（落点、前缀是否改非点） | P1 | ⬜ |
 | W11 | GitHub Actions 交叉编译 + Release | P2 | ⬜ |
 | W12 | T7：`package.json` 加 `files` 字段 | P2 | ⬜ |

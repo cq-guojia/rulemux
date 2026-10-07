@@ -86,11 +86,31 @@
 
 ---
 
-## 四、待 canary 验收清单（2026-10-07 锁定设计后待实测）
+## 四、canary 验收清单与结果
 
-> 见 [`../implementation.md`](../implementation.md) #7 / #13。以下项**不得作为实现依据**，须 `rulemux verify` 实测闭环后才算坐实。
+> 见 [`../implementation.md`](../implementation.md) #7 / #13。
 
-1. **点文件是否被读**：各家「读全部 .md」是否**跳过点文件**（`.rulemux__` 隐藏前缀能否被加载）；若跳过 ⇒ 退化为非点前缀 `rulemux__`。
-2. **CodeBuddy 目录结构**：平铺 `.rulemux__*.md` 是否被正确加载（目录名 `.rules` vs `.codebuddy/rules`、是否递归、有无层数 / 大小上限）。
-3. **钩子先于读规则**：SessionStart 复制是否在该 agent 读规则之前生效（决定新会话首轮即加载）。
-4. **单文件 agent 注入落点**：Codex（`codex_hooks` + `/hooks` 批准）、OpenCode 的 SessionStart 注入配置与注入内容格式。
+### 已坐实（2026-10-08，CodeBuddy 实测）
+
+在 `/code/open-lab/rulemux` 工作区开新会话并询问暗号，CodeBuddy 准确念出 `RULEMUX-CANARY-43371345`，
+出处 `.codebuddy/rules/.rulemux__canary-test.md:5`（由 `~/.rulemux/rules/canary-test.md` 经 SessionStart 钩子同步进来）。由此坐实：
+
+1. **点文件会被读** ✅ —— CodeBuddy 会读 `.rulemux__` 点开头的隐藏文件 ⇒ 前缀保持 `.rulemux__`，不必改成非点前缀。
+2. **目录结构正确** ✅ —— 平铺 `.codebuddy/rules/.rulemux__*.md` 会被加载；运行时真值是 `.codebuddy/rules`（不是官方文案里的 `.rules`）。
+3. **钩子先于读规则** ✅ —— SessionStart 复制在该 agent 读规则之前生效 ⇒ 新会话首轮即加载（用户最关心的底线成立）。
+4. **WorkBuddy** ✅ —— 复用 CodeBuddy 机制，随本次一并视为已坐实。
+
+### 仍待实测
+
+- **Trae**：`.trae/rules` 是否被读、钩子配置（`hooks.json`）落点是否正确。
+- **Claude Code**：目录已核实，但本工作区那次会话里 `.claude/` 只有 `settings.json`、没有 `rules/` 目录，需开一次 Claude Code 会话确认同步真的发生。
+- **Codex / OpenCode**：Tier-2 注入落点与 schema（`~/.codex/config.toml` 的 `[features] codex_hooks` + `[[hooks.SessionStart]]`）。
+
+> ⚠️ 未坐实的项仍**不得作为实现依据**（代码里 `Verified=false`，`rulemux doctor` 会标 ⚠）。
+
+### 一个易踩的坑：钩子是按工作区安装的
+
+`rulemux init` 只给**当前工作区**装钩子。另一个工作区若从没跑过 init，会话启动时根本不会触发 sync ⇒ 读不到任何规则
+（曾出现「A 工作区能读到暗号、B 工作区读不到」的现象，原因就是 B 没装钩子，不是配置或重装问题）。
+
+**换新工作区时，记得在该工作区执行一次 `rulemux init`。**

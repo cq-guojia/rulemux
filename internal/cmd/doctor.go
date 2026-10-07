@@ -15,16 +15,13 @@ func Doctor(args []string) int {
 	f := ParseFlags(args)
 	cfgPath := f.Get("config", config.DefaultPath())
 
-	cfg, cfgErr := config.Load(cfgPath)
-	var cfgWS string
-	if cfg != nil {
-		cfgWS = cfg.Workspace
-	}
-	ws, err := workspaceWith(f.Get("workspace", ""), cfgWS)
+	ws, err := workspace(f.Get("workspace", ""))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
 		return 1
 	}
+
+	cfg, cfgErr := config.Load(cfgPath)
 
 	fmt.Println("rulemux doctor")
 	fmt.Println("工作区:", ws)
@@ -45,20 +42,25 @@ func Doctor(args []string) int {
 		fmt.Println("  提示：先运行 rulemux init")
 	} else {
 		fmt.Printf("配置: ✓ %s（%d 条 source）\n", cfgPath, len(cfg.Sources))
-		if cfg.Workspace != "" {
-			fmt.Printf("  配置内 workspace: %s\n", cfg.Workspace)
-		}
 		for _, s := range cfg.Sources {
 			target := "全部 agent"
 			if len(s.Agents) > 0 {
 				target = strings.Join(s.Agents, ", ")
+			}
+			scope := "全部工作区"
+			if len(s.Workspaces) > 0 {
+				scope = strings.Join(s.Workspaces, ", ")
+			}
+			skip := ""
+			if !s.MatchesWorkspace(ws) {
+				skip = " ← 当前工作区不匹配，本次跳过"
 			}
 			for _, p := range s.Paths {
 				mark := "✓"
 				if _, err := os.Stat(p); err != nil {
 					mark = "✗"
 				}
-				fmt.Printf("  %s %s → %s\n", mark, p, target)
+				fmt.Printf("  %s %s → %s [%s]%s\n", mark, p, target, scope, skip)
 			}
 		}
 		if err := cfg.Validate(); err != nil {

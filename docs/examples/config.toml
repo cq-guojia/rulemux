@@ -1,20 +1,19 @@
 # rulemux 配置示例
 # 默认位置 ~/.rulemux/config.toml（目录可任意指定，非必须工作区）
 #
-# path      = 源文件路径（磁盘任意位置）
-#             单个：path = "a.md"      数组：path = ["a.md", "b.md"]（同一批共享 agents）
-# agents    = 这批文件投递给哪些 agent；省略 = 全部
-# workspace = 可选，工作区根目录；省略 = 当前工作目录（钩子调起时就是 agent 的工作区）
-
-# workspace = "/path/to/your/project"
+# path      = 源文件路径（磁盘任意位置）。单个：path = "a.md"；数组：path = ["a.md", "b.md"]
+# agents    = 投递给哪些 agent；省略 = 全部
+# workspace = 适用于哪些工作区；单个或数组都行；省略 / "*" / "all" = 所有工作区
 
 [[source]]
 path = ["C:/rules/team-conventions.md", "C:/rules/style.md"]
 agents = ["claude", "codebuddy", "trae"]
+# workspace 省略 = 所有工作区都适用
 
 [[source]]
 path = "D:/notes/project-a.txt"
 agents = ["codex"]
+workspace = ["/path/to/proj-a", "/path/to/proj-b"]
 
 # agents 取值：
 #   Tier-1（真实拷贝，进规则目录）：claude / codebuddy / workbuddy / trae

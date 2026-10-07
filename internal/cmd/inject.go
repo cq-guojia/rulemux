@@ -32,7 +32,13 @@ func Inject(args []string) int {
 		return 1
 	}
 
-	srcs := cfg.SourcesFor(a.ID)
+	ws, err := workspace(f.Get("workspace", ""))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
+		return 1
+	}
+
+	srcs := cfg.SourcesFor(a.ID, ws)
 	if len(srcs) == 0 {
 		// 没有该 agent 的源：静默退出，避免往上下文注入空内容
 		return 0

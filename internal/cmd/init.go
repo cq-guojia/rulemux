@@ -13,19 +13,19 @@ import (
 // exampleConfig 是 init 生成的示例配置内容。
 const exampleConfig = `# rulemux 配置
 #
-# path   = 源文件路径（磁盘任意位置）。可以写单个字符串，也可以写数组（同一批文件共享 agents）。
-# agents = 这批文件投递给哪些 agent；省略 = 投递给全部 agent。
-# workspace = 可选，工作区根目录；省略 = 用「当前工作目录」（钩子调起时就是 agent 的工作区）。
-
-# workspace = "/path/to/your/project"
+# path      = 源文件路径（磁盘任意位置）。单个字符串或数组都行。
+# agents    = 投递给哪些 agent；省略 = 全部。
+# workspace = 适用于哪些工作区；单个字符串或数组都行，省略 / "*" / "all" = 所有工作区。
 
 [[source]]
 path = ["C:/rules/team-conventions.md", "C:/rules/style.md"]
 agents = ["claude", "codebuddy", "trae"]
+# workspace 省略 = 所有工作区都适用
 
 [[source]]
 path = "D:/notes/project-a.txt"
 agents = ["codex"]
+workspace = ["/path/to/proj-a", "/path/to/proj-b"]
 
 # agents 取值：
 #   Tier-1（真实拷贝进规则目录）：claude / codebuddy / workbuddy / trae

@@ -3,10 +3,11 @@
 // 配置形态（docs/design/implementation.md #6）：
 //
 //	[[source]]
-//	path = "C:/rules/a.md"
+//	path = ["C:/rules/a.md", "C:/rules/b.md"]
 //	agents = ["claude", "codex"]
+//	workspace = ["/path/to/proj", "/path/to/other"]
 //
-// 本包只解析 rulemux 用到的 TOML 子集（[[source]] / path / agents / 注释），
+// 本包只解析 rulemux 用到的 TOML 子集（[[source]] / path / agents / workspace / 注释），
 // 目的是保持零第三方依赖，使将来在离线环境（如 NAS）也能 go build。
 package config
 
@@ -15,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -22,19 +24,19 @@ import (
 type Source struct {
 	// Paths 是源文件路径列表，每个都可以是磁盘上的任意位置。
 	// 配置里既可写单个：path = "a.md"
-	// 也可写数组：path = ["a.md", "b.md"]  —— 同一批文件共享下面的 agents。
+	// 也可写数组：path = ["a.md", "b.md"]  —— 同一批文件共享下面的 agents/workspace。
 	Paths []string
 	// Agents 指定这批文件投递给哪些 agent；为空表示投递给全部 agent。
 	Agents []string
+	// Workspaces 指定这条规则适用于哪些工作区；为空、或含 "*"/"all" 表示所有工作区。
+	// 既支持单个：workspace = "/path/to/proj"
+	// 也支持数组：workspace = ["/a", "/b"]
+	Workspaces []string
 }
 
 // Config 是 rulemux 的完整配置。
 type Config struct {
 	Sources []Source
-	// Workspace 是可选的工作区根路径。留空表示用「当前工作目录」——
-	// 钩子调起 rulemux 时，agent 的 cwd 天然就是工作区，所以通常不用配。
-	// 需要固定到某个目录时才写：workspace = "/path/to/project"
-	Workspace string
 	// File 是本次实际读取的配置文件路径。
 	File string
 }
@@ -85,20 +87,20 @@ func Load(path string) (*Config, error) {
 		}
 
 		idx := strings.Index(line, "=")
-		if idx < 0 {
+		if idx < 0 || cur < 0 {
 			continue
 		}
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
-		switch {
-		case cur < 0 && key == "workspace":
-			// 顶层键：工作区根路径（可选）
-			c.Workspace = unquote(val)
-		case cur >= 0 && key == "path":
+		switch key {
+		case "path":
 			// 既支持单个字符串，也支持数组
 			c.Sources[cur].Paths = parsePaths(val)
-		case cur >= 0 && key == "agents":
+		case "agents":
 			c.Sources[cur].Agents = parseArray(val)
+		case "workspace":
+			// 既支持单个字符串，也支持数组
+			c.Sources[cur].Workspaces = parsePaths(val)
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -107,16 +109,38 @@ func Load(path string) (*Config, error) {
 	return c, nil
 }
 
-// SourcesFor 返回应投递给指定 agent 的源文件列表。
-// agents 字段为空表示该源投递给全部 agent。
-func (c *Config) SourcesFor(agentID string) []Source {
+// SourcesFor 返回在指定工作区下、应投递给指定 agent 的源规则。
+//   - agents 为空 ⇒ 该条投递给全部 agent
+//   - workspace 为空 / 含 "*" / "all" ⇒ 该条适用于全部工作区
+func (c *Config) SourcesFor(agentID, workspace string) []Source {
 	out := make([]Source, 0, len(c.Sources))
 	for _, s := range c.Sources {
-		if len(s.Agents) == 0 || containsFold(s.Agents, agentID) {
-			out = append(out, s)
+		if len(s.Agents) != 0 && !containsFold(s.Agents, agentID) {
+			continue
 		}
+		if !s.MatchesWorkspace(workspace) {
+			continue
+		}
+		out = append(out, s)
 	}
 	return out
+}
+
+// MatchesWorkspace 报告该条 source 是否适用于给定工作区。
+// Workspaces 为空、或含 "*" / "all"（忽略大小写）⇒ 适用于所有工作区。
+func (s Source) MatchesWorkspace(ws string) bool {
+	if len(s.Workspaces) == 0 {
+		return true
+	}
+	for _, w := range s.Workspaces {
+		if w == "*" || strings.EqualFold(w, "all") {
+			return true
+		}
+		if samePath(w, ws) {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate 校验配置是否可用。
@@ -132,7 +156,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// parsePaths 解析 path：单个字符串或数组都支持。
+// parsePaths 解析 path / workspace：单个字符串或数组都支持。
 func parsePaths(val string) []string {
 	if strings.HasPrefix(strings.TrimSpace(val), "[") {
 		return parseArray(val)
@@ -141,6 +165,24 @@ func parsePaths(val string) []string {
 		return []string{v}
 	}
 	return nil
+}
+
+// samePath 比较两个工作区路径是否指向同一个目录（先转绝对路径再规范化）。
+// ponytail: 只做路径规范化比较，不解析符号链接/挂载差异；若将来遇到 symlink 工作区再加 EvalSymlinks。
+func samePath(a, b string) bool {
+	aa, err := filepath.Abs(a)
+	if err != nil {
+		aa = filepath.Clean(a)
+	}
+	bb, err := filepath.Abs(b)
+	if err != nil {
+		bb = filepath.Clean(b)
+	}
+	aa, bb = filepath.Clean(aa), filepath.Clean(bb)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(aa, bb) // Windows 路径大小写不敏感
+	}
+	return aa == bb
 }
 
 // unquote 去掉字符串两侧的成对引号。

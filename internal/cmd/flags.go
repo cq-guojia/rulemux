@@ -60,13 +60,4 @@ func workspace(v string) (string, error) {
 	return os.Getwd()
 }
 
-// workspaceWith 决定工作区：优先命令行 --workspace，其次配置里的 workspace，最后取 cwd。
-func workspaceWith(flagVal, cfgVal string) (string, error) {
-	if flagVal != "" {
-		return filepath.Abs(flagVal)
-	}
-	if cfgVal != "" {
-		return filepath.Abs(cfgVal)
-	}
-	return os.Getwd()
-}
+

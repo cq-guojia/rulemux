@@ -72,8 +72,8 @@ var registry = []Agent{
 		RulesDir: ".codebuddy/rules",
 		HookFile: ".codebuddy/settings.json",
 		Style:    "claude",
-		Verified: false,
-		Note:     "规则目录与钩子落点待 canary 实测坐实（官方文档暗示每规则一个子文件夹，社区称平铺 .md 自动加载）",
+		Verified: true,
+		Note:     "2026-10-08 canary 已坐实：SessionStart 钩子先于规则加载执行，且会读 .codebuddy/rules/ 下 .rulemux__ 点开头的隐藏文件",
 	},
 	{
 		ID:       "workbuddy",
@@ -81,8 +81,8 @@ var registry = []Agent{
 		RulesDir: ".codebuddy/rules",
 		HookFile: ".codebuddy/settings.json",
 		Style:    "claude",
-		Verified: false,
-		Note:     "复用 CodeBuddy 机制；与 codebuddy 共用同一目录，sync 时按同目录合并计算应保留文件，避免互相误删",
+		Verified: true,
+		Note:     "复用 CodeBuddy 机制（随 CodeBuddy 一并 canary 坐实）；与 codebuddy 共用同一目录，sync 时按同目录合并计算应保留文件，避免互相误删",
 	},
 	{
 		ID:       "trae",

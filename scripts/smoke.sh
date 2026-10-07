@@ -124,5 +124,27 @@ ok "doctor 自检"
 [ ! -f "$WS/.claude/rules/.rulemux__canary.md" ] || fail "canary 未清理"
 ok "verify canary 写入/清理"
 
+# 11. workspace 匹配：只在该条规则声明的工作区里落地
+mkdir -p "$TMP/wsA" "$TMP/wsB"
+cat > "$TMP/ws.toml" <<EOF
+[[source]]
+path = "$TMP/src/a.md"
+workspace = ["$TMP/wsA"]
+EOF
+# wsB 不在声明列表里 ⇒ 不该落地
+"$BIN" sync --agent claude --config "$TMP/ws.toml" --workspace "$TMP/wsB" >/dev/null 2>&1
+[ ! -f "$TMP/wsB/.claude/rules/.rulemux__a.md" ] || fail "不匹配的工作区不该落地"
+# wsA 在声明列表里 ⇒ 应落地
+"$BIN" sync --agent claude --config "$TMP/ws.toml" --workspace "$TMP/wsA" >/dev/null 2>&1
+[ -f "$TMP/wsA/.claude/rules/.rulemux__a.md" ] || fail "匹配的工作区应落地"
+# 省略 workspace = 所有工作区
+cat > "$TMP/all.toml" <<EOF
+[[source]]
+path = "$TMP/src/a.md"
+EOF
+"$BIN" sync --agent claude --config "$TMP/all.toml" --workspace "$TMP/wsB" >/dev/null 2>&1
+[ -f "$TMP/wsB/.claude/rules/.rulemux__a.md" ] || fail "省略 workspace 应在所有工作区落地"
+ok "workspace 匹配"
+
 echo
 echo "ALL SMOKE TESTS PASSED"
