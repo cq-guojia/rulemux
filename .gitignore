@@ -8,3 +8,7 @@ dist/
 # Go 测试产物
 *.test
 *.out
+
+# CodeBuddy / WorkBuddy 的本地状态（IDE 计划文件、钩子配置、rulemux 生成的规则目录）
+# 均为本机环境产物，不入库
+.codebuddy/
