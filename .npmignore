@@ -1,0 +1,15 @@
+# rulemux 内部仓库文档，不随 npm 包发布
+RULES.md
+AGENTS.md
+docs/
+
+# agent 工作区目录，不随 npm 包发布（与 .gitignore 策略保持一致）
+.codebuddy/
+.trae/
+.claude/
+.cursor/
+.windsurf/
+.codex/
+.opencode/
+.gemini/
+.continue/
