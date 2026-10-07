@@ -143,11 +143,11 @@
 
 ## 七、工程化
 
-### 14. 测试与冒烟 ⬜（待 Go 环境）
-- **问题**：`build` / `test` 命令、选什么测试框架。
-- **现状**：Go 源码已实现（结构见 [`../ops/implementation-workplan.md`](../ops/implementation-workplan.md)），但本机无 Go 工具链 ⇒ **尚未编译、未跑测试**。
-- **计划**：用 Go 标准库 `go test` 给核心引擎写单测（前缀命名 / 同名去重 / 内容比对跳过 / 覆盖 / 删残留 / 幂等 / 不碰用户文件），外加冒烟脚本（临时目录 + 配置 → sync → 断言落地 → 删配置项再 sync → 断言残留被清）。
-- **阻塞**：等 NAS 上的 Go 工具链装好并持久化（见 [`../ops/nas-go-toolchain-requirements.md`](../ops/nas-go-toolchain-requirements.md)）。
+### 14. 测试与冒烟 ✅ 已定（已完成）
+- **结论**：用 **Go 标准库 `go test`** + 一个 shell 冒烟脚本，不引第三方测试框架。
+- **单测**：`internal/config/config_test.go`（TOML 子集解析 / SourcesFor / Validate）、`internal/engine/sync_test.go`（前缀命名 / 同名去重 / 复制 / 跳过 / 覆盖 / 删残留 / 不碰用户文件 / 缺失源）。
+- **冒烟**：`scripts/smoke.sh` —— 端到端 10 项：init 装钩子 + 幂等、sync 落地三目录 + 幂等、不碰用户文件、源变更覆盖、删残留、inject、doctor、verify canary。
+- **实测结果**：Go 1.27.1 下 `go build` / `go vet` 全绿，`go test ./...` 通过，冒烟 10/10 通过。
 - **待定**：CI（GitHub Actions 交叉编译 + Release）。
 
 ### 15. 文档落地 ⬜

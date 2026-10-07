@@ -13,9 +13,9 @@
 | 1 | 设计决策逐项拍板（`implementation.md` #1–#13） | ✅ 完成 |
 | 2 | design 文档对齐新模型（去中央真源 / Tier 分层 / 前缀 / DeepSeek 移出） | ✅ 完成 |
 | 3 | **Go 源码实现（核心引擎 + 全部 agent 适配器 + 4 个子命令）** | ✅ 完成（本批） |
-| 4 | 编译出二进制 | ⏸️ **阻塞**：本机/NAS 尚未装 Go（见 Go 环境需求文档） |
-| 5 | canary 实测坐实（点文件 / 目录结构 / 钩子时序 / 注入） | ⬜ 待做 |
-| 6 | 单测 + 冒烟 | ⬜ 待做（随编译一起） |
+| 4 | 编译出二进制 | ✅ 完成（Go 1.27.1，`go build` + `go vet` 全绿） |
+| 5 | canary 实测坐实（点文件 / 目录结构 / 钩子时序 / 注入） | 🚧 **进行中**：链路已搭好（二进制进 PATH + 含暗号测试源 + 6 个 agent 钩子已装），待开新会话问 agent 能否念出暗号来判定 |
+| 6 | 单测 + 冒烟 | ✅ 完成（`go test ./...` 通过；`scripts/smoke.sh` 10/10） |
 | 7 | CI 交叉编译 + Release 分发 | ⬜ 待做 |
 | 8 | T7：`package.json` 加 `files` 字段 | ⬜ 待做 |
 
@@ -76,9 +76,9 @@ rulemux sync --agent X   /   rulemux inject --agent X
 | W4 | Go 源码：agent 注册表（6 个 agent） | P0 | ✅ |
 | W5 | Go 源码：核心引擎 sync / inject / canary | P0 | ✅ |
 | W6 | Go 源码：init / doctor / verify 子命令 + 钩子安装 | P0 | ✅ |
-| W7 | **编译出二进制** | P0 | ⏸️ 阻塞于 Go 环境 |
-| W8 | 核心引擎单测（命名/比对/删残留/幂等）+ 冒烟脚本 | P1 | ⬜ |
-| W9 | canary 实测：点文件 / CodeBuddy 结构 / 钩子时序 / Codex 注入 | P1 | ⬜ |
+| W7 | **编译出二进制** | P0 | ✅ Go 1.27.1 编译通过，`go vet` 无告警 |
+| W8 | 核心引擎单测（命名/比对/删残留/幂等）+ 冒烟脚本 | P1 | ✅ `go test ./...` 通过 + `scripts/smoke.sh` 10/10 |
+| W9 | canary 实测：点文件 / CodeBuddy 结构 / 钩子时序 / Codex 注入 | P1 | 🚧 链路已搭好，待新会话判定 |
 | W10 | 据实测校准未核实项（落点、前缀是否改非点） | P1 | ⬜ |
 | W11 | GitHub Actions 交叉编译 + Release | P2 | ⬜ |
 | W12 | T7：`package.json` 加 `files` 字段 | P2 | ⬜ |
@@ -100,6 +100,13 @@ GOOS=linux   GOARCH=amd64  go build -o rulemux-linux-amd64 .
 ```
 
 > **零第三方依赖**：只用 Go 标准库 ⇒ `go build` 不需要 `go mod download`，离线环境也能编译。
+
+**测试**：
+
+```bash
+go test ./...        # 单测：配置解析 + 核心引擎（命名/去重/比对/覆盖/删残留/幂等/不碰用户文件）
+./scripts/smoke.sh   # 端到端冒烟：init / sync / inject / doctor / verify（10 项）
+```
 
 ---
 
@@ -139,8 +146,16 @@ rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号
 
 ---
 
-## 七、阻塞项
+## 七、当前状态与下一步
 
-**Go 工具链**：本机（NAS 容器）未装 Go，且容器重启会丢。
-需求已写给 NAS 维护方：[`nas-go-toolchain-requirements.md`](nas-go-toolchain-requirements.md)。
-待其反馈持久化方案后即可 `go build` 并跑 W8/W9。
+**Go 工具链**：✅ 已装（Go 1.27.1 linux/amd64），编译 / 单测 / 冒烟均已跑通。
+（若 NAS 重启后仍需在本机编译，持久化需求见 [`nas-go-toolchain-requirements.md`](nas-go-toolchain-requirements.md)。）
+
+**canary 验收准备（已就绪，待新会话判定）**：
+
+- `rulemux` 已安装到 `/usr/local/bin/rulemux`（在 PATH 上，钩子用 exec 形式能 spawn）。
+- 测试源 `~/.rulemux/rules/canary-test.md` 内含暗号；`~/.rulemux/config.toml` 把它派给 claude / codebuddy / trae / codex。
+- 6 个 agent 的 SessionStart 钩子已安装（`rulemux init`），`rulemux doctor` 显示全部已安装。
+- **判定方法**：开一个**新会话**，问该 agent「你能在规则里看到这个暗号吗：`RULEMUX-CANARY-43371345`」。
+  - 念得出 ⇒ 链路通（钩子先于读规则 + 该 agent 会读点开头的隐藏文件）；
+  - 念不出 ⇒ 按 [`../design/features/verification.md`](../design/features/verification.md) 排查；若确认是「跳过点文件」⇒ 把 `internal/engine/sync.go` 的 `Prefix` 改成非点的 `rulemux__`。

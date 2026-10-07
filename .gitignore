@@ -12,3 +12,10 @@ dist/
 # CodeBuddy / WorkBuddy 的本地状态（IDE 计划文件、钩子配置、rulemux 生成的规则目录）
 # 均为本机环境产物，不入库
 .codebuddy/
+
+# rulemux 在本工作区生成的规则目录与钩子配置（同样是本机产物，不入库）
+.claude/rules/
+.trae/rules/
+.claude/settings.json
+hooks.json
+opencode.json
