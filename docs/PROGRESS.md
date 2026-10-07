@@ -30,6 +30,7 @@
 | T5 | **真源里删掉的文档要不要从目标目录清掉** | 「加删自由」（A5）要求删除也生效，但同步器要能区分「我方曾同步过的」与「用户自己的」 | 定方案（如落一份 manifest 记录我方同步过的文件），写进 `features/dir-sync.md` |
 | T6 | **各 agent hooks 配置落点待查证** | `features/hook-injection.md` 表里 CodeBuddy / Codex / WorkBuddy 三项「待补」，且该表属**外部事实**，应迁入 `design/external/` | 查证后新建 `external/` 文档并标适用版本，原表改为引用 |
 | T7 | **正式发版前要加 `files` 字段**（包名已占位） | ✅ `rulemux@0.0.1` 空包已发布占位。但 tarball 把 `AGENTS.md` / `RULES.md` / `PROGRESS*.md` / `worklog/` 全打进去了（18.7 kB） | `package.json` 加 `files: ["dist", "README.md", "LICENSE"]`，只发产物 |
+| T8 | **实现细节逐条拍板**（作为任务跟进） | 用户 2026-10-07 立项 [`design/implementation.md`](design/implementation.md) 为任务清单，含待定项 1–15（语言/CLI/真源/targets/适配/幂等/降级/验证/工程化），覆盖 T0–T7 之外的新增决策 | 基于该文档逐项讨论拍板，结论回写对应 design 文档，划掉一项 |
 
 ---
 

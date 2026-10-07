@@ -2,7 +2,7 @@
 
 > **状态**：📝 待拍板
 > **来源**：用户前期调研（原根 `DESIGN.md` §1 / §7，已分解迁入本文件）
-> **配套**：[`requirements.md`](requirements.md)（用户要什么）· [`features.md`](features.md)（怎么做）· [`external/agent-rules-dirs.md`](external/agent-rules-dirs.md)（各家规则目录）
+> **配套**：[`requirements.md`](requirements.md)（用户要什么）· [`features.md`](features.md)（怎么做）· [`external/agent-rules-dirs.md`](external/agent-rules-dirs.md)（各家规则目录）· [`implementation.md`](implementation.md)（实现待定项清单）
 
 ---
 
