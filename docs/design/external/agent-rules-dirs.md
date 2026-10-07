@@ -19,7 +19,7 @@
 | WorkBuddy | `.codebuddy/rules/`（复用 CodeBuddy 机制） | 同上 | ⚠️ 固定结构 | 待补 | — |
 | Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | 待补 | — |
 | OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | 待补 | — |
-| DeepSeek Harness | 待确认 | — | — | 待补 | TODO |
+| DeepSeek Harness | — | — | — | 移出范围 | 用户 2026-10-07 决定移出当前范围（最开放、支持插件，后续以插件市场解决） |
 
 > ⚠️ **扩展名 / 结构各家不同** ⇒ 同步器必须**按 agent 分别落格式**，不能一个 `.md` 通吃。
 
@@ -83,3 +83,14 @@
   - SessionStart hook 当轮写入「会话开始即加载」位置时，**通常下个会话才生效**（加载已先发生于 hook 之前，时序官方未文档化）→ 但文件已落盘，下轮必读，无功能缺失。
   - 同会话即时新鲜度（改了中央规则想本轮就见）非保证；以 `PreCompact` 再 copy 一次兜底，或重开会话即可。
 - **验证手段**：官方提供 `InstructionsLoaded` hook（可观察哪些规则被加载）与 `/context`（查看已加载 Memory）。→ 这正好是我们 `features/verification.md` 的 canary 实测法要落地的对象，**不当场猜，实测为准**。
+
+---
+
+## 四、待 canary 验收清单（2026-10-07 锁定设计后待实测）
+
+> 见 [`../implementation.md`](../implementation.md) #7 / #13。以下项**不得作为实现依据**，须 `rulemux verify` 实测闭环后才算坐实。
+
+1. **点文件是否被读**：各家「读全部 .md」是否**跳过点文件**（`.rulemux__` 隐藏前缀能否被加载）；若跳过 ⇒ 退化为非点前缀 `rulemux__`。
+2. **CodeBuddy 目录结构**：平铺 `.rulemux__*.md` 是否被正确加载（目录名 `.rules` vs `.codebuddy/rules`、是否递归、有无层数 / 大小上限）。
+3. **钩子先于读规则**：SessionStart 复制是否在该 agent 读规则之前生效（决定新会话首轮即加载）。
+4. **单文件 agent 注入落点**：Codex（`codex_hooks` + `/hooks` 批准）、OpenCode 的 SessionStart 注入配置与注入内容格式。

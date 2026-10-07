@@ -1,0 +1,15 @@
+# rulemux 配置示例
+# 默认位置 ~/.rulemux/config.toml（目录可任意指定，非必须工作区）
+# 每个 [[source]] 列出一个源文件（磁盘任意位置）及其要注入的 agent
+
+[[source]]
+path = "C:/rules/team-conventions.md"   # 任意位置的源文件
+agents = ["claude", "codex"]            # 注入到哪些 agent；省略 = 全部
+
+[[source]]
+path = "D:/notes/project-a.txt"
+agents = ["trae"]                       # 仅 Trae
+
+# agents 取值：
+#   Tier-1（真实拷贝）：claude / codebuddy / trae / workbuddy
+#   Tier-2（SessionStart 注入，不碰用户文件）：codex / opencode
