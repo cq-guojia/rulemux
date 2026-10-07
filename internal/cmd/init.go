@@ -12,11 +12,15 @@ import (
 
 // exampleConfig 是 init 生成的示例配置内容。
 const exampleConfig = `# rulemux 配置
-# 每个 [[source]] 列出一个源文件（磁盘任意位置）及其要投递的 agent。
-# agents 省略 = 投递给全部 agent。
+#
+# path   = 源文件路径（磁盘任意位置）。可以写单个字符串，也可以写数组（同一批文件共享 agents）。
+# agents = 这批文件投递给哪些 agent；省略 = 投递给全部 agent。
+# workspace = 可选，工作区根目录；省略 = 用「当前工作目录」（钩子调起时就是 agent 的工作区）。
+
+# workspace = "/path/to/your/project"
 
 [[source]]
-path = "C:/rules/team-conventions.md"
+path = ["C:/rules/team-conventions.md", "C:/rules/style.md"]
 agents = ["claude", "codebuddy", "trae"]
 
 [[source]]
@@ -26,6 +30,7 @@ agents = ["codex"]
 # agents 取值：
 #   Tier-1（真实拷贝进规则目录）：claude / codebuddy / workbuddy / trae
 #   Tier-2（SessionStart 注入，不碰用户文件）：codex / opencode
+#   trae 的 CN 版与国际版是同一套机制，统一写 trae
 `
 
 // Init 生成示例配置，并为各 agent 安装 SessionStart 钩子（幂等）。

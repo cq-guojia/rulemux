@@ -17,11 +17,7 @@ import (
 func Sync(args []string) int {
 	f := ParseFlags(args)
 	cfgPath := f.Get("config", config.DefaultPath())
-	ws, err := workspace(f.Get("workspace", ""))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
-		return 1
-	}
+	wsFlag := f.Get("workspace", "")
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -30,6 +26,13 @@ func Sync(args []string) int {
 	}
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "rulemux:", err)
+		return 1
+	}
+
+	// 工作区：--workspace > 配置里的 workspace > 当前工作目录
+	ws, err := workspaceWith(wsFlag, cfg.Workspace)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
 		return 1
 	}
 
@@ -82,16 +85,17 @@ func targetAgents(id string) []agents.Agent {
 	return out
 }
 
-// unionSources 合并多个 agent 的源列表，按源路径去重。
+// unionSources 合并多个 agent 的源列表，按源的文件列表去重。
 func unionSources(cfg *config.Config, list []agents.Agent) []config.Source {
 	seen := map[string]bool{}
 	var out []config.Source
 	for _, a := range list {
 		for _, s := range cfg.SourcesFor(a.ID) {
-			if seen[s.Path] {
+			key := strings.Join(s.Paths, "|")
+			if seen[key] {
 				continue
 			}
-			seen[s.Path] = true
+			seen[key] = true
 			out = append(out, s)
 		}
 	}

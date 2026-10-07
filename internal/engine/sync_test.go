@@ -10,7 +10,10 @@ import (
 )
 
 func TestBuildPlanNaming(t *testing.T) {
-	p := BuildPlan("/dir", []config.Source{{Path: "/x/a.md"}, {Path: "/y/b.txt"}})
+	p := BuildPlan("/dir", []config.Source{
+		{Paths: []string{"/x/a.md"}},
+		{Paths: []string{"/y/b.txt"}},
+	})
 	if p.Items[0].DstName != ".rulemux__a.md" {
 		t.Fatalf("期望 .rulemux__a.md，实得 %s", p.Items[0].DstName)
 	}
@@ -19,8 +22,21 @@ func TestBuildPlanNaming(t *testing.T) {
 	}
 }
 
+// TestBuildPlanMultiplePaths 校验一条 source 里 path 写数组时，每个文件都会展开。
+func TestBuildPlanMultiplePaths(t *testing.T) {
+	p := BuildPlan("/dir", []config.Source{
+		{Paths: []string{"/x/a.md", "/x/b.md", "/x/c.md"}},
+	})
+	if len(p.Items) != 3 {
+		t.Fatalf("path 数组应展开成 3 个文件，实得 %d", len(p.Items))
+	}
+}
+
 func TestBuildPlanDedupe(t *testing.T) {
-	p := BuildPlan("/dir", []config.Source{{Path: "/x/a.md"}, {Path: "/y/a.md"}})
+	p := BuildPlan("/dir", []config.Source{
+		{Paths: []string{"/x/a.md"}},
+		{Paths: []string{"/y/a.md"}},
+	})
 	if p.Items[0].DstName == p.Items[1].DstName {
 		t.Fatalf("同名 basename 未去重：%s", p.Items[0].DstName)
 	}
@@ -39,7 +55,7 @@ func TestSyncCopySkipUpdateDelete(t *testing.T) {
 	if err := os.WriteFile(src, []byte("v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	srcs := []config.Source{{Path: src}}
+	srcs := []config.Source{{Paths: []string{src}}}
 
 	// 首次：复制
 	r, err := Sync(target, srcs)
@@ -107,7 +123,7 @@ func TestSyncIgnoresUserFiles(t *testing.T) {
 
 func TestSyncMissingSource(t *testing.T) {
 	target := t.TempDir()
-	r, err := Sync(target, []config.Source{{Path: "/definitely/not/here.md"}})
+	r, err := Sync(target, []config.Source{{Paths: []string{"/definitely/not/here.md"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,15 +21,17 @@ func RenderInject(srcs []config.Source) (string, error) {
 	b.WriteString(managedHeader)
 	b.WriteString("\n")
 	for _, s := range srcs {
-		data, err := os.ReadFile(s.Path)
-		if err != nil {
-			// 单个源文件缺失不影响整体注入
-			continue
-		}
-		b.WriteString("\n")
-		b.Write(data)
-		if !bytes.HasSuffix(data, []byte("\n")) {
+		for _, p := range s.Paths {
+			data, err := os.ReadFile(p)
+			if err != nil {
+				// 单个源文件缺失不影响整体注入
+				continue
+			}
 			b.WriteString("\n")
+			b.Write(data)
+			if !bytes.HasSuffix(data, []byte("\n")) {
+				b.WriteString("\n")
+			}
 		}
 	}
 	return b.String(), nil

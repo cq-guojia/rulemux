@@ -18,17 +18,23 @@ import (
 	"strings"
 )
 
-// Source 是配置里列出的一条源规则文件。
+// Source 是配置里列出的一条源规则（可含一个或多个文件）。
 type Source struct {
-	// Path 是源文件的路径，可以是磁盘上的任意位置。
-	Path string
-	// Agents 指定该源文件投递给哪些 agent；为空表示投递给全部 agent。
+	// Paths 是源文件路径列表，每个都可以是磁盘上的任意位置。
+	// 配置里既可写单个：path = "a.md"
+	// 也可写数组：path = ["a.md", "b.md"]  —— 同一批文件共享下面的 agents。
+	Paths []string
+	// Agents 指定这批文件投递给哪些 agent；为空表示投递给全部 agent。
 	Agents []string
 }
 
 // Config 是 rulemux 的完整配置。
 type Config struct {
 	Sources []Source
+	// Workspace 是可选的工作区根路径。留空表示用「当前工作目录」——
+	// 钩子调起 rulemux 时，agent 的 cwd 天然就是工作区，所以通常不用配。
+	// 需要固定到某个目录时才写：workspace = "/path/to/project"
+	Workspace string
 	// File 是本次实际读取的配置文件路径。
 	File string
 }
@@ -79,15 +85,19 @@ func Load(path string) (*Config, error) {
 		}
 
 		idx := strings.Index(line, "=")
-		if idx < 0 || cur < 0 {
+		if idx < 0 {
 			continue
 		}
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
-		switch key {
-		case "path":
-			c.Sources[cur].Path = unquote(val)
-		case "agents":
+		switch {
+		case cur < 0 && key == "workspace":
+			// 顶层键：工作区根路径（可选）
+			c.Workspace = unquote(val)
+		case cur >= 0 && key == "path":
+			// 既支持单个字符串，也支持数组
+			c.Sources[cur].Paths = parsePaths(val)
+		case cur >= 0 && key == "agents":
 			c.Sources[cur].Agents = parseArray(val)
 		}
 	}
@@ -115,9 +125,20 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("配置 %s 中没有 [[source]]，请先用 rulemux init 生成示例配置并填写源文件", c.File)
 	}
 	for i, s := range c.Sources {
-		if strings.TrimSpace(s.Path) == "" {
+		if len(s.Paths) == 0 {
 			return fmt.Errorf("配置 %s 第 %d 条 [[source]] 缺少 path", c.File, i+1)
 		}
+	}
+	return nil
+}
+
+// parsePaths 解析 path：单个字符串或数组都支持。
+func parsePaths(val string) []string {
+	if strings.HasPrefix(strings.TrimSpace(val), "[") {
+		return parseArray(val)
+	}
+	if v := strings.TrimSpace(unquote(val)); v != "" {
+		return []string{v}
 	}
 	return nil
 }

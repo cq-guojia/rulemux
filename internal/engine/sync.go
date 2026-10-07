@@ -35,22 +35,27 @@ type Plan struct {
 }
 
 // BuildPlan 计算目标文件名：前缀 + 源 basename；同名 basename 冲突时追加源路径短 hash。
+// 每条 source 可含多个文件（path 数组），这里先展平成文件列表再逐个算目标名。
 func BuildPlan(dir string, srcs []config.Source) *Plan {
-	count := map[string]int{}
+	var paths []string
 	for _, s := range srcs {
-		count[filepath.Base(s.Path)]++
+		paths = append(paths, s.Paths...)
 	}
-	items := make([]PlanItem, 0, len(srcs))
-	for _, s := range srcs {
-		base := filepath.Base(s.Path)
+	count := map[string]int{}
+	for _, p := range paths {
+		count[filepath.Base(p)]++
+	}
+	items := make([]PlanItem, 0, len(paths))
+	for _, p := range paths {
+		base := filepath.Base(p)
 		name := Prefix + base
 		if count[base] > 1 {
 			ext := filepath.Ext(base)
 			stem := strings.TrimSuffix(base, ext)
-			name = Prefix + stem + "-" + shortHash(s.Path) + ext
+			name = Prefix + stem + "-" + shortHash(p) + ext
 		}
 		items = append(items, PlanItem{
-			Src:     s.Path,
+			Src:     p,
 			DstName: name,
 			DstPath: filepath.Join(dir, name),
 		})
