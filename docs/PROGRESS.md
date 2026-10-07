@@ -31,6 +31,8 @@
 | T6 | **各 agent hooks 配置落点待查证** | `features/hook-injection.md` 表里 CodeBuddy / Codex / WorkBuddy 三项「待补」，且该表属**外部事实**，应迁入 `design/external/` | 查证后新建 `external/` 文档并标适用版本，原表改为引用 |
 | T7 | **正式发版前要加 `files` 字段**（包名已占位） | ✅ `rulemux@0.0.1` 空包已发布占位。但 tarball 把 `AGENTS.md` / `RULES.md` / `PROGRESS*.md` / `worklog/` 全打进去了（18.7 kB） | `package.json` 加 `files: ["dist", "README.md", "LICENSE"]`，只发产物 |
 | T8 | **实现细节逐条拍板**（作为任务跟进） | [`design/implementation.md`](design/implementation.md) 含待定项 1–15；截至 2026-10-07 已逐条拍定 1–13（仅 #14 测试 / #15 文档落地 留待实现） | ✅ 基本完成，结论已回写 design 文档 |
+| T9 | **Go 源码实现 + 编译** | 源码已写完（CLI + 配置 + agent 注册表 + 核心引擎 + 钩子安装 + 4 个子命令，见 [`ops/implementation-workplan.md`](ops/implementation-workplan.md)）；但本机/NAS **无 Go 工具链**，尚未编译与自测 | ⏸️ **阻塞**：等 NAS 上的 Go 装好并持久化 ⇒ 需求见 [`ops/nas-go-toolchain-requirements.md`](ops/nas-go-toolchain-requirements.md)。拿到环境后：`go build -o rulemux .` + 跑单测冒烟 |
+| T10 | **canary 实测坐实外部事实** | codebuddy / workbuddy / trae 的规则目录与钩子落点、codex / opencode 的注入落点、以及「是否读点开头隐藏文件」均标 `Verified=false`（代码 + doctor 会 ⚠ 提示） | 按 [`design/features/verification.md`](design/features/verification.md) 跑 `rulemux verify`，结论回写 `design/external/agent-rules-dirs.md`；若点文件读不到 ⇒ 前缀改 `rulemux__` |
 
 ---
 

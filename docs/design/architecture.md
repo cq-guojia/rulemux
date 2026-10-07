@@ -35,3 +35,23 @@
 候选（备查）：`rulecast` / `rulehub` / `ruleseed` / `ruleflow` 等。
 
 > npm 是否占用属**外部事实**且会变化 ⇒ 发布前重新核实，记录日期与来源（见 [`../PROGRESS.md`](../PROGRESS.md) 未决项）。
+
+## 四、实现结构（核心引擎 + 每 agent 适配器）
+
+架构在代码里的落法，就是「**统一抽象方法 + 每 agent 单独定义 + 调用统一方法**」三层：
+
+| 层 | 代码位置 | 职责 |
+|---|---|---|
+| **统一方法（核心引擎）** | `internal/engine/` | 文件怎么命名（前缀 `.rulemux__`）、怎么比对内容、怎么覆盖/跳过、怎么删残留、Tier-2 怎么渲染注入 —— **只有一份实现** |
+| **每 agent 单独定义（适配器）** | `internal/agents/registry.go` | 一张注册表声明每个 agent 的：Tier、规则目录、钩子落点、是否已核实 |
+| **调用（子命令）** | `internal/cmd/` | 查适配器拿到「落到哪」→ 调引擎的统一方法 |
+
+```
+各 agent 的 SessionStart 钩子
+   → rulemux sync/inject --agent X
+       → agents.Get(X)（适配器：目录/注入）
+       → engine.Sync / engine.RenderInject（统一方法）
+```
+
+> 详细代码结构、任务拆解与优先级见 [`../ops/implementation-workplan.md`](../ops/implementation-workplan.md)。
+> 适配器是**一个二进制内的多个适配模块**（不是每个 agent 一个独立程序），分发仍是单文件。

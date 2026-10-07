@@ -1,0 +1,122 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/cq-guojia/rulemux/internal/agents"
+	"github.com/cq-guojia/rulemux/internal/config"
+	"github.com/cq-guojia/rulemux/internal/engine"
+)
+
+// Sync 把配置所列源文件真实拷贝进各 agent 的原生规则目录（Tier-1）。
+//
+// 典型调用：由各 agent 的 SessionStart 钩子执行 rulemux sync --agent <id>。
+// 未指定 --agent 时处理全部 Tier-1 agent。
+func Sync(args []string) int {
+	f := ParseFlags(args)
+	cfgPath := f.Get("config", config.DefaultPath())
+	ws, err := workspace(f.Get("workspace", ""))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
+		return 1
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rulemux: 读取配置失败: %v\n  提示：先运行 rulemux init 生成示例配置\n", err)
+		return 1
+	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintln(os.Stderr, "rulemux:", err)
+		return 1
+	}
+
+	requested := f.Get("agent", "")
+	targets := targetAgents(requested)
+	if len(targets) == 0 {
+		fmt.Fprintf(os.Stderr, "rulemux: 未知 agent %q\n", requested)
+		return 1
+	}
+
+	exit := 0
+	for _, a := range targets {
+		if a.Tier == agents.Tier2 {
+			// Tier-2 没有规则目录可丢文件，由 inject 子命令负责注入
+			continue
+		}
+		dir := a.RulesDirAbs(ws)
+		// 共用同一目录的 agent（如 codebuddy/workbuddy）合并计算源，
+		// 避免其中一个把另一个的文件当残留删掉。
+		srcs := unionSources(cfg, agents.ByRulesDir(a.RulesDir))
+		res, err := engine.Sync(dir, srcs)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "rulemux: 同步 %s 失败: %v\n", a.ID, err)
+			exit = 1
+			continue
+		}
+		printSyncResult(a, dir, res)
+		if len(res.Missing) > 0 {
+			exit = 1
+		}
+	}
+	return exit
+}
+
+// targetAgents 决定本次处理哪些 agent；未指定则处理全部 Tier-1。
+func targetAgents(id string) []agents.Agent {
+	if id != "" {
+		a, ok := agents.Get(id)
+		if !ok {
+			return nil
+		}
+		return []agents.Agent{a}
+	}
+	var out []agents.Agent
+	for _, a := range agents.All() {
+		if a.Tier == agents.Tier1 {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// unionSources 合并多个 agent 的源列表，按源路径去重。
+func unionSources(cfg *config.Config, list []agents.Agent) []config.Source {
+	seen := map[string]bool{}
+	var out []config.Source
+	for _, a := range list {
+		for _, s := range cfg.SourcesFor(a.ID) {
+			if seen[s.Path] {
+				continue
+			}
+			seen[s.Path] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// printSyncResult 打印单个 agent 的同步结果。
+func printSyncResult(a agents.Agent, dir string, r *engine.SyncResult) {
+	fmt.Printf("rulemux: %s → %s\n", a.ID, dir)
+	if len(r.Copied) > 0 {
+		fmt.Println("  新增:", strings.Join(r.Copied, ", "))
+	}
+	if len(r.Updated) > 0 {
+		fmt.Println("  更新:", strings.Join(r.Updated, ", "))
+	}
+	if len(r.Deleted) > 0 {
+		fmt.Println("  删除残留:", strings.Join(r.Deleted, ", "))
+	}
+	if len(r.Skipped) > 0 {
+		fmt.Printf("  内容未变跳过: %d 个\n", len(r.Skipped))
+	}
+	for _, m := range r.Missing {
+		fmt.Fprintf(os.Stderr, "  ⚠ 源不存在: %s\n", m)
+	}
+	if len(r.Skipped) == 0 && r.IsEmpty() {
+		fmt.Println("  无事可做（配置未列出该 agent 的源文件）")
+	}
+}
