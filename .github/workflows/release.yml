@@ -59,6 +59,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Collect all binaries
         uses: actions/download-artifact@v4
         with:
@@ -68,6 +70,8 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gh infers the repo from the git remote; GH_REPO makes it explicit.
+          GH_REPO: ${{ github.repository }}
         run: |
           chmod +x dist/rulemux-* 2>/dev/null || true
           gh release create "$GITHUB_REF_NAME" \
