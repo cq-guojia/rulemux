@@ -9,13 +9,14 @@ dist/
 *.test
 *.out
 
-# CodeBuddy / WorkBuddy 的本地状态（IDE 计划文件、钩子配置、rulemux 生成的规则目录）
-# 均为本机环境产物，不入库
+# 各 agent 的本地状态目录（IDE 计划文件、钩子配置、rulemux 生成的规则目录）
+# 均为本机环境产物，整体不入库。
+# 原则：整目录忽略 —— 只忽略 rules/ 子目录会漏掉 IDE 自己产生的其它状态文件
+#（如 .trae/settings.json），那些一旦出现就会被误提交。
 .codebuddy/
+.claude/
+.trae/
 
-# rulemux 在本工作区生成的规则目录与钩子配置（同样是本机产物，不入库）
-.claude/rules/
-.trae/rules/
-.claude/settings.json
+# rulemux / 各 agent 在工作区根目录生成的钩子配置文件（同样是本机产物，不入库）
 hooks.json
 opencode.json
