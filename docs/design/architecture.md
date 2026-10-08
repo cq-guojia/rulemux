@@ -55,3 +55,20 @@
 
 > 详细代码结构、任务拆解与优先级见 [`../ops/implementation-workplan.md`](../ops/implementation-workplan.md)。
 > 适配器是**一个二进制内的多个适配模块**（不是每个 agent 一个独立程序），分发仍是单文件。
+
+## 五、hook 落点决策：Tier-1 保持 workspace 级（不挪 user 级）
+
+> **状态**：✅ 已拍板（2026-10-08）
+> **配套**：[`external/hindsight.md`](external/hindsight.md)（Hindsight 实测机制，作为对照）
+
+**结论**：Tier-1 agent（codebuddy / workbuddy）的 SessionStart 钩子**写在每个工作区的 `.codebuddy/settings.json`**（workspace 级），**不挪到 user 级** `~/.codebuddy/settings.json`。
+
+**依据（用户原话，2026-10-08）**：「他写到每个项目里面就是一个整体，然后根据那个自己去匹配工作区」——每个项目自带一份完整 hook 配置；运行时 rulemux 靠 cwd（未传 `--workspace` 时 `workspace()` 返回 `os.Getwd()`）自己匹配到当前工作区。
+
+**对照 Hindsight**：Hindsight 把同款 hooks（SessionStart / UserPromptSubmit / Stop）+ MCP server 全注册在 **user 级** `~/.codebuddy/settings.json` 与 `~/.codebuddy/mcp.json`（见 `external/hindsight.md`）。rulemux 故意**不**学它，理由：
+
+- workspace 级 ⇒ 配置随仓库走（clone 即得 hooks），各项目天然按工作区隔离；
+- codebuddy 已坐实 `.codebuddy/rules` 在打开该工作区时由 SessionStart 钩子先于规则加载触发（`external/agent-rules-dirs.md` §四），cwd 即该工作区根，`rulemux sync` 由此自匹配；
+- user 级会全局触发、需运行时判别工作区，反而更脆。
+
+**既有能力**：注册表 `Agent.HookAbs` 已支持 user 级落点（`codex` 即 `HookAbs:true` + `~/.codex/config.toml`），故若日后需要可一键切换，但当前默认保持 workspace 级。
