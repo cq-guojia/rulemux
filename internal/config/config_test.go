@@ -131,3 +131,23 @@ func TestValidateEmpty(t *testing.T) {
 		t.Fatal("空配置应校验失败")
 	}
 }
+
+// TestWorkspaceGlob 校验业界标准 glob：* 单段、** 跨段递归、可出现在中间段。
+func TestWorkspaceGlob(t *testing.T) {
+	c := &Config{Sources: []Source{
+		{Paths: []string{"recursive"}, Workspaces: []string{"/abs/**/B"}},
+		{Paths: []string{"single"}, Workspaces: []string{"/abs/*/B"}},
+	}}
+	// /abs/A/B：同时命中 ** 与 *
+	if got := c.SourcesFor("claude", "/abs/A/B"); len(got) != 2 {
+		t.Fatalf("/abs/A/B 应命中 2 条（** 与 *），实得 %d", len(got))
+	}
+	// /abs/A/deep/B：只命中 **（* 不跨段）
+	if got := c.SourcesFor("claude", "/abs/A/deep/B"); len(got) != 1 {
+		t.Fatalf("/abs/A/deep/B 应只命中 1 条（**），实得 %d", len(got))
+	}
+	// /other/B：都不命中
+	if got := c.SourcesFor("claude", "/other/B"); len(got) != 0 {
+		t.Fatalf("/other/B 应命中 0 条，实得 %d", len(got))
+	}
+}

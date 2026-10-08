@@ -4,6 +4,9 @@
 # path      = 源文件路径（磁盘任意位置）。单个：path = "a.md"；数组：path = ["a.md", "b.md"]
 # agents    = 投递给哪些 agent；省略 = 全部
 # workspace = 适用于哪些工作区；单个或数组都行；省略 / "*" / "all" = 所有工作区
+#             支持业界标准 glob："*" 单段、"**" 跨段递归，可出现在中间，例如：
+#               workspace = "/abs/**/B"   # 匹配 /abs 下任意深度的名为 B 的工作区
+#               workspace = "**/B"        # 匹配任意位置、任意层级名为 B 的工作区
 
 [[source]]
 path = ["C:/rules/team-conventions.md", "C:/rules/style.md"]

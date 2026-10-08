@@ -35,11 +35,19 @@ type Plan struct {
 }
 
 // BuildPlan 计算目标文件名：前缀 + 源 basename；同名 basename 冲突时追加源路径短 hash。
-// 每条 source 可含多个文件（path 数组），这里先展平成文件列表再逐个算目标名。
+// 同一源文件路径若被多条 source 同时引用，只在最终列表里保留一次（按源路径去重），
+// 保证一个文件只被同步一次，不会因命中多条策略而重复注入（否则会生成两个不同目标名）。
 func BuildPlan(dir string, srcs []config.Source) *Plan {
+	seen := make(map[string]bool)
 	var paths []string
 	for _, s := range srcs {
-		paths = append(paths, s.Paths...)
+		for _, p := range s.Paths {
+			if seen[p] {
+				continue // 同一源文件跨多条 source 只注入一次
+			}
+			seen[p] = true
+			paths = append(paths, p)
+		}
 	}
 	count := map[string]int{}
 	for _, p := range paths {

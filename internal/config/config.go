@@ -127,14 +127,24 @@ func (c *Config) SourcesFor(agentID, workspace string) []Source {
 }
 
 // MatchesWorkspace 报告该条 source 是否适用于给定工作区。
-// Workspaces 为空、或含 "*" / "all"（忽略大小写）⇒ 适用于所有工作区。
+//   - Workspaces 为空           ⇒ 适用于所有工作区
+//   - 含 "*" / "**" / "all"     ⇒ 适用于所有工作区（全局通配）
+//   - 含 "*" / "?" / "[" 等 glob ⇒ 按业界标准 glob 匹配（"*" 单段，"**" 跨段递归）
+//   - 其余                      ⇒ 与当前工作区路径完全相等（规范化 + 解析符号链接后）
 func (s Source) MatchesWorkspace(ws string) bool {
 	if len(s.Workspaces) == 0 {
 		return true
 	}
 	for _, w := range s.Workspaces {
-		if w == "*" || strings.EqualFold(w, "all") {
-			return true
+		if w == "*" || w == "**" || strings.EqualFold(w, "all") {
+			return true // 全局通配
+		}
+		if isGlob(w) {
+			// 通配模式保持原样（仅 Clean，不加 cwd 前缀），只对当前工作区解析符号链接
+			if globMatch(filepath.Clean(w), resolvePath(ws)) {
+				return true
+			}
+			continue
 		}
 		if samePath(w, ws) {
 			return true
@@ -167,22 +177,85 @@ func parsePaths(val string) []string {
 	return nil
 }
 
-// samePath 比较两个工作区路径是否指向同一个目录（先转绝对路径再规范化）。
-// ponytail: 只做路径规范化比较，不解析符号链接/挂载差异；若将来遇到 symlink 工作区再加 EvalSymlinks。
+// resolvePath 把路径转绝对并规范化；能解析符号链接就解析（失败回退原规范化值），
+// 避免工作区经软链接打开时与配置里的真实路径对不上而漏配。
+func resolvePath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	abs = filepath.Clean(abs)
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		return r
+	}
+	return abs
+}
+
+// isGlob 报告一个 workspace 模式是否包含 glob 元字符（单独的 "*" / "**" / "all"
+// 已在 MatchesWorkspace 中作为全局通配先行处理，不会落到这里）。
+func isGlob(w string) bool {
+	return strings.Contains(w, "*")
+}
+
+// samePath 比较两个工作区路径是否指向同一个目录。
+// 先规范化并尽量解析符号链接（resolvePath），再比较；Windows 忽略大小写。
 func samePath(a, b string) bool {
-	aa, err := filepath.Abs(a)
-	if err != nil {
-		aa = filepath.Clean(a)
-	}
-	bb, err := filepath.Abs(b)
-	if err != nil {
-		bb = filepath.Clean(b)
-	}
-	aa, bb = filepath.Clean(aa), filepath.Clean(bb)
+	aa, bb := resolvePath(a), resolvePath(b)
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(aa, bb) // Windows 路径大小写不敏感
 	}
 	return aa == bb
+}
+
+// globMatch 按业界公认的 glob 语义做整路径匹配：
+//   "*"  匹配单个路径段（不含 "/"）
+//   "**" 匹配零个或多个路径段（含 "/"），可出现在中间或末尾，用于"中间段统一"等场景
+//   "?"、"[...]" 由 path/filepath.Match 处理
+// 匹配前统一去掉前导 "/"，使绝对/相对写法都能对齐。
+func globMatch(pattern, name string) bool {
+	pattern = strings.TrimLeft(pattern, "/")
+	name = strings.TrimLeft(name, "/")
+	pp := strings.Split(pattern, "/")
+	np := strings.Split(name, "/")
+	var rec func(pi, ni int) bool
+	rec = func(pi, ni int) bool {
+		for pi < len(pp) {
+			p := pp[pi]
+			if p == "**" {
+				if pi == len(pp)-1 {
+					return true // 末尾 ** 匹配剩余所有段
+				}
+				for k := ni; k <= len(np); k++ { // ** 吞掉 0..剩余 段，回溯尝试
+					if rec(pi+1, k) {
+						return true
+					}
+				}
+				return false
+			}
+			if ni >= len(np) {
+				return false
+			}
+			if !segMatch(p, np[ni]) {
+				return false
+			}
+			pi++
+			ni++
+		}
+		return ni == len(np)
+	}
+	return rec(0, 0)
+}
+
+// segMatch 匹配单个路径段：无元字符则直接相等；否则交给 path/filepath.Match。
+func segMatch(pat, name string) bool {
+	if !strings.ContainsAny(pat, "*?[") {
+		return pat == name
+	}
+	ok, err := filepath.Match(pat, name)
+	if err != nil {
+		return pat == name
+	}
+	return ok
 }
 
 // unquote 去掉字符串两侧的成对引号。

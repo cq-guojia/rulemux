@@ -34,9 +34,13 @@ const exampleConfig = `# rulemux 配置文件
 #               trae 的 CN 版与国际版机制相同，统一写 trae
 #             示例：agents = ["codebuddy", "codex"]
 #
-#   workspace 这批规则适用于哪些工作区；省略 / "*" / "all" = 所有工作区。写法：
-#               workspace = "/abs/path/to/proj"          # 单个工作区
-#               workspace = ["/abs/path/proj-a", "/b"]   # 数组
+#   workspace 这批规则适用于哪些工作区，写法：
+#               workspace = "/abs/path/to/proj"          # 单个工作区（完全匹配）
+#               workspace = ["/abs/path/proj-a", "/b"]   # 数组，命中其一即可
+#               workspace = "*"  /  "**"  /  "all"       # 所有工作区（全局通配）
+#               支持业界标准 glob："*" 单段、"**" 跨段递归，可出现在中间，例如：
+#               workspace = "/abs/**/B"                 # 匹配 /abs 下任意深度的名为 B 的工作区
+#               workspace = "**/B"                      # 匹配任意位置、任意层级名为 B 的工作区
 #
 # 下面两条是示例，整段被注释掉、不会生效。需要哪条就把前面的 # 去掉，并改成你的真实路径。
 

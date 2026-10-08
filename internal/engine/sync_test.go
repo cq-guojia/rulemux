@@ -47,6 +47,18 @@ func TestBuildPlanDedupe(t *testing.T) {
 	}
 }
 
+// TestBuildPlanSamePathAcrossSources 校验：同一源文件路径被多条 source 引用时，
+// 只在最终列表保留一次（按源路径去重），不会因命中多条策略而重复注入。
+func TestBuildPlanSamePathAcrossSources(t *testing.T) {
+	p := BuildPlan("/dir", []config.Source{
+		{Paths: []string{"/x/a.md"}},
+		{Paths: []string{"/x/a.md"}}, // 同一条源被另一条 source 再次引用
+	})
+	if len(p.Items) != 1 {
+		t.Fatalf("同一源路径跨多条 source 应只注入一次，实得 %d 个 item", len(p.Items))
+	}
+}
+
 func TestSyncCopySkipUpdateDelete(t *testing.T) {
 	srcDir := t.TempDir()
 	target := t.TempDir()
