@@ -14,7 +14,7 @@ import (
 )
 
 // Uninstall removes rulemux's SessionStart hook (and, for Tier-1 agents, the
-// synced .rulemux__* files) for the agent(s) named by --agent, OR for every
+// synced __rulemux__* files) for the agent(s) named by --agent, OR for every
 // agent when --off / --all is given.
 //
 // Exactly one mode is required:
@@ -116,7 +116,7 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 		for _, w := range others {
 			fmt.Printf("    - %s\n", w)
 		}
-		fmt.Printf("  (only files with the .rulemux__ prefix are removed; your source files and everything else are untouched)\n")
+		fmt.Printf("  (only files with the __rulemux__ prefix are removed; your source files and everything else are untouched)\n")
 	}
 	fmt.Print("Proceed? [y/N] ")
 
@@ -131,7 +131,7 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 }
 
 // sweepRecordedWorkspaces 按账本回访「曾经同步过的其它工作区」，清掉该 agent 的残留文件。
-// 钩子此刻已被全局移除，若不做这一步，那些工作区里的 .rulemux__* 将再无机会被删除。
+// 钩子此刻已被全局移除，若不做这一步，那些工作区里的 __rulemux__* 将再无机会被删除。
 //
 // 返回：清理掉的文件数、因工作区已不存在而跳过的工作区数。
 // 说明：即便路径已不存在也不从账本剔除——万一该工作区日后重现（如重新 clone），
@@ -154,7 +154,7 @@ func sweepRecordedWorkspaces(a agents.Agent, current string) (cleaned, skipped i
 	return cleaned, skipped
 }
 
-// removeRuleFiles deletes every .rulemux__* file in dir (Tier-1 leftovers).
+// removeRuleFiles deletes every __rulemux__* file in dir (Tier-1 leftovers).
 func removeRuleFiles(dir string) ([]string, error) {
 	matches, err := filepath.Glob(filepath.Join(dir, engine.Prefix+"*"))
 	if err != nil {
@@ -186,7 +186,7 @@ EXACTLY ONE MODE IS REQUIRED (they are mutually exclusive):
 WHAT IT DOES:
   For each target agent, it:
     1. removes rulemux's SessionStart hook from that agent's hook config;
-    2. deletes the synced .rulemux__* files from that agent's rules dir
+    2. deletes the synced __rulemux__* files from that agent's rules dir
        (Tier-1 agents only; Tier-2 agents like codex/opencode keep nothing on disk).
 
 CONFIRMATION:
@@ -200,7 +200,7 @@ Other registered agents (claude / trae / codex / opencode) are NOT yet verified 
 cannot be installed or removed until their adapter is canary-tested.
 
 OTHER FLAGS:
-  --workspace <dir>   Workspace whose synced .rulemux__* files should be
+  --workspace <dir>   Workspace whose synced __rulemux__* files should be
                       removed (default: current dir). NOTE: the SessionStart
                       hook itself lives in the user-level host config
                       (~/.codebuddy/settings.json), so removing it takes
@@ -209,6 +209,6 @@ OTHER FLAGS:
   --help, -h          Show this help.
 
 NOTE: this only removes rulemux's own artifacts. Your agent's other
-configuration and your own (non-.rulemux__) rule files are never touched.
+configuration and your own (non-__rulemux__) rule files are never touched.
 `)
 }

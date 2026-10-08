@@ -1,7 +1,7 @@
 // Package engine 是 rulemux 的核心引擎：被各 agent 的适配器调用的那套统一方法。
 //
 // 对应设计（docs/design/implementation.md #10/#11）：
-//   - 目标文件名 = 前缀 .rulemux__ + 源 basename（同名冲突时追加源路径短 hash）
+//   - 目标文件名 = 前缀 __rulemux__ + 源 basename（同名冲突时追加源路径短 hash）
 //   - 内容一致 ⇒ 跳过；不一致 ⇒ 覆盖
 //   - 带前缀但不在本次计划内的 ⇒ 删除（删残留，保证加删自由、不累积）
 //   - 不带前缀的文件（用户自己的）一律不碰
@@ -19,7 +19,13 @@ import (
 )
 
 // Prefix 是 rulemux 落盘文件的统一前缀，用来区分「我方同步过的」与「用户自己的」。
-const Prefix = ".rulemux__"
+// 必须是非隐藏前缀：CodeBuddy 实测会跳过点开头的隐藏文件（见 docs/design/external/agent-rules-dirs.md）。
+const Prefix = "__rulemux__"
+
+// AutoApplyFrontmatter 是 CodeBuddy/WorkBuddy 这类 agent 的落盘文件必须带的 YAML 头：
+// 只有带 alwaysApply:true 的规则才会在会话开始被自动加载（2026-10-08 实测）。
+// ponytail: 直接前置、不解析源文件本身是否已有 frontmatter —— 源规则文件应只放正文。
+const AutoApplyFrontmatter = "---\nalwaysApply: true\n---\n"
 
 // PlanItem 是一条「源文件 → 目标文件」的映射。
 type PlanItem struct {
@@ -86,7 +92,9 @@ func (r *SyncResult) IsEmpty() bool {
 }
 
 // Sync 把源列表同步进目标目录。整个过程无状态文件，靠内容比对 + 前缀删残留保证幂等。
-func Sync(dir string, srcs []config.Source) (*SyncResult, error) {
+// autoApplyFrontmatter 为 true 时（CodeBuddy/WorkBuddy），每个落盘文件前置 alwaysApply:true 头；
+// 比对与写入都基于「加头后」的内容，保证幂等。
+func Sync(dir string, srcs []config.Source, autoApplyFrontmatter bool) (*SyncResult, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create rules directory %s: %w", dir, err)
 	}
@@ -103,6 +111,9 @@ func Sync(dir string, srcs []config.Source) (*SyncResult, error) {
 		if err != nil {
 			res.Missing = append(res.Missing, it.Src)
 			continue
+		}
+		if autoApplyFrontmatter {
+			data = append([]byte(AutoApplyFrontmatter), data...)
 		}
 		old, errOld := os.ReadFile(it.DstPath)
 		if errOld == nil && bytes.Equal(old, data) {

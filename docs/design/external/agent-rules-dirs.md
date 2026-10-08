@@ -2,8 +2,8 @@
 
 > **类型**：外部事实（上游 agent 侧）
 > **适用版本**：见下表「适用版本」列；上游升级后据此复核
-> **状态**：🟡 **部分核实** —— Claude Code 经官方文档核实（2026-10-07，见 §三）；CodeBuddy / WorkBuddy 经 canary 实测坐实（2026-10-08，见 §四）；Trae / Codex / OpenCode 仍待补；**Claude 运行时 canary 未落地（open bug，见 §四）**。**除已核实项外不得作为实现依据**
-> **来源**：前期调研（原根 `DESIGN.md` §3）+ 本机 CodeBuddy 安装目录源码核查 + Claude Code 官方文档（`code.claude.com/docs/en/hooks`、`/memory`，2026-10-07）
+> **状态**：🟡 **部分核实** —— Claude Code 经官方文档核实（2026-10-07，见 §三）；CodeBuddy / WorkBuddy 经 canary 实测坐实（2026-10-08，**同日复核并更正**，见 §四）；Trae / Codex / OpenCode 仍待补；**Claude 运行时 canary 未落地（open bug，见 §四）**。**除已核实项外不得作为实现依据**
+> **来源**：前期调研（原根 `DESIGN.md` §3）+ 本机 CodeBuddy 安装目录源码核查 + Claude Code 官方文档（`code.claude.com/docs/en/hooks`、`/memory`，2026-10-07）+ CodeBuddy 官方规则文档（`www.codebuddy.ai/docs/zh/ide/User-guide/Rules`，2026-10-08）
 > **配套**：[`../features/dir-sync.md`](../features/dir-sync.md)（我方怎么适配）· [`../../PROGRESS.md`](../../PROGRESS.md)（核实任务）
 
 > ⚠️ 本文件只记**上游读取能力**（目录 / 扩展名 / 读不读全部）。
@@ -13,10 +13,10 @@
 
 | Agent | 工作区规则目录 | 扩展名 / 结构 | 读目录全部？ | 适用版本 | 备注 |
 |---|---|---|---|---|---|
-| **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.mdc` | ✅ 平铺 `.md`（含点文件）会被读 | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules` |
+| **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules` |
 | Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
 | Trae | `.trae/rules/` | `.mdc` | ✅ 递归读，最多 3 层 | 待补 | 需 frontmatter |
-| WorkBuddy | `.codebuddy/rules/`（复用 CodeBuddy 机制） | 同上 | ⚠️ 固定结构 | 待补 | — |
+| WorkBuddy | `.codebuddy/rules/`（复用 CodeBuddy 机制） | 同上 | 同上（随 CodeBuddy 一并坐实） | 4.12.1（本机，复用） | 与 CodeBuddy **共用同一目录** |
 | Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | 待补 | — |
 | OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | 待补 | — |
 | DeepSeek Harness | — | — | — | 移出范围 | 用户 2026-10-07 决定移出当前范围（最开放、支持插件，后续以插件市场解决） |
@@ -32,14 +32,13 @@
 | 旧结论（前期调研） | 核查结果 |
 |---|---|
 | 每条规则 = 子文件夹 + **`RULE.mdc`** | ❌ **证伪**：全盘搜索 `RULE.mdc` **0 命中**（`find / -name "RULE.mdc"` 无结果） |
-| 目录固定为 `.codebuddy/rules/` | ⚠️ **存疑**，见下 |
 
 ### 已确认
 
 | 项 | 结论 | 出处 |
 |---|---|---|
-| 规则文件扩展名 | **`.mdc`**（官方 generate-rules 提示词要求） | `product.json:753` |
-| frontmatter 字段 | **`alwaysApply`（bool）+ `description`（string）**；示例 `---\nalwaysApply: true\n---` | `product.json:753` |
+| 规则文件扩展名 | **`.mdc`**（官方 generate-rules 提示词要求）；实测平铺 **`.md`** 同样被加载 | `product.json:753` + 2026-10-08 canary |
+| frontmatter 字段 | **`alwaysApply`（bool）+ `description`（string）**；示例 `---\nalwaysApply: true\n---`；**实测：会话开始自动加载须 `alwaysApply: true`** | `product.json:753` + 2026-10-08 canary |
 | `globs` 字段 | ❌ 无据（本机 0 处出现，勿当真） | — |
 | 总开关 | `enableWorkspaceRules`（自动读取） | `package.json` / `package.nls.json:64` |
 | 规则层级 | 存在**用户级** + **项目级**两类（4.0.0 起） | `CHANGELOG.md:441`、`l10n/bundle.l10n.en.json:145-146` |
@@ -55,15 +54,15 @@
 
 > **硬约定**：钩子的 `command` 必须写成**完整命令行字符串**（参数全部写在里面），**不得依赖 `args` 字段** —— 否则会被执行成裸程序名（无参数、只打印帮助），同步从不发生。我们的适配器（`internal/hooks/install.go`）据此把 `rulemux <subcmd> --agent <id>` 写进 `command` 整串。
 
-### 仍未确定（阻塞第一批实现）
+### 仍未确定
 
-1. **目录名冲突** —— 官方设置文案写 **`.rules`**（`package.nls.json:64`："Automatically read smart rules from the `.rules` directory"），但打包代码里确有 **`.codebuddy/rules`**（`index.js:69`、`index.js:84`）。二者哪个是运行时真值，未定。
-2. 是否递归扫描子目录、有无层数 / 大小 / 数量上限。
+1. ~~**目录名冲突**~~ → **已解**：运行时真值是 **`.codebuddy/rules`**（canary 坐实，非官方文案 `.rules`）。
+2. 是否递归扫描子目录、有无层数 / 大小 / 数量上限（实测平铺有效，子目录 `RULE.mdc` 加载不稳定，不依赖）。
 3. 加载时机（打开工作区 / 重载窗口 / 每轮）与改动后是否热更新。
-4. 缺 frontmatter 时的降级行为（不加载 / 报错）。
+4. ~~缺 frontmatter 时的降级行为~~ → **已解**：无 `alwaysApply:true` 的规则**不会**在会话开始自动加载（见 §四）。
 5. 用户级规则的落盘位置与「合并 or 覆盖」策略。
 
-> **为什么卡住**：加载器在 `index.js` 第 69 行（单行 259 万字符），只读检索工具取不到上下文；官方文档站是 VitePress SPA，抓取只返回空壳。**源码与文档两条路都走死了 ⇒ 下一步只能实测**（见 [`../../PROGRESS.md`](../../PROGRESS.md) 未决项）。
+> 官方文档称「每条规则 = 一个含 `RULE.mdc` 的子目录」（`www.codebuddy.ai/docs/zh/ide/User-guide/Rules`，2026-10-08 抓取），但**本机实测与该文案不符**：平铺 `RULE.mdc` 子目录的加载**不稳定**，平铺非隐藏 `.md`（带 `alwaysApply:true`）才是稳定生效的形态。**以实测为准。**
 
 ### 一条容易误判的线索
 
@@ -100,15 +99,25 @@
 
 > 见 [`../implementation.md`](../implementation.md) #7 / #13。
 
-### 已坐实（2026-10-08，CodeBuddy 实测）
+### 已坐实（2026-10-08，CodeBuddy 对照 canary 实测）
 
-在 `/code/open-lab/rulemux` 工作区开新会话并询问暗号，CodeBuddy 准确念出 `RULEMUX-CANARY-43371345`，
-出处 `.codebuddy/rules/.rulemux__canary-test.md:5`（由 `~/.rulemux/rules/canary-test.md` 经 SessionStart 钩子同步进来）。由此坐实：
+在 `/code/open-lab/rulemux` 工作区同时放入三个对照探针，各开一个新会话询问水印，得到明确对照：
 
-1. **点文件会被读** ✅ —— CodeBuddy 会读 `.rulemux__` 点开头的隐藏文件 ⇒ 前缀保持 `.rulemux__`，不必改成非点前缀。
-2. **目录结构正确** ✅ —— 平铺 `.codebuddy/rules/.rulemux__*.md` 会被加载；运行时真值是 `.codebuddy/rules`（不是官方文案里的 `.rules`）。
-3. **钩子先于读规则** ✅ —— SessionStart 复制在该 agent 读规则之前生效 ⇒ 新会话首轮即加载（用户最关心的底线成立）。
-4. **WorkBuddy** ✅ —— 复用 CodeBuddy 机制，随本次一并视为已坐实。
+| 探针（位于 `.codebuddy/rules/`） | 结构 | 被加载？ |
+|---|---|---|
+| `rulemux__canary_flat.md` | 平铺、**非隐藏**、带 `alwaysApply:true` | ✅ **两次均加载** |
+| `.rulemux__canary_hidden.md` | 平铺、**点开头隐藏**、带 `alwaysApply:true` | ❌ **未加载** |
+| `rulemux__canary_dir/RULE.mdc` | 子目录 + `RULE.mdc` | ⚠️ 一次加载、一次未加载（**不稳定，不依赖**） |
+
+由此坐实（并**更正**本节旧结论）：
+
+1. **点文件被跳过** ❌ —— CodeBuddy **不读** `.rulemux__` 点开头的隐藏文件 ⇒ 落盘前缀必须改为**非隐藏**的 `__rulemux__`。
+2. **须带 frontmatter** ✅ —— 平铺非隐藏 `.md` 只有带 `alwaysApply:true` 才会在会话开始**自动加载**（与 §二 frontmatter 字段一致）。
+3. **目录结构** —— 运行时真值是 `.codebuddy/rules`（非官方文案 `.rules`）；平铺即可，**无需** `RULE.mdc` 子目录（其加载不稳定）。
+4. **钩子先于读规则** ✅ —— SessionStart 复制在该 agent 读规则之前生效 ⇒ 新会话首轮即加载（用户最关心的底线成立）。
+5. **WorkBuddy** ✅ —— 复用 CodeBuddy 同一目录与同一机制，随本次一并坐实。
+
+> **更正说明**：本节此前的旧结论（"点文件会被读 ⇒ 保留 `.rulemux__`"，据称 2026-10-08 canary 念出 `RULEMUX-CANARY-43371345`）属**假阳性**——当时只验证了「文件被 copy 进目录」，**未用对照探针区分「隐藏 vs 非隐藏」**，把 copy 成功误当成加载成功。2026-10-08 用三探针对照后更正。**教训：canary 必须用对照探针，且以「内容是否进入本会话上下文」为判据，而非「文件是否落盘」。**
 
 ### 仍待实测
 

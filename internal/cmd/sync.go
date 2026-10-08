@@ -72,8 +72,18 @@ func Sync(args []string) int {
 		dir := a.RulesDirAbs(ws)
 		// 共用同一目录的 agent（如 codebuddy/workbuddy）合并计算源，
 		// 避免其中一个把另一个的文件当残留删掉。
-		srcs := unionSources(cfg, agents.ByRulesDir(a.RulesDir), ws)
-		res, err := engine.Sync(dir, srcs)
+		group := agents.ByRulesDir(a.RulesDir)
+		srcs := unionSources(cfg, group, ws)
+		// 只要该目录下有任一 agent 需要 frontmatter（如 CodeBuddy/WorkBuddy），
+		// 落盘文件就统一带上 alwaysApply:true 头。
+		needFM := false
+		for _, x := range group {
+			if x.NeedsFrontmatter {
+				needFM = true
+				break
+			}
+		}
+		res, err := engine.Sync(dir, srcs, needFM)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
 			exit = 1

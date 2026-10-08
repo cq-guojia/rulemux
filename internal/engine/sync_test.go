@@ -14,11 +14,11 @@ func TestBuildPlanNaming(t *testing.T) {
 		{Paths: []string{"/x/a.md"}},
 		{Paths: []string{"/y/b.txt"}},
 	})
-	if p.Items[0].DstName != ".rulemux__a.md" {
-		t.Fatalf("期望 .rulemux__a.md，实得 %s", p.Items[0].DstName)
+	if p.Items[0].DstName != "__rulemux__a.md" {
+		t.Fatalf("期望 __rulemux__a.md，实得 %s", p.Items[0].DstName)
 	}
-	if p.Items[1].DstName != ".rulemux__b.txt" {
-		t.Fatalf("期望 .rulemux__b.txt，实得 %s", p.Items[1].DstName)
+	if p.Items[1].DstName != "__rulemux__b.txt" {
+		t.Fatalf("期望 __rulemux__b.txt，实得 %s", p.Items[1].DstName)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestSyncCopySkipUpdateDelete(t *testing.T) {
 	srcs := []config.Source{{Paths: []string{src}}}
 
 	// 首次：复制
-	r, err := Sync(target, srcs)
+	r, err := Sync(target, srcs, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestSyncCopySkipUpdateDelete(t *testing.T) {
 	}
 
 	// 再次：内容一致 ⇒ 跳过（幂等、不累积）
-	r, err = Sync(target, srcs)
+	r, err = Sync(target, srcs, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestSyncCopySkipUpdateDelete(t *testing.T) {
 	if err := os.WriteFile(src, []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, err = Sync(target, srcs)
+	r, err = Sync(target, srcs, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestSyncCopySkipUpdateDelete(t *testing.T) {
 	}
 
 	// 源从配置移除 ⇒ 目标残留被清
-	r, err = Sync(target, nil)
+	r, err = Sync(target, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,13 +119,49 @@ func TestSyncCopySkipUpdateDelete(t *testing.T) {
 	}
 }
 
+// TestSyncInjectsFrontmatter 校验：需要 frontmatter 的 agent（CodeBuddy/WorkBuddy）落盘文件
+// 带 alwaysApply:true 头，且比对与写入都基于「加头后」内容（二次同步应跳过，不反复覆盖）。
+func TestSyncInjectsFrontmatter(t *testing.T) {
+	srcDir := t.TempDir()
+	target := t.TempDir()
+	src := filepath.Join(srcDir, "src.md")
+	if err := os.WriteFile(src, []byte("# body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcs := []config.Source{{Paths: []string{src}}}
+
+	r, err := Sync(target, srcs, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Copied) != 1 {
+		t.Fatalf("首次应复制 1 个，实得 %d", len(r.Copied))
+	}
+	got, err := os.ReadFile(filepath.Join(target, Prefix+"src.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := AutoApplyFrontmatter + "# body\n"
+	if string(got) != want {
+		t.Fatalf("注入 frontmatter 后内容应为 %q，实得 %q", want, string(got))
+	}
+
+	r, err = Sync(target, srcs, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Skipped) != 1 {
+		t.Fatalf("二次应跳过 1 个（比对基于加头后内容），实得 skipped=%d updated=%d", len(r.Skipped), len(r.Updated))
+	}
+}
+
 func TestSyncIgnoresUserFiles(t *testing.T) {
 	target := t.TempDir()
 	userFile := filepath.Join(target, "my-own.md")
 	if err := os.WriteFile(userFile, []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Sync(target, nil); err != nil {
+	if _, err := Sync(target, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(userFile); err != nil {
@@ -135,7 +171,7 @@ func TestSyncIgnoresUserFiles(t *testing.T) {
 
 func TestSyncMissingSource(t *testing.T) {
 	target := t.TempDir()
-	r, err := Sync(target, []config.Source{{Paths: []string{"/definitely/not/here.md"}}})
+	r, err := Sync(target, []config.Source{{Paths: []string{"/definitely/not/here.md"}}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

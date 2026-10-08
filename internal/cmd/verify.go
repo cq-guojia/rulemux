@@ -15,7 +15,8 @@ import (
 //
 // It validates two things at once (docs/design/implementation.md #13):
 //  1. the hook really fires before rules are read (otherwise this session can't see it)
-//  2. the agent's "read every .md" really includes dotfiles (.rulemux__ prefix)
+//  2. the agent really loads our probe file: a non-hidden __rulemux__ name, carrying an
+//     alwaysApply:true frontmatter so frontmatter-gated agents (CodeBuddy/WorkBuddy) pick it up
 func Verify(args []string) int {
 	f := ParseFlags(args)
 	ws, err := workspace(f.Get("workspace", ""))
@@ -81,13 +82,14 @@ func Verify(args []string) int {
 	fmt.Println()
 	fmt.Println("How to read the result (docs/design/features/verification.md):")
 	fmt.Println("  · Recites it ⇒ the chain works: the SessionStart copy took effect in this session,")
-	fmt.Println("    and the agent does read dot-prefixed hidden files")
-	fmt.Println("  · Cannot ⇒ check first: is the hook installed? did you open a NEW session?")
-	fmt.Println("    If it turns out to be \"skips dotfiles\" ⇒ the .rulemux__ prefix must be changed")
-	fmt.Println("    to the non-dot prefix rulemux__")
+	fmt.Println("    and the agent loaded rulemux's probe file")
+	fmt.Println("  · Cannot ⇒ check first: is the hook installed? did you open a NEW session? If it still")
+	fmt.Println("    fails, the agent may gate loading on file shape — hidden dotfiles are skipped, and some")
+	fmt.Println("    agents (e.g. CodeBuddy) require an alwaysApply:true frontmatter. Adjust the adapter's")
+	fmt.Println("    Prefix / NeedsFrontmatter accordingly.")
 	fmt.Println()
 	fmt.Println("Clean up when done: rulemux verify --clean")
-	fmt.Println("(the canary carries the .rulemux__ prefix, so even if you skip this, the next")
+	fmt.Println("(the canary carries the __rulemux__ prefix, so even if you skip this, the next")
 	fmt.Println("rulemux sync treats it as residue and deletes it automatically)")
 	return 0
 }

@@ -21,7 +21,7 @@ const exampleConfig = `# rulemux configuration file
 # Default location: ~/.rulemux/config.toml (or pass --config <path> to any command)
 #
 # At the start of every agent session, rulemux copies the "source rule files" described
-# by each [[source]] below into that agent's native rules directory, using a .rulemux__
+# by each [[source]] below into that agent's native rules directory, using a __rulemux__
 # prefix: it cleans up its own residue and never touches your own files.
 #
 # Each [[source]] accepts these fields (all optional, each has a default):

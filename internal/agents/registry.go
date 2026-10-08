@@ -50,6 +50,9 @@ type Agent struct {
 	// Verified 表示「规则目录 / 钩子落点」是否已经官方核实。未核实的在 doctor 里标 ⚠，
 	// 需按 features/verification.md 的 canary 法实测坐实后才可当实现依据。
 	Verified bool
+	// NeedsFrontmatter 表示落盘文件必须带 alwaysApply:true 的 YAML 头，该 agent 才会在
+	// 会话开始自动加载规则（CodeBuddy/WorkBuddy 实测如此）。Tier-2 无意义。
+	NeedsFrontmatter bool
 	// Note 备注。
 	Note string
 }
@@ -74,21 +77,23 @@ var registry = []Agent{
 		RulesDir: ".codebuddy/rules",
 		// 2026-10-08 起钩子落点为 user 级 host 配置（不再是每工作区的 .codebuddy/settings.json），
 		// 与 Hindsight 的做法一致，避免 hook 配置散落在各工作区、易被误改。
-		HookFile: "~/.codebuddy/settings.json",
-		HookAbs:  true,
-		Style:    "claude",
-		Verified: true,
-		Note:     "Canary confirmed 2026-10-08: the SessionStart hook runs before rules are loaded, and hidden files starting with .rulemux__ under .codebuddy/rules are read. Hook lives in the user-level ~/.codebuddy/settings.json; see external/hindsight.md.",
+		HookFile:         "~/.codebuddy/settings.json",
+		HookAbs:          true,
+		Style:            "claude",
+		Verified:         true,
+		NeedsFrontmatter: true,
+		Note:             "Canary re-confirmed 2026-10-08: CodeBuddy auto-loads FLAT, NON-hidden .md files under .codebuddy/rules that carry an alwaysApply:true frontmatter; dot-prefixed (hidden) files are SKIPPED, and the RULE.mdc subdir layout is NOT relied on (its load behaviour was inconsistent across runs). rulemux therefore writes __rulemux__<name>.md with a frontmatter header. Hook lives in the user-level ~/.codebuddy/settings.json; see external/agent-rules-dirs.md.",
 	},
 	{
-		ID:       "workbuddy",
-		Tier:     Tier1,
-		RulesDir: ".codebuddy/rules",
-		HookFile: "~/.codebuddy/settings.json",
-		HookAbs:  true,
-		Style:    "claude",
-		Verified: true,
-		Note:     "Reuses the CodeBuddy mechanism (canary confirmed together with it); shares one directory with codebuddy, so sync merges both agents' sources before computing deletions to avoid them deleting each other's files. Hook location is also the user-level host config.",
+		ID:               "workbuddy",
+		Tier:             Tier1,
+		RulesDir:         ".codebuddy/rules",
+		HookFile:         "~/.codebuddy/settings.json",
+		HookAbs:          true,
+		Style:            "claude",
+		Verified:         true,
+		NeedsFrontmatter: true,
+		Note:             "Reuses the CodeBuddy mechanism (same .codebuddy/rules dir, same alwaysApply:true frontmatter requirement; canary confirmed together with it). Both share one directory, so sync merges both agents' sources before computing deletions to avoid them deleting each other's files. Hook location is also the user-level host config.",
 	},
 	{
 		ID:       "trae",

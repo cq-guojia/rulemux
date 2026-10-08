@@ -2,7 +2,7 @@
 //
 // 设计要点（docs/design/implementation.md）：
 //   - 无守护进程、不监听文件改动：由各 agent 的 SessionStart 钩子调起本程序。
-//   - Tier-1（读整个规则文件夹的 agent）：真实拷贝，文件名加前缀 .rulemux__。
+//   - Tier-1（读整个规则文件夹的 agent）：真实拷贝，文件名加前缀 __rulemux__。
 //   - Tier-2（只认单文件 AGENTS.md 的 agent）：走钩子注入，不碰用户自己的 AGENTS.md。
 package main
 
@@ -16,7 +16,8 @@ import (
 
 // version is the rulemux version.
 // It is a var (not a const) so the release pipeline can inject the real tag:
-//   go build -ldflags="-X main.version=1.2.3"
+//
+//	go build -ldflags="-X main.version=1.2.3"
 var version = "0.1.3"
 
 // usage prints the top-level help.
