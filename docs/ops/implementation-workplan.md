@@ -14,7 +14,7 @@
 | 2 | design 文档对齐新模型（去中央真源 / Tier 分层 / 前缀 / DeepSeek 移出） | ✅ 完成 |
 | 3 | **Go 源码实现（核心引擎 + 全部 agent 适配器 + 4 个子命令）** | ✅ 完成（本批） |
 | 4 | 编译出二进制 | ✅ 完成（Go 1.27.1，`go build` + `go vet` 全绿） |
-| 5 | canary 实测坐实（点文件 / 目录结构 / 钩子时序 / 注入） | 🚧 **进行中**：链路已搭好（二进制进 PATH + 含暗号测试源 + 6 个 agent 钩子已装），待开新会话问 agent 能否念出暗号来判定 |
+| 5 | canary 实测坐实（点文件 / 目录结构 / 钩子时序 / 注入） | 🚧 **部分完成**：CodeBuddy/WorkBuddy ✅ 坐实（2026-10-08，点文件读 + 平铺加载 + 钩子先于读）；Claude ❌ 本工作区未落地（open bug，见 T11）；trae/codex/opencode 待实测 |
 | 6 | 单测 + 冒烟 | ✅ 完成（`go test ./...` 通过；`scripts/smoke.sh` 10/10） |
 | 7 | CI 交叉编译 + Release 分发 | ⬜ 待做 |
 | 8 | T7：`package.json` 加 `files` 字段 | ⬜ 待做 |
@@ -78,10 +78,11 @@ rulemux sync --agent X   /   rulemux inject --agent X
 | W6 | Go 源码：init / doctor / verify 子命令 + 钩子安装 | P0 | ✅ |
 | W7 | **编译出二进制** | P0 | ✅ Go 1.27.1 编译通过，`go vet` 无告警 |
 | W8 | 核心引擎单测（命名/比对/删残留/幂等）+ 冒烟脚本 | P1 | ✅ `go test ./...` 通过 + `scripts/smoke.sh` 10/10 |
-| W9 | canary 实测：点文件 / CodeBuddy 结构 / 钩子时序 / Codex 注入 | P1 | 🚧 **CodeBuddy 已坐实 ✅**（点文件会读 + 目录结构对 + 钩子先于读）；trae / claude / codex / opencode 仍待 |
-| W10 | 据实测校准未核实项（落点、前缀是否改非点） | P1 | ⬜ |
+| W9 | canary 实测：点文件 / CodeBuddy 结构 / 钩子时序 / Codex 注入 | P1 | 🚧 **部分**：CodeBuddy/WorkBuddy ✅；Claude ❌（open bug，T11）；trae / codex / opencode 仍待 |
+| W10 | 据实测校准未核实项（落点、前缀是否改非点） | P1 | ✅ 据 CodeBuddy 实测校准：前缀保持 `.rulemux__`（点文件会被读），落点确认为 `.codebuddy/rules` |
 | W11 | GitHub Actions 交叉编译 + Release | P2 | ⬜ |
 | W12 | T7：`package.json` 加 `files` 字段 | P2 | ⬜ |
+| W13 | 排查 Claude 侧 sync 未落地（open bug，T11） | P0 | ⬜ |
 
 ---
 
@@ -129,20 +130,19 @@ rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号
 
 ---
 
-## 六、已知待校准项（未核实，需 canary 坐实）
+## 六、已知待校准项（部分已坐实，其余待 canary）
 
-代码里这些 agent 标了 `Verified=false`，`doctor` 会用 ⚠ 提示：
+代码里这些 agent 仍标 `Verified=false` 的，`doctor` 会用 ⚠ 提示：
 
-| agent | 待校准内容 |
+| agent | 校准状态 / 内容 |
 |---|---|
-| codebuddy | 规则目录是 `.codebuddy/rules/` 还是 `.rules`；平铺 `.md` 是否被加载；钩子落点 |
-| workbuddy | 同上（与 codebuddy 共用目录，代码已做「同目录合并」避免互相误删） |
-| trae | 钩子配置是 `hooks.json`（工作区根）还是 `.trae/hooks.json`；点文件是否读 |
-| codex | 钩子落点 `~/.codex/config.toml` 与 schema（`[features] codex_hooks` + `[[hooks.SessionStart]]`） |
-| opencode | 钩子落点与注入方式 |
+| codebuddy | ✅ **已坐实（2026-10-08）**：`.codebuddy/rules/` 平铺 `.md`（含点文件）会被加载，钩子先于读（见 `external/agent-rules-dirs.md` §四） |
+| workbuddy | ✅ 随 CodeBuddy 一并坐实（复用其机制） |
+| trae | ⬜ 钩子配置落点（`hooks.json` 工作区根 or `.trae/hooks.json`）；点文件是否读 |
+| codex | ⬜ 钩子落点 `~/.codex/config.toml` 与 schema（`[features] codex_hooks` + `[[hooks.SessionStart]]`） |
+| opencode | ⬜ 钩子落点与注入方式 |
 
-**全局待校准**：各 agent 的「读全部 .md」是否**跳过点开头的隐藏文件**。
-若跳过 ⇒ 需把前缀从 `.rulemux__` 改为非点前缀 `rulemux__`（只需改 `internal/engine/sync.go` 的 `Prefix` 常量）。
+**全局校准**：各 agent 的「读全部 .md」是否**跳过点开头的隐藏文件** —— CodeBuddy 已证明会读点文件 ⇒ 前缀保持 `.rulemux__`；trae / codex / opencode 仍待实测确认（若某家跳过 ⇒ 把 `internal/engine/sync.go` 的 `Prefix` 改成非点前缀 `rulemux__`）。
 
 ---
 

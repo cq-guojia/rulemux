@@ -2,7 +2,7 @@
 
 > **类型**：外部事实（上游 agent 侧）
 > **适用版本**：见下表「适用版本」列；上游升级后据此复核
-> **状态**：🟡 **部分核实** —— Claude Code 已于 2026-10-07 经官方文档核实（hooks 执行二进制 + 规则加载时机，见 §三）；CodeBuddy 走源码级核查（本机 4.12.1）；其余各家仍待补，**除 §三 已核实项外不得作为实现依据**
+> **状态**：🟡 **部分核实** —— Claude Code 经官方文档核实（2026-10-07，见 §三）；CodeBuddy / WorkBuddy 经 canary 实测坐实（2026-10-08，见 §四）；Trae / Codex / OpenCode 仍待补；**Claude 运行时 canary 未落地（open bug，见 §四）**。**除已核实项外不得作为实现依据**
 > **来源**：前期调研（原根 `DESIGN.md` §3）+ 本机 CodeBuddy 安装目录源码核查 + Claude Code 官方文档（`code.claude.com/docs/en/hooks`、`/memory`，2026-10-07）
 > **配套**：[`../features/dir-sync.md`](../features/dir-sync.md)（我方怎么适配）· [`../../PROGRESS.md`](../../PROGRESS.md)（核实任务）
 
@@ -13,8 +13,8 @@
 
 | Agent | 工作区规则目录 | 扩展名 / 结构 | 读目录全部？ | 适用版本 | 备注 |
 |---|---|---|---|---|---|
-| **CodeBuddy** | ⚠️ **存疑**，见 §二 | `.mdc` | 待定 | 4.12.1（本机） | 有「用户级 / 项目级」两类规则 |
-| Claude Code | `.claude/rules/` | `.md` | ✅ 全部 | v2.0.64+ | — |
+| **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.mdc` | ✅ 平铺 `.md`（含点文件）会被读 | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules` |
+| Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
 | Trae | `.trae/rules/` | `.mdc` | ✅ 递归读，最多 3 层 | 待补 | 需 frontmatter |
 | WorkBuddy | `.codebuddy/rules/`（复用 CodeBuddy 机制） | 同上 | ⚠️ 固定结构 | 待补 | — |
 | Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | 待补 | — |
