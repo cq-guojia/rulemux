@@ -72,19 +72,23 @@ var registry = []Agent{
 		Aliases:  []string{"codebuddy-cn"},
 		Tier:     Tier1,
 		RulesDir: ".codebuddy/rules",
-		HookFile: ".codebuddy/settings.json",
+		// 2026-10-08 起钩子落点为 user 级 host 配置（不再是每工作区的 .codebuddy/settings.json），
+		// 与 Hindsight 的做法一致，避免 hook 配置散落在各工作区、易被误改。
+		HookFile: "~/.codebuddy/settings.json",
+		HookAbs:  true,
 		Style:    "claude",
 		Verified: true,
-		Note:     "2026-10-08 canary 已坐实：SessionStart 钩子先于规则加载执行，且会读 .codebuddy/rules/ 下 .rulemux__ 点开头的隐藏文件",
+		Note:     "2026-10-08 canary 已坐实：SessionStart 钩子先于规则加载执行，且会读 .codebuddy/rules/ 下 .rulemux__ 点开头的隐藏文件；钩子装于 user 级 ~/.codebuddy/settings.json，详见 external/hindsight.md",
 	},
 	{
 		ID:       "workbuddy",
 		Tier:     Tier1,
 		RulesDir: ".codebuddy/rules",
-		HookFile: ".codebuddy/settings.json",
+		HookFile: "~/.codebuddy/settings.json",
+		HookAbs:  true,
 		Style:    "claude",
 		Verified: true,
-		Note:     "复用 CodeBuddy 机制（随 CodeBuddy 一并 canary 坐实）；与 codebuddy 共用同一目录，sync 时按同目录合并计算应保留文件，避免互相误删",
+		Note:     "复用 CodeBuddy 机制（随 CodeBuddy 一并 canary 坐实）；与 codebuddy 共用同一目录，sync 时按同目录合并计算应保留文件，避免互相误删；钩子落点同为 user 级 host 配置",
 	},
 	{
 		ID:       "trae",

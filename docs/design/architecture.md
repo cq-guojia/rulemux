@@ -61,9 +61,11 @@
 > **状态**：✅ 已拍板（2026-10-08）
 > **配套**：[`external/hindsight.md`](external/hindsight.md)（Hindsight 实测机制，作为对照）
 
-**结论**：Tier-1 agent（codebuddy / workbuddy）的 SessionStart 钩子**写在每个工作区的 `.codebuddy/settings.json`**（workspace 级），**不挪到 user 级** `~/.codebuddy/settings.json`。
+**结论**：Tier-1 agent（codebuddy / workbuddy）的 SessionStart 钩子**装进 user 级 host 配置 `~/.codebuddy/settings.json`**，**不再写每个工作区的 `.codebuddy/settings.json`** —— 与 Hindsight 的做法一致。
 
-**依据（用户原话，2026-10-08）**：「他写到每个项目里面就是一个整体，然后根据那个自己去匹配工作区」——每个项目自带一份完整 hook 配置；运行时 rulemux 靠 cwd（未传 `--workspace` 时 `workspace()` 返回 `os.Getwd()`）自己匹配到当前工作区。
+**依据（用户拍板，2026-10-08）**：「把 host 的设置方式改成和 hindsight 一样」——不要 workspace 级那份（`/code/open-lab/rulemux/.codebuddy/settings.json`），因为散落在各工作区、容易被误改。
+
+**怎么用的**：钩子是在 user 级、全局生效 ⇒ 打开任意工作区都会触发一次 `rulemux sync --agent codebuddy`；rulemux 以 cwd 作为当前工作区（未传 `--workspace` 时 `workspace()` 返回 `os.Getwd()`），再去匹配配置里 `workspace` 条目决定投递哪些规则 ⇒ 一次安装、按工作区各自生效。
 
 **对照 Hindsight**：Hindsight 把同款 hooks（SessionStart / UserPromptSubmit / Stop）+ MCP server 全注册在 **user 级** `~/.codebuddy/settings.json` 与 `~/.codebuddy/mcp.json`（见 `external/hindsight.md`）。rulemux 故意**不**学它，理由：
 

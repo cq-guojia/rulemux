@@ -192,7 +192,10 @@ until their adapter is canary-tested and flipped to verified:
 Install (only verified agents), comma-separated:
   rulemux init --agent codebuddy
 
-HOOKS ARE PER-WORKSPACE. Run init inside each workspace you want covered.
+The SessionStart hook is installed once into the user-level host config
+(~/.codebuddy/settings.json), so it fires for every workspace you open —
+you do NOT need to run init once per workspace. Run it once per machine.
+Syncing still keys off the current workspace (cwd) to decide which rules apply.
 
 OTHER FLAGS:
   --config <path>     Config file (default ~/.rulemux/config.toml).

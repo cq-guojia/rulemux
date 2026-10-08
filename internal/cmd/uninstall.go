@@ -159,9 +159,11 @@ Other registered agents (claude / trae / codex / opencode) are NOT yet verified 
 cannot be installed or removed until their adapter is canary-tested.
 
 OTHER FLAGS:
-  --workspace <dir>   Workspace to act in (default: current dir).
-                      Hooks are per-workspace, so uninstall in the same
-                      workspace you ran init in.
+  --workspace <dir>   Workspace whose synced .rulemux__* files should be
+                      removed (default: current dir). NOTE: the SessionStart
+                      hook itself lives in the user-level host config
+                      (~/.codebuddy/settings.json), so removing it takes
+                      effect globally regardless of --workspace.
   --yes               Skip the confirmation prompt.
   --help, -h          Show this help.
 

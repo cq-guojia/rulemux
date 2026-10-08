@@ -41,14 +41,14 @@ MCP 缓存 `installed_servers_cache.json` 中条目状态为 `"connected"`、`"c
 
 ## 三、与 rulemux 的关键差异（对照）
 
-| 维度 | rulemux（Tier-1） | Hindsight |
+| 维度 | rulemux（Tier-1，2026-10-08 起） | Hindsight |
 |---|---|---|
-| MCP server | 无 | 有（`~/.codebuddy/mcp.json`） |
+| MCP server | 无（CLI 二进制，由 hook 直接 spawn） | 有（`~/.codebuddy/mcp.json`） |
 | CodeBuddy hooks | 1 个：`SessionStart` | 3 个：`SessionStart` / `UserPromptSubmit` / `Stop` |
-| **hook 落点** | **workspace 级** `<repo>/.codebuddy/settings.json` | **user 级** `/root/.codebuddy/settings.json` |
-| 是否随仓库进 git | 是 | 否（在主目录） |
-| 触发范围 | 仅打开该工作区时 | 任意工作区（全局） |
+| **hook 落点** | **user 级** `~/.codebuddy/settings.json`（已同 Hindsight 对齐） | **user 级** `/root/.codebuddy/settings.json` |
+| 是否随仓库进 git | 否 | 否 |
+| 触发范围 | 任意工作区（全局） | 任意工作区（全局） |
 
 要点：**Hindsight 的 hooks 写在 user 级主目录，不写在任一项目的 workspace `.codebuddy/settings.json` 里**——所以它「看不见」出现在某个具体项目的钩子配置中。其「会话中及时回传」= MCP 工具在对话中被调用 + 上述生命周期 hook 触发，全部挂在 user 级。
 
-> ⚠️ 本条为 fact，记录「Hindsight 怎么装」；rulemux 该怎么做见 `../architecture.md` §五（ deliberately 保持 workspace 级）。
+> ⚠️ 本条为 fact，记录「Hindsight 怎么装」；rulemux 据此的决策见 `../architecture.md` §五——**2026-10-08 起 rulemux 的 hook 落点已改为 user 级，与 Hindsight 对齐**，不再写工作区级 `.codebuddy/settings.json`。

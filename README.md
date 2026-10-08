@@ -40,7 +40,7 @@ rulemux uninstall --off                    # 卸全部 agent（--all 等价）
 ```
 
 > ⚠️ **`init` 必须指定 `--agent`**：rulemux 不会扫描你机器上装了哪些 agent，你得明确说要装哪个（可逗号分隔多个，如 `--agent codebuddy,codex`）。
-> ⚠️ **钩子按工作区安装**：`rulemux init` 只给当前工作区装钩子；换工作区须在该工作区再跑一次 `init`，否则那个工作区不会触发同步（曾出现「A 工作区能读到、B 读不到」即因此）。`uninstall` 同理要进同一个工作区执行。
+> **钩子装在 user 级 host 配置**：`rulemux init` 把 SessionStart 钩子写进 `~/.codebuddy/settings.json`（同 Hindsight 的做法），**一次安装、对所有工作区生效**，不必每个工作区再跑一遍 `init`。同步时仍以当前工作区（cwd）去匹配配置里的 `workspace` 条目，决定投递哪些规则。
 
 配置（`~/.rulemux/config.toml`）示例：
 
