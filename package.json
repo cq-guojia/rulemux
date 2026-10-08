@@ -1,6 +1,6 @@
 {
   "name": "rulemux",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One set of rules, delivered to every AI coding agent: copies the rule files you declare into each agent's native workspace rules directory, with the same effect and token cost as writing AGENTS.md by hand.",
   "license": "MIT",
   "repository": {
