@@ -15,3 +15,4 @@
 | 2026-10-07 | 配置增强：path 数组 + workspace | `Source.Paths` 支持单串/数组；新增 `Workspaces`（数组，空/`*`/`all`=全部）；`SourcesFor`/`MatchesWorkspace` 实现「先算匹配条目→合并文件清单」 | [`design/implementation.md`](../design/implementation.md) #6 |
 | 2026-10-08 | CodeBuddy / WorkBuddy canary 坐实 | 新会话能念出暗号 `RULEMUX-CANARY-43371345`；坐实点文件会被读、`.codebuddy/rules` 平铺加载、钩子先于读；代码标 `Verified=true` | [`design/external/agent-rules-dirs.md`](../design/external/agent-rules-dirs.md) §四 · [worklog/canary-2026-10-08.md](worklog/canary-2026-10-08.md) |
 | 2026-10-08 | npm 正式发版 `rulemux@0.1.0` | 发布可用包（非占位）：补齐 `bin` 启动器 + `files` + `.npmignore` + 交叉编译脚本；5 平台二进制经 `-ldflags="-s -w"` 裁剪（4.2M→2.8M/份，包 12.6M→6.2M）；README 重写为英文默认 + 中文版。已上线且为 `latest` | 本文件 |
+| 2026-10-08 | 发版流水线实测通过 + `rulemux@0.1.2` 上线 | 打 tag 触发 release 流水线：5 平台交叉编译 + GitHub Release 自动挂产物全绿（修复 release job 缺 checkout 的 bug）；npm 的 0.1.2 因仓库未配 `NPM_TOKEN` 由手动 `npm publish` 补发，现为 `latest` | 本文件 |
