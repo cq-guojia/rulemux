@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/hooks"
 )
@@ -33,35 +32,58 @@ workspace = ["/path/to/proj-a", "/path/to/proj-b"]
 #   trae 的 CN 版与国际版是同一套机制，统一写 trae
 `
 
-// Init 生成示例配置，并为各 agent 安装 SessionStart 钩子（幂等）。
+// Init installs the SessionStart hook for the agent(s) named by --agent.
+//
+// --agent is REQUIRED. rulemux never scans the machine for installed agents;
+// you must explicitly say which agent(s) you want. Auto-detecting which agents
+// exist locally is unreliable, so the choice is always the user's.
 func Init(args []string) int {
 	f := ParseFlags(args)
+	if f.Has("help") || f.Has("h") {
+		InitHelp()
+		return 0
+	}
+
+	agentArg := f.Get("agent", "")
+	if agentArg == "" {
+		fmt.Fprintln(os.Stderr, "rulemux init: --agent is required")
+		fmt.Fprintln(os.Stderr, "  rulemux does NOT auto-detect agents installed on your machine.")
+		fmt.Fprintln(os.Stderr, "  name the agent(s) explicitly, e.g. --agent codebuddy")
+		fmt.Fprintln(os.Stderr, "  run 'rulemux init --help' for details")
+		return 2
+	}
+	targets, err := parseAgents(agentArg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rulemux init:", err)
+		return 2
+	}
+
 	cfgPath := f.Get("config", config.DefaultPath())
 	ws, err := workspace(f.Get("workspace", ""))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
+		fmt.Fprintln(os.Stderr, "rulemux: cannot determine workspace:", err)
 		return 1
 	}
 
-	// 1. 配置：不存在则生成示例
+	// 1. config: generate a sample only if missing
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
-			fmt.Fprintln(os.Stderr, "rulemux: 创建配置目录失败:", err)
+			fmt.Fprintln(os.Stderr, "rulemux: cannot create config dir:", err)
 			return 1
 		}
 		if err := os.WriteFile(cfgPath, []byte(exampleConfig), 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, "rulemux: 写入示例配置失败:", err)
+			fmt.Fprintln(os.Stderr, "rulemux: cannot write sample config:", err)
 			return 1
 		}
-		fmt.Println("✓ 已生成示例配置:", cfgPath)
-		fmt.Println("  ⚠ 请把里面的 path 改成你自己的真实规则文件路径")
+		fmt.Println("✓ sample config created:", cfgPath)
+		fmt.Println("  ⚠ change the 'path' fields to your real rule files")
 	} else {
-		fmt.Println("· 配置已存在，跳过:", cfgPath)
+		fmt.Println("· config exists, skipped:", cfgPath)
 	}
 
-	// 2. 为各 agent 安装 SessionStart 钩子
-	fmt.Println("\n安装 SessionStart 钩子：")
-	for _, a := range agents.All() {
+	// 2. install the SessionStart hook for the requested agents only
+	fmt.Println("\nInstalling SessionStart hooks:")
+	for _, a := range targets {
 		p, err := hooks.Install(a, ws)
 		if err != nil {
 			fmt.Printf("  ✗ %-10s %v\n", a.ID, err)
@@ -74,9 +96,43 @@ func Init(args []string) int {
 		fmt.Printf("  %s %-10s %s → rulemux %s --agent %s\n", mark, a.ID, p, hooks.SubcommandFor(a), a.ID)
 	}
 
-	fmt.Println("\n说明：")
-	fmt.Println("  ✓ = 规则目录/钩子落点已官方核实；⚠ = 待 canary 实测坐实")
-	fmt.Println("      （见 docs/design/features/verification.md 与 external/agent-rules-dirs.md §四）")
-	fmt.Println("  下一步：rulemux doctor 自检；rulemux verify 跑 canary 验收")
+	fmt.Println("\nLegend:")
+	fmt.Println("  ✓ = rules dir / hook path verified;  ⚠ = pending canary verification")
+	fmt.Println("  Next: rulemux doctor  (self-check)    rulemux verify  (canary acceptance)")
 	return 0
+}
+
+// InitHelp prints detailed English help for `rulemux init`.
+func InitHelp() {
+	fmt.Print(`rulemux init - install the SessionStart hook for one or more agents
+
+USAGE:
+  rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]
+
+--agent is REQUIRED. rulemux never scans your machine for installed agents;
+you must name the agent(s) you want. This is deliberate: auto-detecting which
+agents exist locally is unreliable, so the choice is always yours.
+
+SUPPORTED AGENTS (value of --agent):
+  claude      Claude Code     Tier-1  .claude/rules/
+  codebuddy   CodeBuddy      Tier-1  .codebuddy/rules/
+  workbuddy   WorkBuddy      Tier-1  .codebuddy/rules/ (shared with CodeBuddy)
+  trae        Trae           Tier-1  .trae/rules/
+  codex       Codex          Tier-2  SessionStart injection (does not touch AGENTS.md)
+  opencode    OpenCode       Tier-2  SessionStart injection (does not touch AGENTS.md)
+
+Install several at once, comma-separated:
+  rulemux init --agent codebuddy,codex
+
+HOOKS ARE PER-WORKSPACE. Run init inside each workspace you want covered.
+
+OTHER FLAGS:
+  --config <path>     Config file (default ~/.rulemux/config.toml).
+  --workspace <dir>   Workspace to install hooks into (default: current dir).
+  --help, -h          Show this help.
+
+The first run also writes a sample ~/.rulemux/config.toml if none exists.
+Edit its 'path' fields to point at your own rule files, then open a new session
+in the agent to trigger the sync.
+`)
 }

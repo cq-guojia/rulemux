@@ -28,14 +28,19 @@
 ## 用法
 
 ```bash
-rulemux init      # 1. 生成示例 ~/.rulemux/config.toml + 为当前工作区装各 agent 的 SessionStart 钩子（幂等）
+rulemux init --agent codebuddy   # 1. 为指定 agent 安装 SessionStart 钩子（--agent 必填），首次会生成示例 config.toml
 # 2. 编辑 ~/.rulemux/config.toml，把 path 改成自己真实的规则文件
-rulemux doctor    # 3. 环境自检：二进制/PATH、各 agent 目录与钩子状态、配置合法性
-rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号 RULEMUX-CANARY-43371345
+rulemux doctor                   # 3. 环境自检：二进制/PATH、各 agent 目录与钩子状态、配置合法性
+rulemux verify                   # 4. canary 验收：开新会话问 agent 能否念出暗号 RULEMUX-CANARY-43371345
 # 5. 之后每次开新会话，钩子自动触发 rulemux sync --agent X
+
+# 卸载
+rulemux uninstall --agent codex  # 卸单个 agent 的钩子（及 Tier-1 同步文件）
+rulemux uninstall --off          # 卸全部 agent
 ```
 
-> ⚠️ **钩子按工作区安装**：`rulemux init` 只给当前工作区装钩子；换工作区须在该工作区再跑一次 `init`，否则那个工作区不会触发同步（曾出现「A 工作区能读到、B 读不到」即因此）。
+> ⚠️ **`init` 必须指定 `--agent`**：rulemux 不会扫描你机器上装了哪些 agent，你得明确说要装哪个（可逗号分隔多个，如 `--agent codebuddy,codex`）。
+> ⚠️ **钩子按工作区安装**：`rulemux init` 只给当前工作区装钩子；换工作区须在该工作区再跑一次 `init`，否则那个工作区不会触发同步（曾出现「A 工作区能读到、B 读不到」即因此）。`uninstall` 同理要进同一个工作区执行。
 
 配置（`~/.rulemux/config.toml`）示例：
 

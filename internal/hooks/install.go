@@ -148,3 +148,146 @@ func installCodex(path, agentID string) error {
 	_, err = f.WriteString(add.String())
 	return err
 }
+
+// Uninstall removes rulemux's SessionStart hook for the agent (idempotent:
+// a missing or empty hook config is treated as already-removed).
+func Uninstall(a agents.Agent, workspace string) error {
+	path := a.HookFileAbs(workspace)
+	switch a.Style {
+	case "claude", "trae", "json":
+		return uninstallJSON(path, a.ID)
+	case "codex":
+		return uninstallCodex(path, a.ID)
+	default:
+		return fmt.Errorf("unknown hook style %q", a.Style)
+	}
+}
+
+// uninstallJSON removes the rulemux SessionStart entry (matching this agentID)
+// from a JSON hook config, preserving every other key/entry in the file.
+func uninstallJSON(path, agentID string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return nil
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return fmt.Errorf("parse hook config %s: %w", path, err)
+	}
+	hooksMap, ok := doc["hooks"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	list, ok := hooksMap["SessionStart"].([]interface{})
+	if !ok {
+		return nil
+	}
+	kept := make([]interface{}, 0, len(list))
+	for _, g := range list {
+		if isRulemuxHook(g, agentID) {
+			continue
+		}
+		kept = append(kept, g)
+	}
+	if len(kept) == 0 {
+		delete(hooksMap, "SessionStart")
+	} else {
+		hooksMap["SessionStart"] = kept
+	}
+	doc["hooks"] = hooksMap
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append(out, '\n')
+	return os.WriteFile(path, out, 0o644)
+}
+
+// isRulemuxHook reports whether a SessionStart group is the rulemux hook for agentID.
+func isRulemuxHook(g interface{}, agentID string) bool {
+	gm, ok := g.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	hs, ok := gm["hooks"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, h := range hs {
+		hm, ok := h.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cmd, ok := hm["command"].(string)
+		if !ok || cmd != "rulemux" {
+			continue
+		}
+		args, ok := hm["args"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, x := range args {
+			if s, ok := x.(string); ok && s == agentID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// uninstallCodex removes the rulemux [[hooks.SessionStart]] block from the
+// Codex TOML config. Naive line-based removal; codex schema is unverified.
+func uninstallCodex(path, agentID string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	lines := strings.Split(string(b), "\n")
+	out := make([]string, 0, len(lines))
+	i := 0
+	for i < len(lines) {
+		line := lines[i]
+		if strings.TrimSpace(line) == "[[hooks.SessionStart]]" {
+			block := []string{line}
+			i++
+			for i < len(lines) && strings.TrimSpace(lines[i]) != "" && !strings.HasPrefix(strings.TrimSpace(lines[i]), "[[") {
+				block = append(block, lines[i])
+				i++
+			}
+			if blockIsRulemux(block, agentID) {
+				continue // drop this block
+			}
+			out = append(out, block...)
+			continue
+		}
+		out = append(out, line)
+		i++
+	}
+	result := strings.Join(out, "\n")
+	if strings.TrimSpace(result) == "" {
+		return os.Remove(path) // file only ever held our additions
+	}
+	return os.WriteFile(path, []byte(result), 0o644)
+}
+
+// blockIsRulemux reports whether a TOML [[hooks.SessionStart]] block is the
+// rulemux hook for the given agent.
+func blockIsRulemux(block []string, agentID string) bool {
+	text := strings.Join(block, "\n")
+	if !strings.Contains(text, "rulemux") {
+		return false
+	}
+	if !strings.Contains(text, "--agent") {
+		return false
+	}
+	return strings.Contains(text, agentID)
+}

@@ -64,6 +64,8 @@ func main() {
 		os.Exit(cmd.Doctor(args[1:]))
 	case "verify":
 		os.Exit(cmd.Verify(args[1:]))
+	case "uninstall":
+		os.Exit(cmd.Uninstall(args[1:]))
 	default:
 		fmt.Fprintf(os.Stderr, "rulemux: 未知子命令 %q\n\n", args[0])
 		usage()

@@ -2,9 +2,12 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/cq-guojia/rulemux/internal/agents"
 )
 
 // Flags 是极简命令行参数解析的结果（不引第三方库，保持零依赖）。
@@ -60,4 +63,23 @@ func workspace(v string) (string, error) {
 	return os.Getwd()
 }
 
-
+// parseAgents 把 --agent 的值（如 "codebuddy,codex"）拆成 Agent 列表，
+// 逐个在注册表里校验；含未知 id 即报错。绝不扫描机器上的 agent。
+func parseAgents(s string) ([]agents.Agent, error) {
+	var out []agents.Agent
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		a, ok := agents.Get(p)
+		if !ok {
+			return nil, fmt.Errorf("unknown agent %q (known: claude, codebuddy, workbuddy, trae, codex, opencode)", p)
+		}
+		out = append(out, a)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no agent specified")
+	}
+	return out, nil
+}
