@@ -1,71 +1,242 @@
 # rulemux
 
-> 你维护的一套规则文档 → 同步投递到各家 AI coding agent（Claude Code / Trae / CodeBuddy / WorkBuddy / Codex / OpenCode / DeepSeek Harness）。
-> 效果与 token 与直接写 `AGENTS.md` 一致：**永不淡出、不累积、不用软链、加删文件自由**。
+> One set of rules, delivered to every AI coding agent.
+> Same effect and same token cost as writing `AGENTS.md` by hand — **never fades out, never accumulates, no symlinks, free to add and remove files**.
 
-## 这是什么
+[中文版](README.zh-CN.md) | [Design docs](docs/design/architecture.md)
 
-你维护着一套规则文档（编码约定、项目规矩……），希望每个 AI coding agent 在每个工作区都读到它，且效果和直接写进 `AGENTS.md` 一模一样。
-`rulemux` 负责把你在配置里列出的规则文件同步进各家 agent 的工作区规则目录 —— 一处管理，多处生效。（rulemux 本身不持有、不维护任何规则内容，源文件完全由你维护；「适用于哪些 agent / 哪些工作区」在配置里声明。）
+---
 
-**核心做法**：hook 只当「投递员」，把规则文档**真实拷贝**进各 agent 原生加载的规则目录，由 harness 自己读 ⇒ 享有静态前缀语义，因此永不淡出、不累积。
-（为什么不靠 hook 注入：见 [`docs/design/architecture.md`](docs/design/architecture.md) §二）
+## 1. What is this
 
-## 安装
+You maintain a set of rule documents (coding conventions, project rules, …) and want every AI
+coding agent to read them in every workspace — with the exact same effect as if you had written
+`AGENTS.md` yourself.
 
-`rulemux` 是零依赖的 Go 单二进制，跨平台交叉编译可得。
+`rulemux` takes the source files you list in a config and copies them into each agent's **native
+workspace rules directory**. You manage them in one place; they take effect everywhere.
 
-- **下载预编译二进制**（推荐）：从 GitHub Release 取对应平台产物，放到 PATH（如 `/usr/local/bin/rulemux`）；Windows 用 `rulemux.exe`（hook 的 exec 形式才能直接 spawn）。
-- **从源码编译**：
-  ```bash
-  git clone <repo> && cd rulemux
-  go build -o rulemux .                              # 当前平台
-  GOOS=darwin  GOARCH=arm64 go build -o rulemux-darwin-arm64 .
-  GOOS=windows GOARCH=amd64 go build -o rulemux.exe .
-  ```
-- （可选）`npm i -g rulemux` 仅作为把二进制放进 PATH 的便捷通道，包内不含运行时。
+- rulemux **does not own or maintain any rule content**. Your source files stay yours — rulemux
+  only copies them. Which agents / workspaces they apply to is declared in your config.
+- **The session hook is only the courier.** It is not used to inject text. Files are really copied
+  into the directory the agent loads natively, so they enjoy static-prefix semantics: they never
+  fade out mid-conversation, and they never accumulate.
+- Invariants: **no symlinks** (real copies only) and **free add/remove** (delete a source from the
+  config and its copy disappears on the next sync).
 
-## 用法
+> Why not "just inject with a hook"? Hook injection lands in the dynamic part of the context: it
+> gets summarised away on compaction (fades out) or re-appended every turn (token blow-up).
+> See [design/architecture.md](docs/design/architecture.md) §一.
+
+---
+
+## 2. Supported scope
+
+rulemux ships **one adapter per agent**, and an adapter is only installable once its rules
+directory and hook location have been confirmed by a real canary test. Today:
+
+| Agent | Tier | Rules directory | Status |
+|---|---|---|---|
+| **codebuddy** | Tier-1 (real copy) | `.codebuddy/rules/` | ✅ **Verified — installable** |
+| **workbuddy** | Tier-1 (real copy) | `.codebuddy/rules/` (shared with CodeBuddy) | ✅ **Verified — installable** |
+| claude (Claude Code) | Tier-1 | `.claude/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
+| trae (Trae) | Tier-1 | `.trae/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
+| codex | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |
+| opencode | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |
+
+- `rulemux init` **refuses** any agent that is not verified — it will not half-install an adapter
+  whose behaviour has not been proven. `rulemux doctor` marks unverified agents with ⚠.
+- **Tier-2 is a deliberate downgrade** for agents that have no rules directory (they only read a
+  single `AGENTS.md`). It injects via the session hook and never touches your own `AGENTS.md`, but
+  it cannot satisfy the "never fades out" bar. See
+  [design/features/hook-injection.md](docs/design/features/hook-injection.md).
+
+---
+
+## 3. Install
+
+rulemux is a **single Go binary with zero third-party dependencies**.
 
 ```bash
-rulemux init --agent codebuddy   # 1. 为指定 agent 安装 SessionStart 钩子（--agent 必填），首次会生成示例 config.toml
-# 2. 编辑 ~/.rulemux/config.toml，把 path 改成自己真实的规则文件
-rulemux doctor                   # 3. 环境自检：二进制/PATH、各 agent 目录与钩子状态、配置合法性
-rulemux verify                   # 4. canary 验收：开新会话问 agent 能否念出暗号 RULEMUX-CANARY-43371345
-# 5. 之后每次开新会话，钩子自动触发 rulemux sync --agent X
+# a) from a GitHub Release (recommended): put the binary on your PATH
+#    e.g. /usr/local/bin/rulemux   (Windows: rulemux.exe)
 
-# 卸载（--agent 与 --off/--all 二选一、必带其一；执行前会交互确认，--yes 跳过）
-rulemux uninstall --agent codex            # 卸单个 agent（支持逗号多个：--agent codebuddy,codex）
-rulemux uninstall --off                    # 卸全部 agent（--all 等价）
+# b) from source
+go install github.com/cq-guojia/rulemux@latest
+# or
+git clone https://github.com/cq-guojia/rulemux.git && cd rulemux && go build -o rulemux .
+
+# c) via npm (convenience channel that puts the binary on your PATH)
+npm i -g rulemux
 ```
 
-> ⚠️ **`init` 必须指定 `--agent`**：rulemux 不会扫描你机器上装了哪些 agent，你得明确说要装哪个（可逗号分隔多个，如 `--agent codebuddy,codex`）。
-> **钩子装在 user 级 host 配置**：`rulemux init` 把 SessionStart 钩子写进 `~/.codebuddy/settings.json`（同 Hindsight 的做法），**一次安装、对所有工作区生效**，不必每个工作区再跑一遍 `init`。同步时仍以当前工作区（cwd）去匹配配置里的 `workspace` 条目，决定投递哪些规则。
+There is **no auto-update**. Upgrades are manual and handled by your package manager
+(`go install …@latest`, Homebrew/Scoop/apt later on). This is a deliberate decision — see
+[design/requirements.md](docs/design/requirements.md) §五.
 
-配置（`~/.rulemux/config.toml`）示例：
+---
+
+## 4. Quick start
+
+```bash
+# 1. Install the session hook for an agent (--agent is REQUIRED)
+rulemux init --agent codebuddy
+#    First run also writes a sample config to ~/.rulemux/config.toml
+
+# 2. Edit ~/.rulemux/config.toml and point `path` at your real rule files
+
+rulemux doctor    # 3. Self-check: binary/PATH, agents, config validity
+rulemux verify    # 4. Canary check: drop a probe and ask the agent to recite its token
+
+# From now on every new session triggers `rulemux sync --agent codebuddy` automatically.
+
+rulemux uninstall --agent codebuddy   # remove rulemux again (--yes skips the confirmation)
+```
+
+**Where the hook goes:** into the **user-level host config** `~/.codebuddy/settings.json` (the same
+place a tool like Hindsight registers itself). **Install once, and it applies to every workspace** —
+you do *not* re-run `init` per project. When it fires, rulemux uses the current workspace (its cwd)
+to match the `workspace` entries in your config and decides what to deliver.
+
+---
+
+## 5. Configuration
+
+Config file: `~/.rulemux/config.toml` (override with `--config <path>` on any command).
+
+### 5.1 Each `[[source]]`
+
+| Field | Meaning |
+|---|---|
+| `path` | Source file(s), anywhere on disk. Single value or a list. A list shares the `agents`/`workspace` below. |
+| `agents` | Which agents receive this batch. Omitted = all supported agents. |
+| `workspace` | Which workspaces these rules apply to. Omitted / `"*"` / `"**"` / `"all"` = every workspace. Single value, a list, or a glob. |
+
+Globbing follows the usual rules: `*` is one path segment, `**` spans segments and may appear in
+the middle — e.g. `workspace = "/abs/**/B"` matches a directory named `B` at any depth.
 
 ```toml
 [[source]]
-path = ["/你的规则/a.md", "/你的规则/b.md"]
-agents = ["claude", "codex"]     # 省略 = 全部 agent
-# workspace 省略 / "*" / "all" = 所有工作区；也可写数组限定特定工作区
+path = ["/your/rules/a.md", "/your/rules/b.md"]
+agents = ["codebuddy"]              # omit to target every supported agent
+# workspace is omitted => every workspace
 # workspace = ["/path/to/proj-a", "/path/to/proj-b"]
-
-[[source]]
-path = "/笔记/c.txt"
-agents = ["trae"]
-workspace = ["/path/to/proj-a"]
+# workspace = "/abs/**/B"           # glob: any depth, named B
 ```
 
-同步算法（每次 `sync`）：计算「应生成的带前缀文件名集合 S」→ 目标目录里不在 S 中的 `.rulemux__*` 删掉（删残留）→ S 中缺失/不一致则复制/覆盖，一致则跳过；非 `.rulemux__` 前缀的用户文件一律不碰。
+### 5.2 Bundling with "groups" (optional)
 
-## 文档
+When you have many files, bundle them and reference the bundle by name.
 
-| 想看 | 去哪 |
+```toml
+# ---- File groups ---------------------------------------------------------
+[[file_group]]
+name  = "base"
+path  = ["/your/rules/team-conventions.md", "/your/rules/style.md"]
+
+[[file_group]]
+name = "proj"
+use  = ["base"]                     # nests the base group (a list: ["base", "dev"])
+path = ["/your/rules/project-a.md"]
+
+# ---- Workspace groups ----------------------------------------------------
+[[workspace_group]]
+name      = "dev"
+workspace = ["/path/to/proj-1", "/path/to/proj-2"]
+
+# ---- Use them ------------------------------------------------------------
+[[source]]
+groups           = ["base", "proj"]      # expands to every file in those groups
+path             = ["/your/rules/extra.md"]   # mixing is allowed: groups + standalone files
+agents           = ["codebuddy"]
+workspace_groups = ["dev"]               # expands to every workspace in the group
+workspace        = ["/path/to/standalone"]    # also allowed alongside workspace_groups
+```
+
+Things worth knowing:
+
+- **`use` is a list** — `use = ["dev", "qa"]` reuses several groups at once, and groups nest
+  (A pulls in B plus its own files).
+- **Mixing is allowed**: `groups` with `path`, and `workspace_groups` with `workspace`, in the same
+  source. The result is the union.
+- **Duplicates are harmless** — everything is deduplicated by value, so each file is processed once.
+- File groups and workspace groups are **separate namespaces**; the same name may be used in both.
+
+### 5.3 What sync does, and what it never touches
+
+On every sync rulemux computes the set of prefixed files that should exist, then removes any
+`.rulemux__*` file that is not in that set, copies/overwrites the ones that are missing or changed,
+and skips the rest.
+
+- Destination name: `.rulemux__` + source basename (a short hash is appended on name collisions).
+- **Your source files are only ever read** — never modified or deleted.
+- **Files without the `.rulemux__` prefix in the rules directory are never touched**, so your own
+  rule files stay safe.
+
+---
+
+## 6. Uninstalling
+
+```bash
+rulemux uninstall --agent codebuddy          # one agent (comma-separated for several)
+rulemux uninstall --off                      # every agent (--all is the same)
+rulemux uninstall --agent codebuddy --yes    # skip the confirmation prompt
+```
+
+It removes rulemux's own hook entry (other tools' hooks in the same file are preserved) and deletes
+the `.rulemux__*` files it previously delivered. Because the hook lives in the user-level config,
+rulemux also **revisits every workspace recorded in its ledger** (`~/.rulemux/workspaces.json`) and
+cleans those too — otherwise, with the hook gone, that residue could never be removed again. You are
+shown the list of workspaces before anything is deleted.
+
+---
+
+## 7. Commands
+
+| Command | What it does |
 |---|---|
-| 现在做到哪、欠什么 | [`docs/PROGRESS.md`](docs/PROGRESS.md) |
-| 文档怎么摆、怎么写 | [`docs/README.md`](docs/README.md) |
-| **用户要什么**（需求 / 验收标准） | [`docs/design/requirements.md`](docs/design/requirements.md) |
-| 设计（核心原理 / 选型 / 命名） | [`docs/design/architecture.md`](docs/design/architecture.md) |
-| 功能列表 | [`docs/design/features.md`](docs/design/features.md) |
-| 各家 agent 的规则目录 | [`docs/design/external/agent-rules-dirs.md`](docs/design/external/agent-rules-dirs.md) |
+| `rulemux sync [--agent <id>] [--config <path>] [--workspace <dir>]` | Sync rules (called by each agent's SessionStart hook) |
+| `rulemux inject --agent <id> [--config <path>]` | Tier-2: print rules to stdout for hook injection |
+| `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | Write a sample config and install the SessionStart hook |
+| `rulemux doctor [--config <path>] [--workspace <dir>]` | Environment self-check |
+| `rulemux verify --agent <id> [--clean] [--workspace <dir>]` | Canary acceptance test |
+| `rulemux uninstall --agent <id[,id...]> \| --off \| --all [--yes]` | Remove hooks and delivered files |
+
+Run `rulemux` with no arguments for the full help.
+
+---
+
+## 8. Roadmap
+
+Ongoing work and what comes next are tracked in [docs/PROGRESS.md](docs/PROGRESS.md). In short:
+
+- **More agents** — finish the adapters that are already registered but unverified:
+  - **Trae** (`.trae/rules/`) and **Claude Code** (`.claude/rules/`) as Tier-1;
+  - **Codex** and **OpenCode** as Tier-2 injection.
+  Each one needs its rules directory and hook location confirmed by a real canary run before it is
+  switched on. The checklist for adding an agent lives in
+  [design/features/agent-onboarding.md](docs/design/features/agent-onboarding.md).
+- **Distribution** — GitHub Actions cross-compilation plus Release artifacts (this also feeds the
+  npm package), and publishing the npm package properly.
+- **Verification tooling** — make the canary check repeatable per agent.
+- Rule content transformation, templating, and automatic self-update are **explicitly out of scope**
+  ([design/requirements.md](docs/design/requirements.md) §五).
+
+---
+
+## 9. License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+## 10. Documentation
+
+| Want to read | Where |
+|---|---|
+| What the user actually wants (requirements / acceptance) | [docs/design/requirements.md](docs/design/requirements.md) |
+| Why it is designed this way | [docs/design/architecture.md](docs/design/architecture.md) |
+| Feature list | [docs/design/features.md](docs/design/features.md) |
+| Checklist for adding a new agent | [docs/design/features/agent-onboarding.md](docs/design/features/agent-onboarding.md) |
+| Each agent's rules directory (external facts) | [docs/design/external/agent-rules-dirs.md](docs/design/external/agent-rules-dirs.md) |
+| Current progress and open items | [docs/PROGRESS.md](docs/PROGRESS.md) |
