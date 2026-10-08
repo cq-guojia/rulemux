@@ -10,6 +10,7 @@ import (
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/engine"
 	"github.com/cq-guojia/rulemux/internal/hooks"
+	"github.com/cq-guojia/rulemux/internal/state"
 )
 
 // Uninstall removes rulemux's SessionStart hook (and, for Tier-1 agents, the
@@ -85,6 +86,12 @@ func Uninstall(args []string) int {
 				fmt.Printf("  · %-10s no synced files in %s\n", a.ID, dir)
 			}
 		}
+
+		// 回访账本里记录的其它工作区：钩子已全局移除，这里不补清就再没机会了。
+		if cleaned, skipped := sweepRecordedWorkspaces(a, ws); cleaned > 0 || skipped > 0 {
+			fmt.Printf("  ✓ %-10s 其它工作区：清理 %d 个残留文件；%d 个工作区已不存在而跳过（账本保留，路径重现仍会回访）\n",
+				a.ID, cleaned, skipped)
+		}
 	}
 	return 0
 }
@@ -101,6 +108,14 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 		}
 		fmt.Printf("  - %s (%s)\n", a.ID, kind)
 	}
+	if others := state.Others(ws); len(others) > 0 {
+		fmt.Printf("  另外，钩子是装在 user 级 host 配置里的（全局生效），本次卸载后不再有 sync 触发。\n")
+		fmt.Printf("  因此还会按账本回访以下曾同步过的 %d 个工作区，一并清理残留文件：\n", len(others))
+		for _, w := range others {
+			fmt.Printf("    - %s\n", w)
+		}
+		fmt.Printf("  （只删 .rulemux__ 前缀的我方文件，你的源文件与其它文件一律不碰）\n")
+	}
 	fmt.Print("Proceed? [y/N] ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -111,6 +126,30 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 	}
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "y" || line == "yes"
+}
+
+// sweepRecordedWorkspaces 按账本回访「曾经同步过的其它工作区」，清掉该 agent 的残留文件。
+// 钩子此刻已被全局移除，若不做这一步，那些工作区里的 .rulemux__* 将再无机会被删除。
+//
+// 返回：清理掉的文件数、因工作区已不存在而跳过的工作区数。
+// 说明：即便路径已不存在也不从账本剔除——万一该工作区日后重现（如重新 clone），
+// 下一次卸载仍会回访并清理它。
+func sweepRecordedWorkspaces(a agents.Agent, current string) (cleaned, skipped int) {
+	if a.RulesDir == "" {
+		return 0, 0 // Tier-2 磁盘上不留任何文件，无需回访
+	}
+	for _, ws := range state.Others(current) {
+		if _, err := os.Stat(ws); err != nil {
+			skipped++
+			continue // 工作区已被删除，本次无从清理
+		}
+		removed, err := removeRuleFiles(a.RulesDirAbs(ws))
+		if err != nil {
+			continue
+		}
+		cleaned += len(removed)
+	}
+	return cleaned, skipped
 }
 
 // removeRuleFiles deletes every .rulemux__* file in dir (Tier-1 leftovers).

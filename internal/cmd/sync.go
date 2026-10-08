@@ -8,6 +8,7 @@ import (
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/engine"
+	"github.com/cq-guojia/rulemux/internal/state"
 )
 
 // Sync 把配置所列源文件真实拷贝进各 agent 的原生规则目录（Tier-1）。
@@ -81,6 +82,12 @@ func Sync(args []string) int {
 		if len(res.Missing) > 0 {
 			exit = 1
 		}
+	}
+
+	// 记入账本：钩子是全局的，但规则文件落在各工作区本地。
+	// 卸载时要靠这份账本逐一回访清理，否则钩子一去、残留将永无机会被自动删除。
+	if err := state.Record(ws); err != nil {
+		fmt.Fprintf(os.Stderr, "rulemux: 警告：写入工作区账本失败: %v\n", err)
 	}
 	return exit
 }
