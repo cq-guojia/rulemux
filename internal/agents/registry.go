@@ -62,8 +62,10 @@ var registry = []Agent{
 		RulesDir: ".claude/rules",
 		HookFile: ".claude/settings.json",
 		Style:    "claude",
-		Verified: true,
-		Note:     "已核实：会话开始读 .claude/rules/*.md；SessionStart 可 exec 形式 spawn 二进制",
+		// 目录与 hook 能力已通过官方文档核实（external/agent-rules-dirs.md §三），但本工作区运行时
+		// canary 仍未落地（open bug，T11 / §四），未坐实前不得作为实现依据 ⇒ 标 false，doctor 会标 ⚠。
+		Verified: false,
+		Note:     "官方文档已核实：会话开始读 .claude/rules/*.md；SessionStart 可 exec 形式 spawn 二进制。但本工作区运行时 canary 未落地（open bug，见 T11 / external/agent-rules-dirs.md §四），待开一次 Claude Code 会话坐实",
 	},
 	{
 		ID:       "codebuddy",
