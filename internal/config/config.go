@@ -25,18 +25,42 @@ type Source struct {
 	// Paths 是源文件路径列表，每个都可以是磁盘上的任意位置。
 	// 配置里既可写单个：path = "a.md"
 	// 也可写数组：path = ["a.md", "b.md"]  —— 同一批文件共享下面的 agents/workspace。
+	// 也可通过 groups 引用“文件组”，解析阶段会把组内所有文件合并进来。
 	Paths []string
 	// Agents 指定这批文件投递给哪些 agent；为空表示投递给全部 agent。
 	Agents []string
 	// Workspaces 指定这条规则适用于哪些工作区；为空、或含 "*"/"all" 表示所有工作区。
 	// 既支持单个：workspace = "/path/to/proj"
 	// 也支持数组：workspace = ["/a", "/b"]
+	// 也可通过 workspace_groups 引用“工作区分组”，解析阶段会把组内所有路径合并进来。
 	Workspaces []string
+	// Groups 引用哪些文件组（按 [[file_group]].name），解析阶段展开成具体文件并入 Paths。
+	Groups []string
+	// WorkspaceGroups 引用哪些工作区分组（按 [[workspace_group]].name），解析阶段展开成具体路径并入 Workspaces。
+	WorkspaceGroups []string
+}
+
+// FileGroup 是配置中的一个“文件组”，把若干规则文件打包，供 [[source]] 用 groups 引用。
+// 组与组之间可互相引用（use），形成嵌套。
+type FileGroup struct {
+	Name  string   // 组名，供 groups 按名引用
+	Paths []string // 组内文件；单个或数组写法均可
+	Uses  []string // 引用的其它 file_group 名称（可多个，支持嵌套）
+}
+
+// WorkspaceGroup 是配置中的一个“工作区分组”，把若干工作区打包，供 [[source]] 用 workspace_groups 引用。
+// 组与组之间可互相引用（use），形成嵌套；其 workspace 既可是具体路径，也可是 glob（如 /proj/**）。
+type WorkspaceGroup struct {
+	Name       string   // 组名，供 workspace_groups 按名引用
+	Workspaces []string // 组内工作区；单个或数组写法均可，支持 glob
+	Uses       []string // 引用的其它 workspace_group 名称（可多个，支持嵌套）
 }
 
 // Config 是 rulemux 的完整配置。
 type Config struct {
-	Sources []Source
+	Sources         []Source
+	FileGroups      []FileGroup
+	WorkspaceGroups []WorkspaceGroup
 	// File 是本次实际读取的配置文件路径。
 	File string
 }
@@ -60,7 +84,16 @@ func Load(path string) (*Config, error) {
 
 	c := &Config{File: path}
 	sc := bufio.NewScanner(f)
-	cur := -1 // 当前正在填充的 [[source]] 下标，-1 表示不在 source 表内
+
+	// curKind 跟踪当前正在填充的数组表类型；普通表（如 [features]）或未知数组表均为 none。
+	const (
+		curNone = iota
+		curSource
+		curFileGroup
+		curWSGroup
+	)
+	cur := curNone
+	srcIdx, fgIdx, wgIdx := -1, -1, -1
 
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -68,42 +101,80 @@ func Load(path string) (*Config, error) {
 			continue
 		}
 
-		// [[source]] 数组表
+		// 数组表 [[name]]
 		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
 			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "[["), "]]"))
-			if name == "source" {
+			switch name {
+			case "source":
 				c.Sources = append(c.Sources, Source{})
-				cur = len(c.Sources) - 1
-			} else {
-				cur = -1
+				srcIdx = len(c.Sources) - 1
+				cur = curSource
+			case "file_group":
+				c.FileGroups = append(c.FileGroups, FileGroup{})
+				fgIdx = len(c.FileGroups) - 1
+				cur = curFileGroup
+			case "workspace_group":
+				c.WorkspaceGroups = append(c.WorkspaceGroups, WorkspaceGroup{})
+				wgIdx = len(c.WorkspaceGroups) - 1
+				cur = curWSGroup
+			default:
+				cur = curNone
 			}
 			continue
 		}
 
-		// 其它普通表（如 [features]），其键值不属于 source，忽略
+		// 其它普通表（如 [features]），其键值不属于任何已知数组表，忽略
 		if strings.HasPrefix(line, "[") {
-			cur = -1
+			cur = curNone
 			continue
 		}
 
 		idx := strings.Index(line, "=")
-		if idx < 0 || cur < 0 {
+		if idx < 0 {
 			continue
 		}
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
-		switch key {
-		case "path":
-			// 既支持单个字符串，也支持数组
-			c.Sources[cur].Paths = parsePaths(val)
-		case "agents":
-			c.Sources[cur].Agents = parseArray(val)
-		case "workspace":
-			// 既支持单个字符串，也支持数组
-			c.Sources[cur].Workspaces = parsePaths(val)
+
+		switch cur {
+		case curSource:
+			switch key {
+			case "path":
+				c.Sources[srcIdx].Paths = parsePaths(val)
+			case "agents":
+				c.Sources[srcIdx].Agents = parseArray(val)
+			case "workspace":
+				c.Sources[srcIdx].Workspaces = parsePaths(val)
+			case "groups":
+				c.Sources[srcIdx].Groups = parseArray(val)
+			case "workspace_groups":
+				c.Sources[srcIdx].WorkspaceGroups = parseArray(val)
+			}
+		case curFileGroup:
+			switch key {
+			case "name":
+				c.FileGroups[fgIdx].Name = unquote(val)
+			case "path":
+				c.FileGroups[fgIdx].Paths = parsePaths(val)
+			case "use":
+				c.FileGroups[fgIdx].Uses = parseArray(val)
+			}
+		case curWSGroup:
+			switch key {
+			case "name":
+				c.WorkspaceGroups[wgIdx].Name = unquote(val)
+			case "workspace":
+				c.WorkspaceGroups[wgIdx].Workspaces = parsePaths(val)
+			case "use":
+				c.WorkspaceGroups[wgIdx].Uses = parseArray(val)
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := c.resolveGroups(); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -292,6 +363,125 @@ func parseArray(s string) []string {
 func containsFold(list []string, v string) bool {
 	for _, x := range list {
 		if strings.EqualFold(strings.TrimSpace(x), v) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveGroups 把配置中的“组”引用展开成具体的文件 / 工作区，
+// 并写回每条 Source 的 Paths / Workspaces。展开过程做环检测与按源路径去重，
+// 因此组间重复文件最终只出现一次（满足“每个文件只做一次”）。
+func (c *Config) resolveGroups() error {
+	fgMap := make(map[string]*FileGroup, len(c.FileGroups))
+	for i := range c.FileGroups {
+		g := &c.FileGroups[i]
+		if g.Name == "" {
+			return fmt.Errorf("配置 %s 存在未命名的 [[file_group]]", c.File)
+		}
+		if _, dup := fgMap[g.Name]; dup {
+			return fmt.Errorf("配置 %s 中 [[file_group]] 名称 %q 重复定义", c.File, g.Name)
+		}
+		fgMap[g.Name] = g
+	}
+	wgMap := make(map[string]*WorkspaceGroup, len(c.WorkspaceGroups))
+	for i := range c.WorkspaceGroups {
+		g := &c.WorkspaceGroups[i]
+		if g.Name == "" {
+			return fmt.Errorf("配置 %s 存在未命名的 [[workspace_group]]", c.File)
+		}
+		if _, dup := wgMap[g.Name]; dup {
+			return fmt.Errorf("配置 %s 中 [[workspace_group]] 名称 %q 重复定义", c.File, g.Name)
+		}
+		wgMap[g.Name] = g
+	}
+
+	// 递归展开文件组，visiting 用于环检测。
+	var expandFG func(name string, visiting map[string]bool, out *[]string) error
+	expandFG = func(name string, visiting map[string]bool, out *[]string) error {
+		g, ok := fgMap[name]
+		if !ok {
+			return fmt.Errorf("配置 %s 引用了未定义的文件组 %q", c.File, name)
+		}
+		if visiting[name] {
+			return fmt.Errorf("配置 %s 的文件组存在循环引用：%s", c.File, name)
+		}
+		visiting[name] = true
+		defer delete(visiting, name)
+		for _, u := range g.Uses {
+			if err := expandFG(u, visiting, out); err != nil {
+				return err
+			}
+		}
+		appendUnique(out, g.Paths)
+		return nil
+	}
+
+	// 递归展开工作区分组（workspace 值可能是 glob，原样保留，交给 MatchesWorkspace 处理）。
+	var expandWG func(name string, visiting map[string]bool, out *[]string) error
+	expandWG = func(name string, visiting map[string]bool, out *[]string) error {
+		g, ok := wgMap[name]
+		if !ok {
+			return fmt.Errorf("配置 %s 引用了未定义的工作区分组 %q", c.File, name)
+		}
+		if visiting[name] {
+			return fmt.Errorf("配置 %s 的工作区分组存在循环引用：%s", c.File, name)
+		}
+		visiting[name] = true
+		defer delete(visiting, name)
+		for _, u := range g.Uses {
+			if err := expandWG(u, visiting, out); err != nil {
+				return err
+			}
+		}
+		appendUnique(out, g.Workspaces)
+		return nil
+	}
+
+	for i := range c.Sources {
+		s := &c.Sources[i]
+		var files []string
+		for _, gname := range s.Groups {
+			if err := expandFG(gname, map[string]bool{}, &files); err != nil {
+				return err
+			}
+		}
+		// 组展开的文件在前，source 自身显式 path 在后（书写顺序直观：groups 写在前）。
+		s.Paths = mergeUnique(files, s.Paths)
+
+		var wss []string
+		for _, gname := range s.WorkspaceGroups {
+			if err := expandWG(gname, map[string]bool{}, &wss); err != nil {
+				return err
+			}
+		}
+		// 工作区分组展开在前，source 自身显式 workspace 在后。
+		s.Workspaces = mergeUnique(wss, s.Workspaces)
+	}
+	return nil
+}
+
+// appendUnique 把 vals 中尚未出现在 *out 的元素追加进去（保持首次出现顺序，按精确字符串去重）。
+func appendUnique(out *[]string, vals []string) {
+	for _, v := range vals {
+		if !containsStr(*out, v) {
+			*out = append(*out, v)
+		}
+	}
+}
+
+// mergeUnique 合并 a 与 b，去掉重复（b 中已存在于 a 的元素忽略，保持 a 顺序后接 b 剩余）。
+func mergeUnique(a, b []string) []string {
+	out := make([]string, len(a))
+	copy(out, a)
+	appendUnique(&out, b)
+	return out
+}
+
+// containsStr 报告切片是否包含 s（精确匹配）。
+func containsStr(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
 			return true
 		}
 	}

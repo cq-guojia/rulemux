@@ -151,3 +151,207 @@ func TestWorkspaceGlob(t *testing.T) {
 		t.Fatalf("/other/B 应命中 0 条，实得 %d", len(got))
 	}
 }
+
+// equalSlice 比较两个字符串切片是否逐项相等（顺序敏感）。
+func equalSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestFileGroupExpand 校验文件组展开：嵌套引用会把组内所有文件合并进 source.Paths。
+func TestFileGroupExpand(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `
+[[file_group]]
+name = "base"
+path = ["/rules/a.md", "/rules/b.md"]
+
+[[file_group]]
+name = "proj"
+use = ["base"]
+path = ["/rules/c.md"]
+
+[[source]]
+groups = ["base", "proj"]
+agents = ["codebuddy"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Sources) != 1 {
+		t.Fatalf("期望 1 条 source，实得 %d", len(c.Sources))
+	}
+	got := c.Sources[0].Paths
+	want := []string{"/rules/a.md", "/rules/b.md", "/rules/c.md"}
+	if !equalSlice(got, want) {
+		t.Fatalf("展开后 Paths 应为 %v，实得 %v", want, got)
+	}
+}
+
+// TestGroupDedup 校验组间重复文件按源路径去重，每个文件只出现一次。
+func TestGroupDedup(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `
+[[file_group]]
+name = "base"
+path = ["/rules/a.md", "/rules/b.md"]
+
+[[file_group]]
+name = "proj"
+use = ["base"]
+path = ["/rules/a.md", "/rules/c.md"]
+
+[[source]]
+groups = ["base", "proj"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Sources[0].Paths
+	want := []string{"/rules/a.md", "/rules/b.md", "/rules/c.md"}
+	if !equalSlice(got, want) {
+		t.Fatalf("去重后 Paths 应为 %v，实得 %v", want, got)
+	}
+}
+
+// TestWorkspaceGroupExpandAndGlob 校验工作区分组展开，且 glob 原样保留。
+func TestWorkspaceGroupExpandAndGlob(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `
+[[workspace_group]]
+name = "dev"
+workspace = ["/proj/1", "/proj/2"]
+
+[[workspace_group]]
+name = "qa"
+use = ["dev"]
+workspace = ["/proj/1/**"]
+
+[[source]]
+path = ["/rules/a.md"]
+workspace_groups = ["dev", "qa"]
+workspace = ["/standalone"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Sources[0].Workspaces
+	want := []string{"/proj/1", "/proj/2", "/proj/1/**", "/standalone"}
+	if !equalSlice(got, want) {
+		t.Fatalf("工作区展开后应为 %v，实得 %v", want, got)
+	}
+}
+
+// TestMixedGroupsAndPaths 校验 [[source]] 可同时引用组与混列单个文件。
+func TestMixedGroupsAndPaths(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `
+[[file_group]]
+name = "base"
+path = ["/rules/a.md"]
+
+[[source]]
+groups = ["base"]
+path = ["/rules/extra.md"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Sources[0].Paths
+	want := []string{"/rules/a.md", "/rules/extra.md"}
+	if !equalSlice(got, want) {
+		t.Fatalf("混合引用展开后应为 %v，实得 %v", want, got)
+	}
+}
+
+// TestGroupUndefinedError 校验引用未定义的组应报错。
+func TestGroupUndefinedError(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `[[source]]
+groups = ["nope"]
+path = ["/x.md"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("引用未定义组应报错")
+	}
+}
+
+// TestGroupCycleError 校验文件组循环引用应报错。
+func TestGroupCycleError(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `
+[[file_group]]
+name = "A"
+use = ["B"]
+
+[[file_group]]
+name = "B"
+use = ["A"]
+
+[[source]]
+groups = ["A"]
+path = ["/x.md"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("循环引用应报错")
+	}
+}
+
+// TestDuplicateGroupNameError 校验同类表重复定义组名应报错。
+func TestDuplicateGroupNameError(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `
+[[file_group]]
+name = "x"
+path = ["/a.md"]
+
+[[file_group]]
+name = "x"
+path = ["/b.md"]
+
+[[source]]
+groups = ["x"]
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("重复定义组名应报错")
+	}
+}

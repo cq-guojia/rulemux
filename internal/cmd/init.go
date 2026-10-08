@@ -42,17 +42,52 @@ const exampleConfig = `# rulemux 配置文件
 #               workspace = "/abs/**/B"                 # 匹配 /abs 下任意深度的名为 B 的工作区
 #               workspace = "**/B"                      # 匹配任意位置、任意层级名为 B 的工作区
 #
-# 下面两条是示例，整段被注释掉、不会生效。需要哪条就把前面的 # 去掉，并改成你的真实路径。
+# ── 进阶：用“组”打包，减少重复 ─────────────────────────────────────────────
+# 文件多了之后，可以把常用文件 / 工作区打包成“组”，在 [[source]] 里用组名引用。
+#
+# 文件组 [[file_group]]：把若干规则文件打包，供 [[source]] 用 groups 引用。
+#   name  组名（必填）
+#   path  组内文件；单个或数组写法均可
+#   use   引用其它文件组（可多个，支持嵌套：A 组引入 B 组，再加自己的文件）
+#
+# 工作区分组 [[workspace_group]]：把若干工作区打包，供 [[source]] 用 workspace_groups 引用。
+#   name       组名（必填）
+#   workspace  组内工作区；单个或数组写法均可，支持上面的 glob
+#   use        引用其它工作区分组（可多个，支持嵌套）
+#
+# 在 [[source]] 里：
+#   groups            = ["组A", "组B"]   # 引用文件组（自动展开为组内所有文件）
+#   workspace_groups  = ["组X"]          # 引用工作区分组（自动展开为组内所有工作区）
+#   groups/path、workspace_groups/workspace 可同时存在、混合使用。
+#   组间重复的文件 / 工作区无所谓——程序最后按值去重，每个只做一次。
+#   文件组与工作区分组是两套独立的命名空间，允许同名（它们分别位于不同的区域）。
+#
+# 下面都是示例，整段被注释掉、不会生效。需要哪个就去掉前面的 #，并改成你的真实值。
 
-# [[source]]
+# [[file_group]]
+# name = "base"
 # path = ["/abs/path/to/team-conventions.md", "/abs/path/to/style.md"]
-# agents = ["claude", "codebuddy", "trae"]
-# # workspace 省略 = 所有工作区都适用
+
+# [[file_group]]
+# name = "proj"
+# use = ["base"]                       # 嵌套引用 base 组
+# path = ["/abs/path/to/project-a.md"]
+
+# [[workspace_group]]
+# name = "dev"
+# workspace = ["/abs/path/to/proj-1", "/abs/path/to/proj-2"]
+
+# [[workspace_group]]
+# name = "qa"
+# use = ["dev"]                        # 复用 dev 组
+# workspace = ["/abs/path/to/proj-3"]
 
 # [[source]]
-# path = "/abs/path/to/project-a.txt"
-# agents = ["codex"]
-# workspace = ["/abs/path/to/proj-a", "/abs/path/to/proj-b"]
+# groups = ["base", "proj"]            # 引用文件组（自动展开成组内所有文件）
+# path = ["/abs/path/to/extra.md"]     # 也可同时混列单个文件
+# agents = ["claude", "codebuddy", "trae"]
+# workspace_groups = ["dev"]          # 引用工作区分组（展开成组内所有工作区）
+# workspace = ["/abs/path/to/standalone"]   # 也同时混列单个工作区
 `
 
 // Init installs the SessionStart hook for the agent(s) named by --agent.
