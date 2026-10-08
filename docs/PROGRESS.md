@@ -45,5 +45,5 @@
 
 1. **查 Claude 侧 sync 未落地（T11）**：开 Claude Code 会话，确认 `rulemux sync --agent claude` 是否生成 `.claude/rules/.rulemux__*`；用 `doctor` + `external/agent-rules-dirs.md` §四 定位根因（adapter 路径 / hook 触发 / 该工作区未装钩子）。
 2. **其余 agent canary（T4）**：按 `design/features/verification.md` 跑 trae / codex / opencode 实测闭环，回写 `external/agent-rules-dirs.md` §四 并标 `Verified` 与适用版本。
-3. **发版（W11 / W12）**：✅ **均已解（2026-10-08）** —— W12：`rulemux@0.1.0` 已发布 npm；W11：新增 `.github/workflows/release.yml`（打 tag 自动交叉编译 5 平台 → 挂 GitHub Release → 发 npm，npm 步骤需仓库 Secrets 配 `NPM_TOKEN`，未配则跳过告警）+ `ci.yml`（build/vet/test/smoke）。流水线首次真实运行要等下一个 tag；届时若 npm 步骤失败，需检查 `NPM_TOKEN` 是否已配 | 无需动作 |
+3. **发版（W11 / W12）**：✅ **W12 已解**（`rulemux@0.1.0` 已发 npm）；**W11 流水线已搭好且已实测**：`v0.1.2` 的 GitHub Release 成功（5 平台二进制齐全），首次运行暴露并修复 release job 缺 checkout 的 bug。**遗留**：npm 步骤因仓库未配 `NPM_TOKEN` secret 而按设计跳过 ⇒ npm `latest` 仍是 0.1.0；配好 secret 后下个 tag 起全自动，当前 0.1.2 需手动 `npm publish` 补发 | 配 `NPM_TOKEN`（Settings → Secrets → Actions）；或手动补发 0.1.2 |
 4. **本批文档落地**：上一轮梳理出的 PROGRESS / HISTORY / workplan / README / external 更新已落盘并提交（本批）。
