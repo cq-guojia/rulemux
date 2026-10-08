@@ -24,11 +24,11 @@ const (
 func (t Tier) String() string {
 	switch t {
 	case Tier1:
-		return "Tier-1 目录同步"
+		return "Tier-1 directory sync"
 	case Tier2:
-		return "Tier-2 钩子注入"
+		return "Tier-2 hook injection"
 	}
-	return "未知"
+	return "unknown"
 }
 
 // Agent 描述一个 agent 的适配信息。
@@ -65,7 +65,7 @@ var registry = []Agent{
 		// 目录与 hook 能力已通过官方文档核实（external/agent-rules-dirs.md §三），但本工作区运行时
 		// canary 仍未落地（open bug，T11 / §四），未坐实前不得作为实现依据 ⇒ 标 false，doctor 会标 ⚠。
 		Verified: false,
-		Note:     "官方文档已核实：会话开始读 .claude/rules/*.md；SessionStart 可 exec 形式 spawn 二进制。但本工作区运行时 canary 未落地（open bug，见 T11 / external/agent-rules-dirs.md §四），待开一次 Claude Code 会话坐实",
+		Note:     "Verified via official docs: .claude/rules/*.md is read at session start; SessionStart can exec-spawn a binary. However the canary has not landed in this workspace yet (open bug, see T11 / external/agent-rules-dirs.md section 4) - still needs one Claude Code session to confirm.",
 	},
 	{
 		ID:       "codebuddy",
@@ -78,7 +78,7 @@ var registry = []Agent{
 		HookAbs:  true,
 		Style:    "claude",
 		Verified: true,
-		Note:     "2026-10-08 canary 已坐实：SessionStart 钩子先于规则加载执行，且会读 .codebuddy/rules/ 下 .rulemux__ 点开头的隐藏文件；钩子装于 user 级 ~/.codebuddy/settings.json，详见 external/hindsight.md",
+		Note:     "Canary confirmed 2026-10-08: the SessionStart hook runs before rules are loaded, and hidden files starting with .rulemux__ under .codebuddy/rules are read. Hook lives in the user-level ~/.codebuddy/settings.json; see external/hindsight.md.",
 	},
 	{
 		ID:       "workbuddy",
@@ -88,7 +88,7 @@ var registry = []Agent{
 		HookAbs:  true,
 		Style:    "claude",
 		Verified: true,
-		Note:     "复用 CodeBuddy 机制（随 CodeBuddy 一并 canary 坐实）；与 codebuddy 共用同一目录，sync 时按同目录合并计算应保留文件，避免互相误删；钩子落点同为 user 级 host 配置",
+		Note:     "Reuses the CodeBuddy mechanism (canary confirmed together with it); shares one directory with codebuddy, so sync merges both agents' sources before computing deletions to avoid them deleting each other's files. Hook location is also the user-level host config.",
 	},
 	{
 		ID:       "trae",
@@ -98,7 +98,7 @@ var registry = []Agent{
 		HookFile: "hooks.json",
 		Style:    "trae",
 		Verified: false,
-		Note:     "CN 版与国际版差异仅在模型/账号/网络/合规，IDE 的规则目录与钩子机制是同一套 ⇒ 统一为一个适配器",
+		Note:     "The CN and international builds differ only in model/account/network/compliance; the IDE's rules directory and hook mechanism are identical, so both share one adapter.",
 	},
 	{
 		ID:       "codex",
@@ -108,7 +108,7 @@ var registry = []Agent{
 		HookAbs:  true,
 		Style:    "codex",
 		Verified: false,
-		Note:     "只认单文件 AGENTS.md（无目录模式）⇒ 走 SessionStart 注入，不碰用户自己的 AGENTS.md",
+		Note:     "Only reads a single-file AGENTS.md (no directory mode), so it goes through SessionStart injection and never touches your own AGENTS.md.",
 	},
 	{
 		ID:       "opencode",
@@ -117,7 +117,7 @@ var registry = []Agent{
 		HookFile: "opencode.json",
 		Style:    "json",
 		Verified: false,
-		Note:     "只认单文件 AGENTS.md ⇒ 走 SessionStart 注入，不碰用户自己的 AGENTS.md",
+		Note:     "Only reads a single-file AGENTS.md, so it goes through SessionStart injection and never touches your own AGENTS.md.",
 	},
 }
 

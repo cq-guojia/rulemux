@@ -22,16 +22,17 @@ func Sync(args []string) int {
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "rulemux: 读取配置失败: %v\n  提示：先运行 rulemux init 生成示例配置\n", err)
+		fmt.Fprintf(os.Stderr, "rulemux: failed to read config: %v\n  Hint: run rulemux init to generate a sample config\n", err)
 		return 1
 	}
-	// 开关优先：先确认请求的 agent 已支持，再校验配置内容（未验证的 agent 直接拒绝）。
+	// Feature-switch first: confirm the requested agent is supported before validating
+	// config content (unverified agents are rejected outright).
 	if reqAgent := f.Get("agent", ""); reqAgent != "" {
 		if a, ok := agents.Get(reqAgent); !ok || !a.Verified {
 			if ok && !a.Verified {
-				fmt.Fprintf(os.Stderr, "rulemux: agent %q 尚未支持：当前仅支持已验证的 %s\n", reqAgent, agents.SupportedSummary())
+				fmt.Fprintf(os.Stderr, "rulemux: agent %q is not supported yet: only verified agents are available: %s\n", reqAgent, agents.SupportedSummary())
 			} else {
-				fmt.Fprintf(os.Stderr, "rulemux: 未知 agent %q\n", reqAgent)
+				fmt.Fprintf(os.Stderr, "rulemux: unknown agent %q\n", reqAgent)
 			}
 			return 1
 		}
@@ -43,7 +44,7 @@ func Sync(args []string) int {
 
 	ws, err := workspace(wsFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
+		fmt.Fprintln(os.Stderr, "rulemux: cannot determine workspace:", err)
 		return 1
 	}
 
@@ -52,12 +53,12 @@ func Sync(args []string) int {
 	if len(targets) == 0 {
 		if requested != "" {
 			if a, ok := agents.Get(requested); ok && !a.Verified {
-				fmt.Fprintf(os.Stderr, "rulemux: agent %q 尚未支持：当前仅支持已验证的 %s\n", requested, agents.SupportedSummary())
+				fmt.Fprintf(os.Stderr, "rulemux: agent %q is not supported yet: only verified agents are available: %s\n", requested, agents.SupportedSummary())
 			} else {
-				fmt.Fprintf(os.Stderr, "rulemux: 未知 agent %q\n", requested)
+				fmt.Fprintf(os.Stderr, "rulemux: unknown agent %q\n", requested)
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, "rulemux: 当前没有可处理的已验证 agent")
+			fmt.Fprintln(os.Stderr, "rulemux: no verified agent to process")
 		}
 		return 1
 	}
@@ -74,7 +75,7 @@ func Sync(args []string) int {
 		srcs := unionSources(cfg, agents.ByRulesDir(a.RulesDir), ws)
 		res, err := engine.Sync(dir, srcs)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "rulemux: 同步 %s 失败: %v\n", a.ID, err)
+			fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
 			exit = 1
 			continue
 		}
@@ -87,7 +88,7 @@ func Sync(args []string) int {
 	// 记入账本：钩子是全局的，但规则文件落在各工作区本地。
 	// 卸载时要靠这份账本逐一回访清理，否则钩子一去、残留将永无机会被自动删除。
 	if err := state.Record(ws); err != nil {
-		fmt.Fprintf(os.Stderr, "rulemux: 警告：写入工作区账本失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
 	}
 	return exit
 }
@@ -132,21 +133,21 @@ func unionSources(cfg *config.Config, list []agents.Agent, workspace string) []c
 func printSyncResult(a agents.Agent, dir string, r *engine.SyncResult) {
 	fmt.Printf("rulemux: %s → %s\n", a.ID, dir)
 	if len(r.Copied) > 0 {
-		fmt.Println("  新增:", strings.Join(r.Copied, ", "))
+		fmt.Println("  Added:", strings.Join(r.Copied, ", "))
 	}
 	if len(r.Updated) > 0 {
-		fmt.Println("  更新:", strings.Join(r.Updated, ", "))
+		fmt.Println("  Updated:", strings.Join(r.Updated, ", "))
 	}
 	if len(r.Deleted) > 0 {
-		fmt.Println("  删除残留:", strings.Join(r.Deleted, ", "))
+		fmt.Println("  Removed residue:", strings.Join(r.Deleted, ", "))
 	}
 	if len(r.Skipped) > 0 {
-		fmt.Printf("  内容未变跳过: %d 个\n", len(r.Skipped))
+		fmt.Printf("  Unchanged, skipped: %d file(s)\n", len(r.Skipped))
 	}
 	for _, m := range r.Missing {
-		fmt.Fprintf(os.Stderr, "  ⚠ 源不存在: %s\n", m)
+		fmt.Fprintf(os.Stderr, "  ⚠ source file missing: %s\n", m)
 	}
 	if len(r.Skipped) == 0 && r.IsEmpty() {
-		fmt.Println("  无事可做（配置未列出该 agent 的源文件）")
+		fmt.Println("  Nothing to do (no source files listed for this agent)")
 	}
 }

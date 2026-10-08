@@ -31,7 +31,7 @@ func Install(a agents.Agent, workspace string) (string, error) {
 	case "codex":
 		return path, installCodex(path, a.ID)
 	default:
-		return path, fmt.Errorf("未知钩子配置风格 %q", a.Style)
+		return path, fmt.Errorf("unknown hook config style %q", a.Style)
 	}
 }
 
@@ -41,7 +41,7 @@ func installJSON(path, agentID, subcmd string) error {
 	var doc map[string]interface{}
 	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
 		if err := json.Unmarshal(b, &doc); err != nil {
-			return fmt.Errorf("解析现有钩子配置 %s 失败: %w", path, err)
+			return fmt.Errorf("failed to parse existing hook config %s: %w", path, err)
 		}
 	}
 	if doc == nil {

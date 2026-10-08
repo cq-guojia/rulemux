@@ -17,43 +17,43 @@ func Doctor(args []string) int {
 
 	ws, err := workspace(f.Get("workspace", ""))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "rulemux: 无法确定工作区:", err)
+		fmt.Fprintln(os.Stderr, "rulemux: cannot determine workspace:", err)
 		return 1
 	}
 
 	cfg, cfgErr := config.Load(cfgPath)
 
 	fmt.Println("rulemux doctor")
-	fmt.Println("工作区:", ws)
+	fmt.Println("Workspace:", ws)
 
-	// 1. 本体位置与 PATH（Claude Code 的 exec 形式钩子要求 rulemux 在 PATH 上）
+	// 1. Binary location and PATH (Claude Code's exec-style hook requires rulemux on PATH)
 	if self, err := os.Executable(); err == nil {
-		fmt.Println("本体:", self)
+		fmt.Println("Binary:", self)
 	}
 	if p, err := exec.LookPath("rulemux"); err == nil {
-		fmt.Println("PATH 查找:", p)
+		fmt.Println("PATH lookup:", p)
 	} else {
-		fmt.Println("PATH 查找: ✗ 未找到 rulemux —— 钩子若用 exec 形式会失败，请确保它在 PATH 上")
+		fmt.Println("PATH lookup: ✗ rulemux not found on PATH — exec-style hooks will fail; make sure it is installed there")
 	}
 
-	// 2. 配置
+	// 2. Config
 	if cfgErr != nil {
-		fmt.Printf("配置: ✗ %v\n", cfgErr)
-		fmt.Println("  提示：先运行 rulemux init")
+		fmt.Printf("Config: ✗ %v\n", cfgErr)
+		fmt.Println("  Hint: run rulemux init first")
 	} else {
-		fmt.Printf("配置: ✓ %s（%d 条 source）\n", cfgPath, len(cfg.Sources))
+		fmt.Printf("Config: ✓ %s (%d source(s))\n", cfgPath, len(cfg.Sources))
 		for _, s := range cfg.Sources {
-			target := "全部 agent"
+			target := "all agents"
 			if len(s.Agents) > 0 {
 				target = strings.Join(s.Agents, ", ")
 			}
-			scope := "全部工作区"
+			scope := "all workspaces"
 			if len(s.Workspaces) > 0 {
 				scope = strings.Join(s.Workspaces, ", ")
 			}
 			skip := ""
 			if !s.MatchesWorkspace(ws) {
-				skip = " ← 当前工作区不匹配，本次跳过"
+				skip = " ← skipped: not the current workspace"
 			}
 			for _, p := range s.Paths {
 				mark := "✓"
@@ -68,8 +68,8 @@ func Doctor(args []string) int {
 		}
 	}
 
-	// 3. 各 agent
-	fmt.Println("\n各 agent：")
+	// 3. Each agent
+	fmt.Println("\nAgents:")
 	for _, a := range agents.All() {
 		mark := "✓"
 		if !a.Verified {
@@ -78,26 +78,26 @@ func Doctor(args []string) int {
 		fmt.Printf("  %s %-10s %s\n", mark, a.ID, a.Tier)
 
 		if dir := a.RulesDirAbs(ws); dir != "" {
-			state := "目录不存在（首次 sync 会创建）"
+			state := "directory does not exist (created on first sync)"
 			if st, err := os.Stat(dir); err == nil && st.IsDir() {
-				state = "目录已存在"
+				state = "directory exists"
 			}
-			fmt.Printf("      规则目录: %s（%s）\n", dir, state)
+			fmt.Printf("      Rules dir: %s (%s)\n", dir, state)
 		} else {
-			fmt.Println("      规则目录: 无（Tier-2，走 SessionStart 注入）")
+			fmt.Println("      Rules dir: none (Tier-2, injected via SessionStart)")
 		}
 
 		hookPath := a.HookFileAbs(ws)
 		if b, err := os.ReadFile(hookPath); err == nil && strings.Contains(string(b), "rulemux") {
-			fmt.Printf("      钩子: ✓ 已安装 → %s\n", hookPath)
+			fmt.Printf("      Hook: ✓ installed → %s\n", hookPath)
 		} else {
-			fmt.Printf("      钩子: ✗ 未安装 → %s（运行 rulemux init）\n", hookPath)
+			fmt.Printf("      Hook: ✗ not installed → %s (run rulemux init)\n", hookPath)
 		}
 		if a.Note != "" {
-			fmt.Printf("      备注: %s\n", a.Note)
+			fmt.Printf("      Note: %s\n", a.Note)
 		}
 	}
 
-	fmt.Println("\n⚠ = 该 agent 的规则目录 / 钩子落点尚未核实，请用 rulemux verify 实测坐实。")
+	fmt.Println("\n⚠ = this agent's rules dir / hook location is not verified yet; confirm it with rulemux verify.")
 	return 0
 }

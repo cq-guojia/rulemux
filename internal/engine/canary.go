@@ -26,9 +26,9 @@ func WriteCanary(dir, token string) (string, error) {
 	}
 	p := filepath.Join(dir, CanaryName)
 	content := "# rulemux canary\n\n" +
-		"这是 rulemux 的验收探针。如果你能在上下文里读到下面这行暗号，\n" +
-		"说明「SessionStart 钩子复制 → 本会话加载」这条链路是通的。\n\n" +
-		"暗号：" + token + "\n"
+		"This is rulemux's acceptance probe. If you can read the token below from your rules,\n" +
+		"then the \"SessionStart hook copy -> loaded in this session\" chain works.\n\n" +
+		"Token: " + token + "\n"
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		return "", err
 	}

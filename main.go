@@ -10,33 +10,49 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/cmd"
 )
 
 // version 是 rulemux 的版本号。
 const version = "0.1.0"
 
+// usage prints the top-level help.
+//
+// The agent list is generated from registry.Supported() (i.e. Verified adapters only)
+// so the help can never advertise an adapter that is not installable yet.
 func usage() {
-	fmt.Fprint(os.Stderr, `rulemux - 一份规则，投递到各家 AI coding agent
+	fmt.Fprint(os.Stderr, `rulemux - one set of rules, delivered to every AI coding agent
 
-用法:
-  rulemux sync    [--agent <id>] [--config <path>] [--workspace <dir>]   同步规则（被各 agent 的 SessionStart 钩子调用）
-  rulemux inject  --agent <id>  [--config <path>]                        Tier-2：把规则输出到 stdout 供钩子注入
-  rulemux init    [--config <path>] [--workspace <dir>]                  生成示例配置并为各 agent 安装 SessionStart 钩子
-  rulemux doctor  [--config <path>] [--workspace <dir>]                  环境自检
-  rulemux verify  [--agent <id>] [--clean] [--workspace <dir>]           canary 验收
+USAGE:
+  rulemux sync      [--agent <id>] [--config <path>] [--workspace <dir>]   Sync rules (invoked by each agent's SessionStart hook)
+  rulemux inject    --agent <id>   [--config <path>]                       Tier-2: print rules to stdout for hook injection
+  rulemux init      --agent <id[,id...]> [--config <path>] [--workspace <dir>]
+                                                                          Generate a sample config + install SessionStart hooks
+  rulemux doctor    [--config <path>] [--workspace <dir>]                  Environment self-check
+  rulemux verify    --agent <id> [--clean] [--workspace <dir>]             Canary acceptance test
+  rulemux uninstall --agent <id[,id...]> | --off | --all [--yes]           Remove rulemux hooks and synced files
 
-支持的 agent:
-  claude     Claude Code      Tier-1  .claude/rules/
-  codebuddy  CodeBuddy        Tier-1  .codebuddy/rules/
-  workbuddy  WorkBuddy        Tier-1  .codebuddy/rules/（与 CodeBuddy 同目录，合并处理）
-  trae       Trae（CN/国际版统一） Tier-1  .trae/rules/
-  codex      Codex            Tier-2  注入（不碰用户 AGENTS.md）
-  opencode   OpenCode         Tier-2  注入（不碰用户 AGENTS.md）
+`)
+	fmt.Fprint(os.Stderr, "SUPPORTED AGENTS (only these can be installed):\n")
+	for _, a := range agents.Supported() {
+		tier := "Tier-1"
+		if a.Tier == agents.Tier2 {
+			tier = "Tier-2"
+		}
+		target := a.RulesDir
+		if target == "" {
+			target = "inject (your AGENTS.md is never touched)"
+		}
+		fmt.Fprintf(os.Stderr, "  %-11s %-7s %s\n", a.ID, tier, target)
+	}
+	fmt.Fprintf(os.Stderr, `
+NOTE: other agents may already be registered but are NOT yet enabled; they are
+omitted here until their adapter passes canary verification.
 
-其它:
-  --version   打印版本
-  --help      打印本帮助
+OTHER:
+  --version   Print version
+  --help      Print this help
 `)
 }
 
@@ -67,7 +83,7 @@ func main() {
 	case "uninstall":
 		os.Exit(cmd.Uninstall(args[1:]))
 	default:
-		fmt.Fprintf(os.Stderr, "rulemux: 未知子命令 %q\n\n", args[0])
+		fmt.Fprintf(os.Stderr, "rulemux: unknown subcommand %q\n\n", args[0])
 		usage()
 		os.Exit(2)
 	}

@@ -78,7 +78,7 @@ func parseAgents(s string) ([]agents.Agent, error) {
 			return nil, fmt.Errorf("unknown agent %q (supported: %s)", p, agents.SupportedSummary())
 		}
 		if !a.Verified {
-			return nil, fmt.Errorf("agent %q 尚未支持安装：当前仅支持已验证的 %s（其余 agent 还在做，未就绪前不允许安装）", a.ID, agents.SupportedSummary())
+			return nil, fmt.Errorf("agent %q is not installable yet: only verified agents are supported: %s (the other adapters are still in progress and cannot be installed until ready)", a.ID, agents.SupportedSummary())
 		}
 		out = append(out, a)
 	}

@@ -9,70 +9,79 @@ import (
 	"github.com/cq-guojia/rulemux/internal/hooks"
 )
 
-// exampleConfig 是 init 首次运行时生成的默认配置内容。
+// exampleConfig is the default config content written on the first run of init.
 //
-// 设计原则（与用户约定一致）：
-//   - 顶部用注释把每一项配置方式都写清楚，用户照着改即可；
-//   - 默认没有任何生效的 [[source]]（示例整段注释掉），即“空 / 只有初始配置”状态，
-//     不塞任何示例路径或测试文档；用户自行取消注释或新增 [[source]] 后才会有动作。
-const exampleConfig = `# rulemux 配置文件
+// Design principles (agreed with the user):
+//   - the header comments explain every option, so the user only edits what they need;
+//   - no active [[source]] by default (all examples commented out) — a clean slate with
+//     no sample paths or test documents; nothing happens until the user uncomments an
+//     example or adds their own [[source]] with real paths.
+const exampleConfig = `# rulemux configuration file
 #
-# 默认位置：~/.rulemux/config.toml（也可用各命令的 --config <path> 指定别的路径）
+# Default location: ~/.rulemux/config.toml (or pass --config <path> to any command)
 #
-# rulemux 会在 agent 会话开始时，把下面每条 [[source]] 描述的“源规则文件”
-# 真实拷贝进对应 agent 的原生规则目录（带 .rulemux__ 前缀，删残留、不碰你的文件）。
+# At the start of every agent session, rulemux copies the "source rule files" described
+# by each [[source]] below into that agent's native rules directory, using a .rulemux__
+# prefix: it cleans up its own residue and never touches your own files.
 #
-# 每条 [[source]] 支持三个字段（都可选，省略有默认值）：
+# Each [[source]] accepts these fields (all optional, each has a default):
 #
-#   path      源文件路径，磁盘任意位置均可。两种写法都支持：
-#               path = "/abs/path/to/your-rules.md"          # 单个文件
-#               path = ["/abs/path/a.md", "/abs/path/b.md"]  # 数组（同批文件共享下面的 agents / workspace）
+#   path      Source file(s); may live anywhere on disk. Both forms work:
+#               path = "/abs/path/to/your-rules.md"          # a single file
+#               path = ["/abs/path/a.md", "/abs/path/b.md"]  # a list (shares agents/workspace below)
 #
-#   agents    这批文件投递给哪些 agent；省略 = 投递给全部「已支持」的 agent。取值（当前已验证、可安装）：
-#               codebuddy   Tier-1（真实拷贝进 .codebuddy/rules）
-#               workbuddy   Tier-1（与 codebuddy 共用目录）
-#             其余 agent（claude / trae / codex / opencode）尚未坐实验证，暂不允许安装或投递；
-#             等对应适配坐实、被标记为 verified 后，安装程序会自动开放，无需改这里。
-#             示例：agents = ["codebuddy"]
+#   agents    Which agents receive this batch; omitted = every *supported* agent.
+#             Current verified values (installable):
+#               codebuddy   Tier-1 (really copied into .codebuddy/rules)
+#               workbuddy   Tier-1 (shares the .codebuddy/rules directory)
+#             Other agents (claude / trae / codex / opencode) have not passed canary
+#             verification yet, so they cannot be installed or targeted for now;
+#             once their adapters are proven they open up automatically — no edit needed here.
+#             Example: agents = ["codebuddy"]
 #
-#   workspace 这批规则适用于哪些工作区，写法：
-#               workspace = "/abs/path/to/proj"          # 单个工作区（完全匹配）
-#               workspace = ["/abs/path/proj-a", "/b"]   # 数组，命中其一即可
-#               workspace = "*"  /  "**"  /  "all"       # 所有工作区（全局通配）
-#               支持业界标准 glob："*" 单段、"**" 跨段递归，可出现在中间，例如：
-#               workspace = "/abs/**/B"                 # 匹配 /abs 下任意深度的名为 B 的工作区
-#               workspace = "**/B"                      # 匹配任意位置、任意层级名为 B 的工作区
+#   workspace Which workspaces these rules apply to. Forms:
+#               workspace = "/abs/path/to/proj"          # single workspace (exact match)
+#               workspace = ["/abs/path/proj-a", "/b"]   # list: matching any one is enough
+#               workspace = "*"  /  "**"  /  "all"       # every workspace (global wildcard)
+#             Standard globbing is supported: "*" is one segment, "**" recurses across
+#             segments and may appear in the middle, e.g.:
+#               workspace = "/abs/**/B"                 # any depth under /abs named B
+#               workspace = "**/B"                      # B at any location or nesting level
 #
-# ── 进阶：用“组”打包，减少重复 ─────────────────────────────────────────────
-# 文件多了之后，可以把常用文件 / 工作区打包成“组”，在 [[source]] 里用组名引用。
+# --- Advanced: bundle things into "groups" to avoid repetition -------------------
+# Once you have many files, bundle your common files / workspaces into groups and
+# reference them by name from [[source]].
 #
-# 文件组 [[file_group]]：把若干规则文件打包，供 [[source]] 用 groups 引用。
-#   name  组名（必填）
-#   path  组内文件；单个或数组写法均可
-#   use   引用其它文件组——【数组，可写多个，支持嵌套】：
-#           use = ["dev"]            # 单个
-#           use = ["dev", "qa"]      # 多个：同时复用这几个组
-#           # A 组引入 B 组，再加自己的文件——A 最终 = B 的文件 + A 的文件
+# File group [[file_group]]: bundles rule files, referenced via groups.
+#   name  Group name (required)
+#   path  Files inside the group; single value or list
+#   use   Reference other file groups -- [LIST, MAY BE MULTIPLE, NESTS]:
+#           use = ["dev"]            # one group
+#           use = ["dev", "qa"]      # several: reuse all of them at once
+#           # group A pulls in group B plus its own files => A == B's files + A's files
 #
-# 工作区分组 [[workspace_group]]：把若干工作区打包，供 [[source]] 用 workspace_groups 引用。
-#   name       组名（必填）
-#   workspace  组内工作区；单个或数组写法均可，支持上面的 glob
-#   use        引用其它工作区分组——【数组，可写多个，支持嵌套】：
-#           use = ["dev"]            # 单个
-#           use = ["dev", "qa"]      # 多个：同时复用这几个工作区分组
+# Workspace group [[workspace_group]]: bundles workspaces, referenced via workspace_groups.
+#   name       Group name (required)
+#   workspace  Workspaces inside the group; single value or list, globs allowed
+#   use        Reference other workspace groups -- [LIST, MAY BE MULTIPLE, NESTS]:
+#           use = ["dev"]            # one group
+#           use = ["dev", "qa"]      # several: reuse all of them at once
 #
-# 在 [[source]] 里：
-#   groups            = ["组A", "组B"]   # 引用文件组（数组，可写多个；自动展开为组内所有文件）
-#   workspace_groups  = ["组X", "组Y"]   # 引用工作区分组（数组，可写多个）
-#   【可混合书写】groups 与 path 能同时写、workspace_groups 与 workspace 也能同时写：
-#       groups = ["base", "proj"]            # 我用了 base、proj 这两个组里的所有文件
-#       path   = ["/abs/path/extra.md"]      # 另外再单独指定这一个文件
-#     ⇒ 这条 source 投递的 = base 组文件 + proj 组文件 + extra.md；三者合并后按值去重。
-#   （workspace_groups / workspace 同理：既可引用分组，也可同时单列单个工作区。）
-#   组间重复的文件 / 工作区无所谓——程序最后按值去重，每个只做一次。
-#   文件组与工作区分组是两套独立的命名空间，允许同名（它们分别位于不同的区域）。
+# Inside a [[source]]:
+#   groups            = ["gA", "gB"]     # file groups (list, may be multiple; expands to their files)
+#   workspace_groups  = ["gX", "gY"]     # workspace groups (list, may be multiple)
+#   [MIXING IS ALLOWED] groups can be combined with path, and workspace_groups with workspace:
+#       groups = ["base", "proj"]            # use every file in the base and proj groups
+#       path   = ["/abs/path/extra.md"]      # ...and additionally this one file
+#     => this source ships files of base + files of proj + extra.md, deduplicated by value.
+#   (workspace_groups / workspace work the same way: reference a group and also list a
+#    standalone workspace at the same time.)
+#   Duplicates across groups are harmless -- everything is deduplicated by value at the end,
+#   so each file is processed exactly once.
+#   File groups and workspace groups are separate namespaces; identical names are allowed.
 #
-# 下面都是示例，整段被注释掉、不会生效。需要哪个就去掉前面的 #，并改成你的真实值。
+# Everything below is commented out and inactive. Uncomment what you need and replace
+# the placeholders with your real values.
 
 # [[file_group]]
 # name = "base"
@@ -80,7 +89,7 @@ const exampleConfig = `# rulemux 配置文件
 
 # [[file_group]]
 # name = "proj"
-# use = ["base"]                       # 嵌套引用 base 组（数组，可写多个：use = ["base", "dev"]）
+# use = ["base"]                       # nests the base group (list, may be multiple: use = ["base", "dev"])
 # path = ["/abs/path/to/project-a.md"]
 
 # [[workspace_group]]
@@ -89,15 +98,15 @@ const exampleConfig = `# rulemux 配置文件
 
 # [[workspace_group]]
 # name = "qa"
-# use = ["dev"]                        # 复用 dev 组（数组，可写多个）
+# use = ["dev"]                        # reuses the dev group (list, may be multiple)
 # workspace = ["/abs/path/to/proj-3"]
 
 # [[source]]
-# groups = ["base", "proj"]            # 引用文件组（数组，可多个；自动展开成组内所有文件）
-# path = ["/abs/path/to/extra.md"]     # 同时混列单个文件：这条 source = base+proj 组文件 + 该文件
+# groups = ["base", "proj"]            # file groups (list, may be multiple; expands to their files)
+# path = ["/abs/path/to/extra.md"]     # plus a standalone file: this source = base + proj + this file
 # agents = ["codebuddy"]
-# workspace_groups = ["dev"]          # 引用工作区分组（数组，可多个；展开成组内所有工作区）
-# workspace = ["/abs/path/to/standalone"]   # 同时混列单个工作区
+# workspace_groups = ["dev"]          # workspace groups (list, may be multiple; expands to their workspaces)
+# workspace = ["/abs/path/to/standalone"]   # plus a standalone workspace
 `
 
 // Init installs the SessionStart hook for the agent(s) named by --agent.
@@ -144,7 +153,7 @@ func Init(args []string) int {
 			return 1
 		}
 		fmt.Println("✓ sample config created:", cfgPath)
-		fmt.Println("  ⚠ 默认没有任何生效的 [[source]]；取消注释示例或新增 [[source]] 并填好你的规则文件路径")
+		fmt.Println("  ⚠ no active [[source]] yet; uncomment an example or add your own [[source]] with real rule file paths")
 	} else {
 		fmt.Println("· config exists, skipped:", cfgPath)
 	}

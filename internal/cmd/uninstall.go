@@ -87,9 +87,10 @@ func Uninstall(args []string) int {
 			}
 		}
 
-		// 回访账本里记录的其它工作区：钩子已全局移除，这里不补清就再没机会了。
+		// Revisit the other workspaces recorded in the ledger: the hook is now gone,
+		// so without this sweep their residue would never be removed.
 		if cleaned, skipped := sweepRecordedWorkspaces(a, ws); cleaned > 0 || skipped > 0 {
-			fmt.Printf("  ✓ %-10s 其它工作区：清理 %d 个残留文件；%d 个工作区已不存在而跳过（账本保留，路径重现仍会回访）\n",
+			fmt.Printf("  ✓ %-10s other workspaces: removed %d residue file(s); skipped %d workspace(s) that no longer exist (kept in the ledger — revisited if the path reappears)\n",
 				a.ID, cleaned, skipped)
 		}
 	}
@@ -109,12 +110,13 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 		fmt.Printf("  - %s (%s)\n", a.ID, kind)
 	}
 	if others := state.Others(ws); len(others) > 0 {
-		fmt.Printf("  另外，钩子是装在 user 级 host 配置里的（全局生效），本次卸载后不再有 sync 触发。\n")
-		fmt.Printf("  因此还会按账本回访以下曾同步过的 %d 个工作区，一并清理残留文件：\n", len(others))
+		fmt.Printf("  Note: the hook lives in the user-level host config (applies globally), so after\n")
+		fmt.Printf("  this uninstall no sync will ever fire again. rulemux will therefore also revisit\n")
+		fmt.Printf("  these %d previously synced workspace(s) from its ledger and clean their residue:\n", len(others))
 		for _, w := range others {
 			fmt.Printf("    - %s\n", w)
 		}
-		fmt.Printf("  （只删 .rulemux__ 前缀的我方文件，你的源文件与其它文件一律不碰）\n")
+		fmt.Printf("  (only files with the .rulemux__ prefix are removed; your source files and everything else are untouched)\n")
 	}
 	fmt.Print("Proceed? [y/N] ")
 

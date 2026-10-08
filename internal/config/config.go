@@ -227,11 +227,11 @@ func (s Source) MatchesWorkspace(ws string) bool {
 // Validate 校验配置是否可用。
 func (c *Config) Validate() error {
 	if len(c.Sources) == 0 {
-		return fmt.Errorf("配置 %s 中没有 [[source]]，请先用 rulemux init 生成示例配置并填写源文件", c.File)
+		return fmt.Errorf("config %s has no [[source]]; run rulemux init first to generate a sample config and fill in your source files", c.File)
 	}
 	for i, s := range c.Sources {
 		if len(s.Paths) == 0 {
-			return fmt.Errorf("配置 %s 第 %d 条 [[source]] 缺少 path", c.File, i+1)
+			return fmt.Errorf("config %s: [[source]] #%d is missing path", c.File, i+1)
 		}
 	}
 	return nil
@@ -377,10 +377,10 @@ func (c *Config) resolveGroups() error {
 	for i := range c.FileGroups {
 		g := &c.FileGroups[i]
 		if g.Name == "" {
-			return fmt.Errorf("配置 %s 存在未命名的 [[file_group]]", c.File)
+			return fmt.Errorf("config %s has an unnamed [[file_group]]", c.File)
 		}
 		if _, dup := fgMap[g.Name]; dup {
-			return fmt.Errorf("配置 %s 中 [[file_group]] 名称 %q 重复定义", c.File, g.Name)
+			return fmt.Errorf("config %s: duplicate [[file_group]] name %q", c.File, g.Name)
 		}
 		fgMap[g.Name] = g
 	}
@@ -388,10 +388,10 @@ func (c *Config) resolveGroups() error {
 	for i := range c.WorkspaceGroups {
 		g := &c.WorkspaceGroups[i]
 		if g.Name == "" {
-			return fmt.Errorf("配置 %s 存在未命名的 [[workspace_group]]", c.File)
+			return fmt.Errorf("config %s has an unnamed [[workspace_group]]", c.File)
 		}
 		if _, dup := wgMap[g.Name]; dup {
-			return fmt.Errorf("配置 %s 中 [[workspace_group]] 名称 %q 重复定义", c.File, g.Name)
+			return fmt.Errorf("config %s: duplicate [[workspace_group]] name %q", c.File, g.Name)
 		}
 		wgMap[g.Name] = g
 	}
@@ -401,10 +401,10 @@ func (c *Config) resolveGroups() error {
 	expandFG = func(name string, visiting map[string]bool, out *[]string) error {
 		g, ok := fgMap[name]
 		if !ok {
-			return fmt.Errorf("配置 %s 引用了未定义的文件组 %q", c.File, name)
+			return fmt.Errorf("config %s references undefined file group %q", c.File, name)
 		}
 		if visiting[name] {
-			return fmt.Errorf("配置 %s 的文件组存在循环引用：%s", c.File, name)
+			return fmt.Errorf("config %s has a circular reference in file groups: %s", c.File, name)
 		}
 		visiting[name] = true
 		defer delete(visiting, name)
@@ -422,10 +422,10 @@ func (c *Config) resolveGroups() error {
 	expandWG = func(name string, visiting map[string]bool, out *[]string) error {
 		g, ok := wgMap[name]
 		if !ok {
-			return fmt.Errorf("配置 %s 引用了未定义的工作区分组 %q", c.File, name)
+			return fmt.Errorf("config %s references undefined workspace group %q", c.File, name)
 		}
 		if visiting[name] {
-			return fmt.Errorf("配置 %s 的工作区分组存在循环引用：%s", c.File, name)
+			return fmt.Errorf("config %s has a circular reference in workspace groups: %s", c.File, name)
 		}
 		visiting[name] = true
 		defer delete(visiting, name)

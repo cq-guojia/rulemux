@@ -88,7 +88,7 @@ func (r *SyncResult) IsEmpty() bool {
 // Sync 把源列表同步进目标目录。整个过程无状态文件，靠内容比对 + 前缀删残留保证幂等。
 func Sync(dir string, srcs []config.Source) (*SyncResult, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建规则目录 %s 失败: %w", dir, err)
+		return nil, fmt.Errorf("failed to create rules directory %s: %w", dir, err)
 	}
 
 	plan := BuildPlan(dir, srcs)
@@ -110,7 +110,7 @@ func Sync(dir string, srcs []config.Source) (*SyncResult, error) {
 			continue
 		}
 		if err := os.WriteFile(it.DstPath, data, 0o644); err != nil {
-			return nil, fmt.Errorf("写入 %s 失败: %w", it.DstPath, err)
+			return nil, fmt.Errorf("failed to write %s: %w", it.DstPath, err)
 		}
 		if errOld == nil {
 			res.Updated = append(res.Updated, it.DstName)
@@ -122,7 +122,7 @@ func Sync(dir string, srcs []config.Source) (*SyncResult, error) {
 	// 删残留：带前缀但不在本次计划内的一律删除
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("读取规则目录 %s 失败: %w", dir, err)
+		return nil, fmt.Errorf("failed to read rules directory %s: %w", dir, err)
 	}
 	for _, e := range entries {
 		if e.IsDir() {
@@ -136,7 +136,7 @@ func Sync(dir string, srcs []config.Source) (*SyncResult, error) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
-			return nil, fmt.Errorf("删除残留 %s 失败: %w", name, err)
+			return nil, fmt.Errorf("failed to remove residue %s: %w", name, err)
 		}
 		res.Deleted = append(res.Deleted, name)
 	}
