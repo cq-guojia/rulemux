@@ -34,9 +34,9 @@ rulemux doctor                   # 3. 环境自检：二进制/PATH、各 agent 
 rulemux verify                   # 4. canary 验收：开新会话问 agent 能否念出暗号 RULEMUX-CANARY-43371345
 # 5. 之后每次开新会话，钩子自动触发 rulemux sync --agent X
 
-# 卸载
-rulemux uninstall --agent codex  # 卸单个 agent 的钩子（及 Tier-1 同步文件）
-rulemux uninstall --off          # 卸全部 agent
+# 卸载（--agent 与 --off/--all 二选一、必带其一；执行前会交互确认，--yes 跳过）
+rulemux uninstall --agent codex            # 卸单个 agent（支持逗号多个：--agent codebuddy,codex）
+rulemux uninstall --off                    # 卸全部 agent（--all 等价）
 ```
 
 > ⚠️ **`init` 必须指定 `--agent`**：rulemux 不会扫描你机器上装了哪些 agent，你得明确说要装哪个（可逗号分隔多个，如 `--agent codebuddy,codex`）。

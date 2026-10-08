@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/engine"
@@ -11,9 +13,14 @@ import (
 )
 
 // Uninstall removes rulemux's SessionStart hook (and, for Tier-1 agents, the
-// synced .rulemux__* files) for the agent(s) named by --agent.
+// synced .rulemux__* files) for the agent(s) named by --agent, OR for every
+// agent when --off / --all is given.
 //
-// With --off, or with no --agent at all, it removes everything for every agent.
+// Exactly one mode is required:
+//   - --agent <id[,id...]>   remove only the named agent(s)
+//   - --off | --all          remove for ALL agents
+//
+// Nothing is removed until the user confirms (unless --yes is passed).
 func Uninstall(args []string) int {
 	f := ParseFlags(args)
 	if f.Has("help") || f.Has("h") {
@@ -21,11 +28,22 @@ func Uninstall(args []string) int {
 		return 0
 	}
 
-	all := f.Has("off")
+	all := f.Has("off") || f.Has("all")
 	agentArg := f.Get("agent", "")
 
+	// Mutually-exclusive, exactly-one-required.
+	if !all && agentArg == "" {
+		fmt.Fprintln(os.Stderr, "rulemux uninstall: must specify either --agent <id[,id...]> OR --off/--all")
+		fmt.Fprintln(os.Stderr, "  run 'rulemux uninstall --help' for details")
+		return 2
+	}
+	if all && agentArg != "" {
+		fmt.Fprintln(os.Stderr, "rulemux uninstall: --agent and --off/--all are mutually exclusive")
+		return 2
+	}
+
 	var targets []agents.Agent
-	if all || agentArg == "" {
+	if all {
 		targets = agents.All()
 	} else {
 		ts, err := parseAgents(agentArg)
@@ -42,11 +60,13 @@ func Uninstall(args []string) int {
 		return 1
 	}
 
-	scope := "all agents"
-	if !all && agentArg != "" {
-		scope = agentArg
+	// Interactive confirmation, unless --yes skips it (for scripts/CI).
+	if !f.Has("yes") {
+		if ok := confirmUninstall(targets, ws); !ok {
+			fmt.Println("rulemux uninstall: cancelled")
+			return 0
+		}
 	}
-	fmt.Printf("rulemux uninstall (%s) in %s\n", scope, ws)
 
 	for _, a := range targets {
 		if err := hooks.Uninstall(a, ws); err != nil {
@@ -67,6 +87,30 @@ func Uninstall(args []string) int {
 		}
 	}
 	return 0
+}
+
+// confirmUninstall prints the targets and asks the user to confirm.
+// Returns false on any answer other than an explicit yes, or on EOF
+// (non-interactive stdin without --yes) so we fail safe.
+func confirmUninstall(targets []agents.Agent, ws string) bool {
+	fmt.Printf("\nrulemux uninstall: about to remove rulemux from %d agent(s) in %s\n", len(targets), ws)
+	for _, a := range targets {
+		kind := "hook only"
+		if a.RulesDirAbs(ws) != "" {
+			kind = "hook + synced files"
+		}
+		fmt.Printf("  - %s (%s)\n", a.ID, kind)
+	}
+	fmt.Print("Proceed? [y/N] ")
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Println() // EOF / non-interactive: abort safely
+		return false
+	}
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line == "y" || line == "yes"
 }
 
 // removeRuleFiles deletes every .rulemux__* file in dir (Tier-1 leftovers).
@@ -90,9 +134,13 @@ func UninstallHelp() {
 	fmt.Print(`rulemux uninstall - remove rulemux from one or all agents
 
 USAGE:
-  rulemux uninstall --agent <id[,id...]> [--workspace <dir>]
-  rulemux uninstall --off                 [--workspace <dir>]
-  rulemux uninstall                       [--workspace <dir>]
+  rulemux uninstall --agent <id[,id...]> [--workspace <dir>] [--yes]
+  rulemux uninstall --off  | --all        [--workspace <dir>] [--yes]
+
+EXACTLY ONE MODE IS REQUIRED (they are mutually exclusive):
+  --agent <id[,id...]>   Remove only the named agent(s), e.g. --agent codex
+                          or --agent codebuddy,codex.
+  --off  | --all          Remove hooks (and Tier-1 synced files) for ALL agents.
 
 WHAT IT DOES:
   For each target agent, it:
@@ -100,11 +148,11 @@ WHAT IT DOES:
     2. deletes the synced .rulemux__* files from that agent's rules dir
        (Tier-1 agents only; Tier-2 agents like codex/opencode keep nothing on disk).
 
-WHICH AGENTS:
-  --agent <id[,id...]>   Remove only the named agent(s), e.g. --agent codex
-                          or --agent codebuddy,codex.
-  --off                   Remove hooks for ALL agents.
-  (no --agent)           Equivalent to --off: remove for ALL agents.
+CONFIRMATION:
+  Before anything is removed, rulemux lists the targets and asks "Proceed? [y/N]".
+  Type y or yes to continue; anything else (or EOF on non-interactive stdin)
+  cancels safely.
+  Pass --yes to skip the prompt (for scripts / CI).
 
 Supported ids: claude, codebuddy, workbuddy, trae, codex, opencode.
 
@@ -112,6 +160,7 @@ OTHER FLAGS:
   --workspace <dir>   Workspace to act in (default: current dir).
                       Hooks are per-workspace, so uninstall in the same
                       workspace you ran init in.
+  --yes               Skip the confirmation prompt.
   --help, -h          Show this help.
 
 NOTE: this only removes rulemux's own artifacts. Your agent's other
