@@ -54,18 +54,20 @@ func installJSON(path, agentID, subcmd string) error {
 	}
 	list, _ := hooksMap["SessionStart"].([]interface{})
 
-	if !hasRulemuxHook(list, agentID) {
-		list = append(list, map[string]interface{}{
-			"matcher": "",
-			"hooks": []interface{}{
-				map[string]interface{}{
-					"type":    "command",
-					"command": "rulemux",
-					"args":    []string{subcmd, "--agent", agentID},
-				},
+	// 参数必须写进 command 整串，不能用单独的 args 字段：宿主（如 CodeBuddy）只执行
+	// command 字段本身、会丢弃 args（实测见 docs/design/external/agent-rules-dirs.md §二）。
+	// 旧式把参数放在 args 里的钩子会被执行成裸 `rulemux`（无参数，只打印帮助、什么都不干），
+	// 所以这里先剔除该 agent 的旧钩子、再统一写新式（幂等，且能把旧配置迁移过来）。
+	list = dropRulemuxHooks(list, agentID)
+	list = append(list, map[string]interface{}{
+		"matcher": "",
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"type":    "command",
+				"command": fmt.Sprintf("rulemux %s --agent %s", subcmd, agentID),
 			},
-		})
-	}
+		},
+	})
 	hooksMap["SessionStart"] = list
 	doc["hooks"] = hooksMap
 
@@ -80,38 +82,66 @@ func installJSON(path, agentID, subcmd string) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
-// hasRulemuxHook 判断是否已装过该 agent 的 rulemux 钩子（保证幂等、不重复装）。
-func hasRulemuxHook(list []interface{}, agentID string) bool {
-	for _, g := range list {
-		gm, ok := g.(map[string]interface{})
+// commandLineOf 返回一个 hook 的完整命令行：优先用 command 字段本身；若存在旧式 args
+// 字段（历史写法）则拼回去，以便识别并迁移旧配置。
+func commandLineOf(hm map[string]interface{}) (string, bool) {
+	cmd, ok := hm["command"].(string)
+	if !ok || cmd == "" {
+		return "", false
+	}
+	parts := []string{cmd}
+	if args, ok := hm["args"].([]interface{}); ok {
+		for _, x := range args {
+			if s, ok := x.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+	}
+	return strings.Join(parts, " "), true
+}
+
+// isRulemuxHookFor 报告一个 SessionStart 分组是否本工具针对 agentID 的钩子（新旧写法都认）。
+func isRulemuxHookFor(g interface{}, agentID string) bool {
+	gm, ok := g.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	hs, ok := gm["hooks"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, h := range hs {
+		hm, ok := h.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		hs, ok := gm["hooks"].([]interface{})
+		line, ok := commandLineOf(hm)
 		if !ok {
 			continue
 		}
-		for _, h := range hs {
-			hm, ok := h.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			cmd, ok := hm["command"].(string)
-			if !ok || cmd != "rulemux" {
-				continue
-			}
-			args, ok := hm["args"].([]interface{})
-			if !ok {
-				continue
-			}
-			for _, x := range args {
-				if s, ok := x.(string); ok && s == agentID {
-					return true
-				}
+		fields := strings.Fields(line)
+		if len(fields) == 0 || filepath.Base(fields[0]) != "rulemux" {
+			continue
+		}
+		for i, f := range fields {
+			if (f == "--agent" && i+1 < len(fields) && fields[i+1] == agentID) || f == "--agent="+agentID {
+				return true
 			}
 		}
 	}
 	return false
+}
+
+// dropRulemuxHooks 返回剔除「本工具针对 agentID 的钩子」后的列表，其余条目原样保留。
+func dropRulemuxHooks(list []interface{}, agentID string) []interface{} {
+	kept := make([]interface{}, 0, len(list))
+	for _, g := range list {
+		if isRulemuxHookFor(g, agentID) {
+			continue
+		}
+		kept = append(kept, g)
+	}
+	return kept
 }
 
 // installCodex 为 Codex 追加 TOML 钩子配置。
@@ -137,8 +167,8 @@ func installCodex(path, agentID string) error {
 	}
 	add.WriteString("codex_hooks = true\n\n")
 	add.WriteString("[[hooks.SessionStart]]\n")
-	add.WriteString("command = \"rulemux\"\n")
-	fmt.Fprintf(&add, "args = [\"inject\", \"--agent\", %q]\n", agentID)
+	// 参数写进 command 整串：宿主只执行 command 字段，可能丢弃 args。
+	fmt.Fprintf(&add, "command = \"rulemux inject --agent %s\"\n", agentID)
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -188,13 +218,7 @@ func uninstallJSON(path, agentID string) error {
 	if !ok {
 		return nil
 	}
-	kept := make([]interface{}, 0, len(list))
-	for _, g := range list {
-		if isRulemuxHook(g, agentID) {
-			continue
-		}
-		kept = append(kept, g)
-	}
+	kept := dropRulemuxHooks(list, agentID)
 	if len(kept) == 0 {
 		delete(hooksMap, "SessionStart")
 	} else {
@@ -207,38 +231,6 @@ func uninstallJSON(path, agentID string) error {
 	}
 	out = append(out, '\n')
 	return os.WriteFile(path, out, 0o644)
-}
-
-// isRulemuxHook reports whether a SessionStart group is the rulemux hook for agentID.
-func isRulemuxHook(g interface{}, agentID string) bool {
-	gm, ok := g.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	hs, ok := gm["hooks"].([]interface{})
-	if !ok {
-		return false
-	}
-	for _, h := range hs {
-		hm, ok := h.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		cmd, ok := hm["command"].(string)
-		if !ok || cmd != "rulemux" {
-			continue
-		}
-		args, ok := hm["args"].([]interface{})
-		if !ok {
-			continue
-		}
-		for _, x := range args {
-			if s, ok := x.(string); ok && s == agentID {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // uninstallCodex removes the rulemux [[hooks.SessionStart]] block from the

@@ -16,3 +16,4 @@
 | 2026-10-08 | CodeBuddy / WorkBuddy canary 坐实 | 新会话能念出暗号 `RULEMUX-CANARY-43371345`；坐实点文件会被读、`.codebuddy/rules` 平铺加载、钩子先于读；代码标 `Verified=true` | [`design/external/agent-rules-dirs.md`](../design/external/agent-rules-dirs.md) §四 · [worklog/canary-2026-10-08.md](worklog/canary-2026-10-08.md) |
 | 2026-10-08 | npm 正式发版 `rulemux@0.1.0` | 发布可用包（非占位）：补齐 `bin` 启动器 + `files` + `.npmignore` + 交叉编译脚本；5 平台二进制经 `-ldflags="-s -w"` 裁剪（4.2M→2.8M/份，包 12.6M→6.2M）；README 重写为英文默认 + 中文版。已上线且为 `latest` | 本文件 |
 | 2026-10-08 | 发版流水线实测通过 + `rulemux@0.1.2` 上线 | 打 tag 触发 release 流水线：5 平台交叉编译 + GitHub Release 自动挂产物全绿（修复 release job 缺 checkout 的 bug）；npm 的 0.1.2 因仓库未配 `NPM_TOKEN` 由手动 `npm publish` 补发，现为 `latest` | 本文件 |
+| 2026-10-08 | 修复 hook 命令格式（`args` 被宿主丢弃）| CodeBuddy 的 hook 只执行 `command` 字段、丢弃 `args` ⇒ 旧写法被执行成裸 `rulemux`（无参数、只打印帮助），规则从不生效；改为把参数写进 `command` 整串，并自动迁移旧钩子；新增回归测试 | [worklog/hook-command-2026-10-08.md](worklog/hook-command-2026-10-08.md) |

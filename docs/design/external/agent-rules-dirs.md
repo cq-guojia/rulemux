@@ -45,6 +45,16 @@
 | 规则层级 | 存在**用户级** + **项目级**两类（4.0.0 起） | `CHANGELOG.md:441`、`l10n/bundle.l10n.en.json:145-146` |
 | 工作区配置根 | `.codebuddy/`（技能落 `.codebuddy/skills/`，与规则目录是两套东西） | `product.json:926-932` |
 
+### hook 执行语义（2026-10-08 实测坐实）
+
+| 项 | 结论 | 出处 |
+|---|---|---|
+| hook 命令取哪个字段 | **只执行 `command` 字段（整串命令行），完全丢弃 `args` 字段** | 本机日志 `~/.local/share/CodeBuddyExtension/Logs/CodeBuddyIDE/2026-10-08/rulemux__*.log:93968`：`[HookExecutor] Executing hook command: rulemux`（配置为 `command:"rulemux"` + `args:["sync","--agent","codebuddy"]`，实际只跑了裸 `rulemux`） |
+| 对照（正常样例） | Hindsight 的钩子把参数写进 command 整串（`node "<abs>.js"`），被执行原样 | 同目录 Hindsight 日志行 / `hindsight.md` §2.2 |
+| 适用版本 | CodeBuddy 4.12.1（本机）；WorkBuddy 复用同一机制 | — |
+
+> **硬约定**：钩子的 `command` 必须写成**完整命令行字符串**（参数全部写在里面），**不得依赖 `args` 字段** —— 否则会被执行成裸程序名（无参数、只打印帮助），同步从不发生。我们的适配器（`internal/hooks/install.go`）据此把 `rulemux <subcmd> --agent <id>` 写进 `command` 整串。
+
 ### 仍未确定（阻塞第一批实现）
 
 1. **目录名冲突** —— 官方设置文案写 **`.rules`**（`package.nls.json:64`："Automatically read smart rules from the `.rules` directory"），但打包代码里确有 **`.codebuddy/rules`**（`index.js:69`、`index.js:84`）。二者哪个是运行时真值，未定。
