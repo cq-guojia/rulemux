@@ -138,7 +138,7 @@ func installCodex(path, agentID string) error {
 	add.WriteString("codex_hooks = true\n\n")
 	add.WriteString("[[hooks.SessionStart]]\n")
 	add.WriteString("command = \"rulemux\"\n")
-	add.WriteString("args = [\"inject\", \"--agent\", \"" + agentID + "\"]\n")
+	fmt.Fprintf(&add, "args = [\"inject\", \"--agent\", %q]\n", agentID)
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {

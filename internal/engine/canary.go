@@ -15,7 +15,7 @@ const CanaryName = Prefix + "canary.md"
 // CanaryToken 生成一个本次运行唯一的暗号。
 func CanaryToken() string {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())))
+	_, _ = h.Write(fmt.Appendf(nil, "%d-%d", time.Now().UnixNano(), os.Getpid()))
 	return fmt.Sprintf("RULEMUX-CANARY-%016x", h.Sum64())
 }
 
