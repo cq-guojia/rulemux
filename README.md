@@ -224,7 +224,22 @@ Ongoing work and what comes next are tracked in [docs/PROGRESS.md](docs/PROGRESS
 
 ---
 
-## 9. License
+## 9. Releasing (maintainers)
+
+```bash
+npm version patch|minor|major   # bumps package.json and creates the git tag v0.x.y
+git push --follow-tags
+```
+
+Pushing the tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
+cross-compile all platform binaries, attach them to a GitHub Release, and publish the
+npm package with the tag's version. Set the `NPM_TOKEN` repository secret to enable
+the npm step (it is skipped with a warning if absent). A plain CI run
+([`ci.yml`](.github/workflows/ci.yml)) runs build/vet/tests/smoke on every push.
+
+---
+
+## 10. License
 
 MIT — see [LICENSE](LICENSE).
 

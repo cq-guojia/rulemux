@@ -1,0 +1,107 @@
+# Release pipeline: push a tag (vX.Y.Z) -> cross-compile all platform binaries ->
+# attach them to a GitHub Release -> publish the npm package.
+#
+# Required repository secrets:
+#   NPM_TOKEN  automation token for npmjs.org. If it is not set, the npm job
+#              skips publishing with a warning and only the GitHub Release happens.
+#
+# Usage (maintainers):
+#   npm version patch|minor|major     # bumps package.json + creates git tag v0.x.y
+#   git push --follow-tags
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          name="rulemux-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then name="$name.exe"; fi
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "$name" .
+          echo "built $name"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rulemux-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: rulemux-${{ matrix.goos }}-${{ matrix.goarch }}*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x dist/rulemux-* 2>/dev/null || true
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/*
+
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Build bundled binaries (version taken from the tag)
+        run: bash scripts/build-dist.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Sync package.json version to the tag
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::warning::NPM_TOKEN secret is not set; skipping npm publish (set it in repo Settings > Secrets)"
+            exit 0
+          fi
+          npm publish

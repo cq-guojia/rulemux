@@ -209,7 +209,21 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 
 ---
 
-## 9. 许可证
+## 9. 发版（维护者）
+
+```bash
+npm version patch|minor|major   # 更新 package.json 并创建 git tag v0.x.y
+git push --follow-tags
+```
+
+推送 tag 会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：
+自动交叉编译全部平台二进制、挂到 GitHub Release、并按 tag 版本发布 npm 包。
+需在仓库 Secrets 里配置 `NPM_TOKEN` 才会发布 npm（未配置时跳过并告警）。
+普通的 CI（[`ci.yml`](.github/workflows/ci.yml)）在每次 push 时跑 build/vet/测试/冒烟。
+
+---
+
+## 10. 许可证
 
 MIT —— 见 [LICENSE](LICENSE)。
 

@@ -14,8 +14,10 @@ import (
 	"github.com/cq-guojia/rulemux/internal/cmd"
 )
 
-// version 是 rulemux 的版本号。
-const version = "0.1.0"
+// version is the rulemux version.
+// It is a var (not a const) so the release pipeline can inject the real tag:
+//   go build -ldflags="-X main.version=1.2.3"
+var version = "0.1.0"
 
 // usage prints the top-level help.
 //

@@ -45,5 +45,5 @@
 
 1. **查 Claude 侧 sync 未落地（T11）**：开 Claude Code 会话，确认 `rulemux sync --agent claude` 是否生成 `.claude/rules/.rulemux__*`；用 `doctor` + `external/agent-rules-dirs.md` §四 定位根因（adapter 路径 / hook 触发 / 该工作区未装钩子）。
 2. **其余 agent canary（T4）**：按 `design/features/verification.md` 跑 trae / codex / opencode 实测闭环，回写 `external/agent-rules-dirs.md` §四 并标 `Verified` 与适用版本。
-3. **发版（W11 / W12）**：`package.json` 加 `files` 字段只发产物（W12，即 T7）✅ **已解**（2026-10-08 发出 `rulemux@0.1.0`）；**W11 仍欠**：GitHub Actions 交叉编译 + Release（届时产物可直接喂给 npm 包，也让用户能不装 Go 就取二进制）。
+3. **发版（W11 / W12）**：✅ **均已解（2026-10-08）** —— W12：`rulemux@0.1.0` 已发布 npm；W11：新增 `.github/workflows/release.yml`（打 tag 自动交叉编译 5 平台 → 挂 GitHub Release → 发 npm，npm 步骤需仓库 Secrets 配 `NPM_TOKEN`，未配则跳过告警）+ `ci.yml`（build/vet/test/smoke）。流水线首次真实运行要等下一个 tag；届时若 npm 步骤失败，需检查 `NPM_TOKEN` 是否已配 | 无需动作 |
 4. **本批文档落地**：上一轮梳理出的 PROGRESS / HISTORY / workplan / README / external 更新已落盘并提交（本批）。

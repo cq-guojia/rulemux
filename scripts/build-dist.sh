@@ -9,7 +9,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION="$(grep -m1 '^const version' main.go | sed -E 's/.*"([^"]+)".*/\1/')"
+# Version may be passed in (the release pipeline passes the git tag); otherwise
+# it is read from main.go so local builds stay consistent.
+VERSION="${1:-}"
+if [ -z "$VERSION" ]; then
+  VERSION="$(grep -m1 -E '^(const|var) version' main.go | sed -E 's/.*"([^"]+)".*/\1/')"
+fi
 OUT="dist"
 mkdir -p "$OUT"
 
@@ -24,8 +29,9 @@ build() {
   # -ldflags="-s -w" strips the symbol table and DWARF debug info: ~33% smaller
   # (4.2MB -> 2.8MB per binary). Only cost is that panic stack traces lose
   # file/line detail, which is acceptable for a CLI.
+  # -X main.version= stamps the version so `rulemux --version` reports the release tag.
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
-    go build -trimpath -ldflags="-s -w" -o "$OUT/$name" .
+    go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$OUT/$name" .
 }
 
 build linux   amd64

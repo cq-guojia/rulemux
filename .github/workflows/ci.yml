@@ -1,0 +1,24 @@
+# CI: build, vet, unit tests and the end-to-end smoke script.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
+      - name: Smoke test (end to end)
+        run: bash scripts/smoke.sh
