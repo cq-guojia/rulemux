@@ -52,3 +52,17 @@ MCP 缓存 `installed_servers_cache.json` 中条目状态为 `"connected"`、`"c
 要点：**Hindsight 的 hooks 写在 user 级主目录，不写在任一项目的 workspace `.codebuddy/settings.json` 里**——所以它「看不见」出现在某个具体项目的钩子配置中。其「会话中及时回传」= MCP 工具在对话中被调用 + 上述生命周期 hook 触发，全部挂在 user 级。
 
 > ⚠️ 本条为 fact，记录「Hindsight 怎么装」；rulemux 据此的决策见 `../architecture.md` §五——**2026-10-08 起 rulemux 的 hook 落点已改为 user 级，与 Hindsight 对齐**，不再写工作区级 `.codebuddy/settings.json`。
+
+## 四、它的"自动更新"是谁做的（2026-10-08 查证）
+
+用户观察到「Hindsight 的插件包好像有自动更新」。查证结论：**更新不是 Hindsight 自己做的，是 CodeBuddy 的插件/技能市场在更新它。**
+
+- Hindsight 本体是 npm 包 `@vectorize-io/hindsight-coding-agents@0.6.1`（`package.json`），以插件形态提供 `skills` / `hooks` / `mcpServers`（`plugin.json`）。
+- 它的 MCP server 只是 `node dist/mcp-server.js` —— **惰性，自身不含任何更新逻辑**。
+- 真正的版本检查在宿主侧：`/root/.codebuddy/.skills-marketplace-update-state`：
+  ```json
+  { "lastAttemptAt":..., "lastSuccessAt":..., "remoteVersion": "e056361e-...", "failureCount": 0 }
+  ```
+  即 **CodeBuddy skills marketplace 自带的版本检查器**（记录远端版本 / 上次尝试 / 上次成功 / 失败次数）在拉新版。
+
+**对 rulemux 的意义**：不要误以为「做一个 MCP 就能白嫖自动更新」——那是市场机制，不是 MCP 的能力；而 rulemux 是单二进制 + 钩子，走不了插件市场。升级策略已拍板为「包管理器手动更新」，见 [`../requirements.md`](../requirements.md) §五。

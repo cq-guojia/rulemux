@@ -44,3 +44,6 @@
 - **不改规则内容**：不做改写 / 模板渲染，源文件写什么就落什么（格式适配只动文件组织方式，不动正文）。
 - **不把注入当主方案**：hook 注入落在动态区，做不到 A3；仅对**无工作区规则目录的单文件 agent（Tier-2）**启用降级，且**不碰用户自己的 `AGENTS.md`**（由 SessionStart hook 注入上下文）。启用即视为该 agent 未达验收标准（见 [`features/hook-injection.md`](features/hook-injection.md)）。
 - **不常驻、不监听**：无守护进程、不监听文件改动，极致简单（见 [`implementation.md`](implementation.md) #8）。
+- **不做自动更新、不做自更新**：升级一律**交给包管理器、由用户手动执行**（`go install github.com/cq-guojia/rulemux@latest`，将来 brew / scoop / apt 同理）。—— 2026-10-08 拍板。
+  依据：核心链路是「SessionStart 钩子调 `rulemux sync`」，而各家钩子都有超时（本机实测 Hindsight 的钩子均为 30–60s），在热路径里联网自更新会拖慢甚至挂住会话；且自我替换二进制一旦失败，后续所有同步都被锁死。收益也有限：rulemux 无后台状态、无服务端，版本差异通常只影响边缘行为。
+  补充：即便日后加 `rulemux update`，也须是**手动触发 + 校验 checksum/签名**，绝不放在钩子路径里自动跑。
