@@ -28,11 +28,12 @@ const exampleConfig = `# rulemux 配置文件
 #               path = "/abs/path/to/your-rules.md"          # 单个文件
 #               path = ["/abs/path/a.md", "/abs/path/b.md"]  # 数组（同批文件共享下面的 agents / workspace）
 #
-#   agents    这批文件投递给哪些 agent；省略 = 全部 agent。取值：
-#               Tier-1（真实拷贝进规则目录）：claude / codebuddy / workbuddy / trae
-#               Tier-2（SessionStart 注入，不碰用户文件）：codex / opencode
-#               trae 的 CN 版与国际版机制相同，统一写 trae
-#             示例：agents = ["codebuddy", "codex"]
+#   agents    这批文件投递给哪些 agent；省略 = 投递给全部「已支持」的 agent。取值（当前已验证、可安装）：
+#               codebuddy   Tier-1（真实拷贝进 .codebuddy/rules）
+#               workbuddy   Tier-1（与 codebuddy 共用目录）
+#             其余 agent（claude / trae / codex / opencode）尚未坐实验证，暂不允许安装或投递；
+#             等对应适配坐实、被标记为 verified 后，安装程序会自动开放，无需改这里。
+#             示例：agents = ["codebuddy"]
 #
 #   workspace 这批规则适用于哪些工作区，写法：
 #               workspace = "/abs/path/to/proj"          # 单个工作区（完全匹配）
@@ -85,7 +86,7 @@ const exampleConfig = `# rulemux 配置文件
 # [[source]]
 # groups = ["base", "proj"]            # 引用文件组（自动展开成组内所有文件）
 # path = ["/abs/path/to/extra.md"]     # 也可同时混列单个文件
-# agents = ["claude", "codebuddy", "trae"]
+# agents = ["codebuddy"]
 # workspace_groups = ["dev"]          # 引用工作区分组（展开成组内所有工作区）
 # workspace = ["/abs/path/to/standalone"]   # 也同时混列单个工作区
 `
@@ -171,16 +172,16 @@ USAGE:
 you must name the agent(s) you want. This is deliberate: auto-detecting which
 agents exist locally is unreliable, so the choice is always yours.
 
-SUPPORTED AGENTS (value of --agent):
-  claude      Claude Code     Tier-1  .claude/rules/
-  codebuddy   CodeBuddy      Tier-1  .codebuddy/rules/
-  workbuddy   WorkBuddy      Tier-1  .codebuddy/rules/ (shared with CodeBuddy)
-  trae        Trae           Tier-1  .trae/rules/
-  codex       Codex          Tier-2  SessionStart injection (does not touch AGENTS.md)
-  opencode    OpenCode       Tier-2  SessionStart injection (does not touch AGENTS.md)
+SUPPORTED AGENTS (value of --agent; only VERIFIED agents can be installed):
+  codebuddy   CodeBuddy   Tier-1  .codebuddy/rules/   [verified — installable]
+  workbuddy   WorkBuddy   Tier-1  .codebuddy/rules/   [verified — shares CodeBuddy dir]
 
-Install several at once, comma-separated:
-  rulemux init --agent codebuddy,codex
+The following are registered but NOT YET verified, so init refuses to install them
+until their adapter is canary-tested and flipped to verified:
+  claude, trae, codex, opencode
+
+Install (only verified agents), comma-separated:
+  rulemux init --agent codebuddy
 
 HOOKS ARE PER-WORKSPACE. Run init inside each workspace you want covered.
 

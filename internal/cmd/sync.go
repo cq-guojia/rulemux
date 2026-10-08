@@ -24,6 +24,17 @@ func Sync(args []string) int {
 		fmt.Fprintf(os.Stderr, "rulemux: 读取配置失败: %v\n  提示：先运行 rulemux init 生成示例配置\n", err)
 		return 1
 	}
+	// 开关优先：先确认请求的 agent 已支持，再校验配置内容（未验证的 agent 直接拒绝）。
+	if reqAgent := f.Get("agent", ""); reqAgent != "" {
+		if a, ok := agents.Get(reqAgent); !ok || !a.Verified {
+			if ok && !a.Verified {
+				fmt.Fprintf(os.Stderr, "rulemux: agent %q 尚未支持：当前仅支持已验证的 %s\n", reqAgent, agents.SupportedSummary())
+			} else {
+				fmt.Fprintf(os.Stderr, "rulemux: 未知 agent %q\n", reqAgent)
+			}
+			return 1
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "rulemux:", err)
 		return 1
@@ -38,7 +49,15 @@ func Sync(args []string) int {
 	requested := f.Get("agent", "")
 	targets := targetAgents(requested)
 	if len(targets) == 0 {
-		fmt.Fprintf(os.Stderr, "rulemux: 未知 agent %q\n", requested)
+		if requested != "" {
+			if a, ok := agents.Get(requested); ok && !a.Verified {
+				fmt.Fprintf(os.Stderr, "rulemux: agent %q 尚未支持：当前仅支持已验证的 %s\n", requested, agents.SupportedSummary())
+			} else {
+				fmt.Fprintf(os.Stderr, "rulemux: 未知 agent %q\n", requested)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "rulemux: 当前没有可处理的已验证 agent")
+		}
 		return 1
 	}
 
@@ -66,17 +85,18 @@ func Sync(args []string) int {
 	return exit
 }
 
-// targetAgents 决定本次处理哪些 agent；未指定则处理全部 Tier-1。
+// targetAgents 决定本次处理哪些 agent；未指定则处理全部「已验证」的 Tier-1。
+// 未做好的 agent（Verified==false）一律不参与，从源头保证只动做好的适配。
 func targetAgents(id string) []agents.Agent {
 	if id != "" {
 		a, ok := agents.Get(id)
-		if !ok {
+		if !ok || !a.Verified {
 			return nil
 		}
 		return []agents.Agent{a}
 	}
 	var out []agents.Agent
-	for _, a := range agents.All() {
+	for _, a := range agents.Supported() {
 		if a.Tier == agents.Tier1 {
 			out = append(out, a)
 		}

@@ -63,8 +63,9 @@ func workspace(v string) (string, error) {
 	return os.Getwd()
 }
 
-// parseAgents 把 --agent 的值（如 "codebuddy,codex"）拆成 Agent 列表，
-// 逐个在注册表里校验；含未知 id 即报错。绝不扫描机器上的 agent。
+// parseAgents 把 --agent 的值（如 "codebuddy,workbuddy"）拆成 Agent 列表，
+// 逐个在注册表里校验；含未知 id 或「尚未做好」（Verified==false）的 agent 即报错。
+// 绝不扫描机器上的 agent。
 func parseAgents(s string) ([]agents.Agent, error) {
 	var out []agents.Agent
 	for _, p := range strings.Split(s, ",") {
@@ -74,7 +75,10 @@ func parseAgents(s string) ([]agents.Agent, error) {
 		}
 		a, ok := agents.Get(p)
 		if !ok {
-			return nil, fmt.Errorf("unknown agent %q (known: claude, codebuddy, workbuddy, trae, codex, opencode)", p)
+			return nil, fmt.Errorf("unknown agent %q (supported: %s)", p, agents.SupportedSummary())
+		}
+		if !a.Verified {
+			return nil, fmt.Errorf("agent %q 尚未支持安装：当前仅支持已验证的 %s（其余 agent 还在做，未就绪前不允许安装）", a.ID, agents.SupportedSummary())
 		}
 		out = append(out, a)
 	}

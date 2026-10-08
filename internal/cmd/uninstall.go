@@ -154,7 +154,9 @@ CONFIRMATION:
   cancels safely.
   Pass --yes to skip the prompt (for scripts / CI).
 
-Supported ids: claude, codebuddy, workbuddy, trae, codex, opencode.
+Supported (verified) ids: codebuddy, workbuddy.
+Other registered agents (claude / trae / codex / opencode) are NOT yet verified and
+cannot be installed or removed until their adapter is canary-tested.
 
 OTHER FLAGS:
   --workspace <dir>   Workspace to act in (default: current dir).

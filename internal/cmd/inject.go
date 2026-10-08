@@ -25,6 +25,10 @@ func Inject(args []string) int {
 		fmt.Fprintf(os.Stderr, "rulemux: 未知 agent %q\n", id)
 		return 2
 	}
+	if !a.Verified {
+		fmt.Fprintf(os.Stderr, "rulemux: agent %q 尚未支持：当前仅支持已验证的 %s\n", id, agents.SupportedSummary())
+		return 2
+	}
 
 	cfg, err := config.Load(f.Get("config", config.DefaultPath()))
 	if err != nil {

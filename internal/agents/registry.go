@@ -124,6 +124,38 @@ func All() []Agent {
 	return out
 }
 
+// Supported 返回当前已「做好」（canary 实测坐实，Verified==true）的 agent，
+// 即安装程序允许安装的清单。未在此列的 agent 尚未就绪，禁止安装。
+func Supported() []Agent {
+	out := make([]Agent, 0, len(registry))
+	for _, a := range registry {
+		if a.Verified {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// IsSupported 报告该 ID/别名对应的 agent 是否已就绪、允许安装。
+func IsSupported(idOrAlias string) bool {
+	a, ok := Get(idOrAlias)
+	return ok && a.Verified
+}
+
+// SupportedIDs 返回当前允许安装的 agent ID 列表。
+func SupportedIDs() []string {
+	ids := make([]string, 0, len(registry))
+	for _, a := range Supported() {
+		ids = append(ids, a.ID)
+	}
+	return ids
+}
+
+// SupportedSummary 返回逗号分隔的「当前可安装 agent」列表，用于错误/帮助文本。
+func SupportedSummary() string {
+	return strings.Join(SupportedIDs(), ", ")
+}
+
 // Get 按 ID 或别名查找 agent。
 func Get(idOrAlias string) (Agent, bool) {
 	for _, a := range registry {
