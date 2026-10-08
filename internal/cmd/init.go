@@ -49,17 +49,26 @@ const exampleConfig = `# rulemux 配置文件
 # 文件组 [[file_group]]：把若干规则文件打包，供 [[source]] 用 groups 引用。
 #   name  组名（必填）
 #   path  组内文件；单个或数组写法均可
-#   use   引用其它文件组（可多个，支持嵌套：A 组引入 B 组，再加自己的文件）
+#   use   引用其它文件组——【数组，可写多个，支持嵌套】：
+#           use = ["dev"]            # 单个
+#           use = ["dev", "qa"]      # 多个：同时复用这几个组
+#           # A 组引入 B 组，再加自己的文件——A 最终 = B 的文件 + A 的文件
 #
 # 工作区分组 [[workspace_group]]：把若干工作区打包，供 [[source]] 用 workspace_groups 引用。
 #   name       组名（必填）
 #   workspace  组内工作区；单个或数组写法均可，支持上面的 glob
-#   use        引用其它工作区分组（可多个，支持嵌套）
+#   use        引用其它工作区分组——【数组，可写多个，支持嵌套】：
+#           use = ["dev"]            # 单个
+#           use = ["dev", "qa"]      # 多个：同时复用这几个工作区分组
 #
 # 在 [[source]] 里：
-#   groups            = ["组A", "组B"]   # 引用文件组（自动展开为组内所有文件）
-#   workspace_groups  = ["组X"]          # 引用工作区分组（自动展开为组内所有工作区）
-#   groups/path、workspace_groups/workspace 可同时存在、混合使用。
+#   groups            = ["组A", "组B"]   # 引用文件组（数组，可写多个；自动展开为组内所有文件）
+#   workspace_groups  = ["组X", "组Y"]   # 引用工作区分组（数组，可写多个）
+#   【可混合书写】groups 与 path 能同时写、workspace_groups 与 workspace 也能同时写：
+#       groups = ["base", "proj"]            # 我用了 base、proj 这两个组里的所有文件
+#       path   = ["/abs/path/extra.md"]      # 另外再单独指定这一个文件
+#     ⇒ 这条 source 投递的 = base 组文件 + proj 组文件 + extra.md；三者合并后按值去重。
+#   （workspace_groups / workspace 同理：既可引用分组，也可同时单列单个工作区。）
 #   组间重复的文件 / 工作区无所谓——程序最后按值去重，每个只做一次。
 #   文件组与工作区分组是两套独立的命名空间，允许同名（它们分别位于不同的区域）。
 #
@@ -71,7 +80,7 @@ const exampleConfig = `# rulemux 配置文件
 
 # [[file_group]]
 # name = "proj"
-# use = ["base"]                       # 嵌套引用 base 组
+# use = ["base"]                       # 嵌套引用 base 组（数组，可写多个：use = ["base", "dev"]）
 # path = ["/abs/path/to/project-a.md"]
 
 # [[workspace_group]]
@@ -80,15 +89,15 @@ const exampleConfig = `# rulemux 配置文件
 
 # [[workspace_group]]
 # name = "qa"
-# use = ["dev"]                        # 复用 dev 组
+# use = ["dev"]                        # 复用 dev 组（数组，可写多个）
 # workspace = ["/abs/path/to/proj-3"]
 
 # [[source]]
-# groups = ["base", "proj"]            # 引用文件组（自动展开成组内所有文件）
-# path = ["/abs/path/to/extra.md"]     # 也可同时混列单个文件
+# groups = ["base", "proj"]            # 引用文件组（数组，可多个；自动展开成组内所有文件）
+# path = ["/abs/path/to/extra.md"]     # 同时混列单个文件：这条 source = base+proj 组文件 + 该文件
 # agents = ["codebuddy"]
-# workspace_groups = ["dev"]          # 引用工作区分组（展开成组内所有工作区）
-# workspace = ["/abs/path/to/standalone"]   # 也同时混列单个工作区
+# workspace_groups = ["dev"]          # 引用工作区分组（数组，可多个；展开成组内所有工作区）
+# workspace = ["/abs/path/to/standalone"]   # 同时混列单个工作区
 `
 
 // Init installs the SessionStart hook for the agent(s) named by --agent.
