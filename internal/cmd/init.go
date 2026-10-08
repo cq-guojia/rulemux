@@ -9,27 +9,46 @@ import (
 	"github.com/cq-guojia/rulemux/internal/hooks"
 )
 
-// exampleConfig 是 init 生成的示例配置内容。
-const exampleConfig = `# rulemux 配置
+// exampleConfig 是 init 首次运行时生成的默认配置内容。
+//
+// 设计原则（与用户约定一致）：
+//   - 顶部用注释把每一项配置方式都写清楚，用户照着改即可；
+//   - 默认没有任何生效的 [[source]]（示例整段注释掉），即“空 / 只有初始配置”状态，
+//     不塞任何示例路径或测试文档；用户自行取消注释或新增 [[source]] 后才会有动作。
+const exampleConfig = `# rulemux 配置文件
 #
-# path      = 源文件路径（磁盘任意位置）。单个字符串或数组都行。
-# agents    = 投递给哪些 agent；省略 = 全部。
-# workspace = 适用于哪些工作区；单个字符串或数组都行，省略 / "*" / "all" = 所有工作区。
+# 默认位置：~/.rulemux/config.toml（也可用各命令的 --config <path> 指定别的路径）
+#
+# rulemux 会在 agent 会话开始时，把下面每条 [[source]] 描述的“源规则文件”
+# 真实拷贝进对应 agent 的原生规则目录（带 .rulemux__ 前缀，删残留、不碰你的文件）。
+#
+# 每条 [[source]] 支持三个字段（都可选，省略有默认值）：
+#
+#   path      源文件路径，磁盘任意位置均可。两种写法都支持：
+#               path = "/abs/path/to/your-rules.md"          # 单个文件
+#               path = ["/abs/path/a.md", "/abs/path/b.md"]  # 数组（同批文件共享下面的 agents / workspace）
+#
+#   agents    这批文件投递给哪些 agent；省略 = 全部 agent。取值：
+#               Tier-1（真实拷贝进规则目录）：claude / codebuddy / workbuddy / trae
+#               Tier-2（SessionStart 注入，不碰用户文件）：codex / opencode
+#               trae 的 CN 版与国际版机制相同，统一写 trae
+#             示例：agents = ["codebuddy", "codex"]
+#
+#   workspace 这批规则适用于哪些工作区；省略 / "*" / "all" = 所有工作区。写法：
+#               workspace = "/abs/path/to/proj"          # 单个工作区
+#               workspace = ["/abs/path/proj-a", "/b"]   # 数组
+#
+# 下面两条是示例，整段被注释掉、不会生效。需要哪条就把前面的 # 去掉，并改成你的真实路径。
 
-[[source]]
-path = ["C:/rules/team-conventions.md", "C:/rules/style.md"]
-agents = ["claude", "codebuddy", "trae"]
-# workspace 省略 = 所有工作区都适用
+# [[source]]
+# path = ["/abs/path/to/team-conventions.md", "/abs/path/to/style.md"]
+# agents = ["claude", "codebuddy", "trae"]
+# # workspace 省略 = 所有工作区都适用
 
-[[source]]
-path = "D:/notes/project-a.txt"
-agents = ["codex"]
-workspace = ["/path/to/proj-a", "/path/to/proj-b"]
-
-# agents 取值：
-#   Tier-1（真实拷贝进规则目录）：claude / codebuddy / workbuddy / trae
-#   Tier-2（SessionStart 注入，不碰用户文件）：codex / opencode
-#   trae 的 CN 版与国际版是同一套机制，统一写 trae
+# [[source]]
+# path = "/abs/path/to/project-a.txt"
+# agents = ["codex"]
+# workspace = ["/abs/path/to/proj-a", "/abs/path/to/proj-b"]
 `
 
 // Init installs the SessionStart hook for the agent(s) named by --agent.
@@ -76,7 +95,7 @@ func Init(args []string) int {
 			return 1
 		}
 		fmt.Println("✓ sample config created:", cfgPath)
-		fmt.Println("  ⚠ change the 'path' fields to your real rule files")
+		fmt.Println("  ⚠ 默认没有任何生效的 [[source]]；取消注释示例或新增 [[source]] 并填好你的规则文件路径")
 	} else {
 		fmt.Println("· config exists, skipped:", cfgPath)
 	}
@@ -132,7 +151,8 @@ OTHER FLAGS:
   --help, -h          Show this help.
 
 The first run also writes a sample ~/.rulemux/config.toml if none exists.
-Edit its 'path' fields to point at your own rule files, then open a new session
-in the agent to trigger the sync.
+It contains only commented-out examples and a header explaining every option;
+nothing is synced until you uncomment an example or add your own [[source]] with
+real 'path' values. Then open a new session in the agent to trigger the sync.
 `)
 }
