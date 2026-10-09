@@ -149,5 +149,91 @@ ok "workspace matching"
 [ -f "$WS/$RULES_REL/my-own.md" ]            || fail "uninstall deleted the user's own file"
 ok "uninstall sweeps every recorded workspace (user files kept)"
 
+# 13. Refresh (the upgrade self-heal): rewrite ONLY rulemux's own hook entry.
+# This is what makes "upgrade the binary" bring old hooks up to date, and it is
+# where the hard rule lives: nothing but our own entry may change.
+HOOKHOME="$TMP/hookhome"
+mkdir -p "$HOOKHOME/.codebuddy"
+cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
+{
+  "theme": "dark",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "node \"/other-tool.js\""}]},
+      {"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}
+    ]
+  }
+}
+EOF
+HOME="$HOOKHOME" "$BIN" init --refresh >"$TMP/refresh.log" 2>&1 || fail "init --refresh exited non-zero"
+REFRESHED="$HOOKHOME/.codebuddy/settings.json"
+grep -qF 'rulemux sync --hook --agent codebuddy' "$REFRESHED" || fail "old hook was not refreshed to the current format"
+grep -qF 'node \"/other-tool.js\"' "$REFRESHED" || fail "another tool's hook was damaged"
+grep -qF '"theme": "dark"' "$REFRESHED" || fail "an unrelated key was dropped"
+ok "refresh upgrades only rulemux's own hook entry"
+
+# ...and a second refresh is a no-op: not even a byte is rewritten
+sum_before="$(cksum < "$REFRESHED")"
+HOME="$HOOKHOME" "$BIN" init --refresh >"$TMP/refresh2.log" 2>&1
+sum_after="$(cksum < "$REFRESHED")"
+[ "$sum_before" = "$sum_after" ] || fail "second refresh rewrote an already-current file"
+grep -q "refreshed 0 hook(s)" "$TMP/refresh2.log" || fail "second refresh did not report 0 changes"
+ok "refresh is idempotent (current hooks are never rewritten)"
+
+# ...and it never conjures a host config where none existed
+mkdir -p "$TMP/emptyhome"
+HOME="$TMP/emptyhome" "$BIN" init --refresh >/dev/null 2>&1 || fail "init --refresh must always exit 0"
+[ ! -e "$TMP/emptyhome/.codebuddy" ] || fail "refresh created a host config directory out of nowhere"
+[ ! -e "$TMP/emptyhome/.rulemux" ]   || fail "refresh created the rulemux home directory"
+ok "refresh never creates host config"
+
+# 14. CODEBUDDY_CONFIG_DIR: a relocated config dir must be followed, not ignored
+MOVED="$TMP/moved-cfg"
+mkdir -p "$MOVED"
+cat > "$MOVED/settings.json" <<'EOF'
+{"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
+EOF
+HOME="$TMP/emptyhome" CODEBUDDY_CONFIG_DIR="$MOVED" "$BIN" init --refresh >"$TMP/moved.log" 2>&1 || fail "refresh with CODEBUDDY_CONFIG_DIR exited non-zero"
+grep -qF 'rulemux sync --hook --agent codebuddy' "$MOVED/settings.json" || fail "the relocated config dir was ignored"
+grep -qF '[dir from $CODEBUDDY_CONFIG_DIR]' "$TMP/moved.log" || fail "refresh did not report the env-provided path"
+[ ! -e "$TMP/emptyhome/.codebuddy" ] || fail "the default config dir was touched although the env var was set"
+ok "CODEBUDDY_CONFIG_DIR is honoured"
+
+# 15. doctor must flag an OUTDATED hook (it used to print a plain ✓ for any file
+# that merely mentioned "rulemux", so an old-format hook looked fine)
+cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
+{"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
+EOF
+HOME="$HOOKHOME" "$BIN" doctor --workspace "$WS" >"$TMP/doctor2.log" 2>&1 || fail "doctor exited non-zero"
+grep -q "installed but OUTDATED" "$TMP/doctor2.log" || fail "doctor did not flag the outdated hook"
+grep -q "rulemux init --refresh" "$TMP/doctor2.log" || fail "doctor did not point at the fix"
+ok "doctor flags outdated hooks"
+
+# 16. npm postinstall: refresh on a global install, stay silent otherwise and
+# never fail the install.
+if command -v node >/dev/null 2>&1; then
+  cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
+{"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
+EOF
+  HOME="$HOOKHOME" npm_config_global=true node bin/postinstall.js >"$TMP/postinstall.log" 2>&1 \
+    || fail "postinstall exited non-zero"
+  grep -qF 'rulemux sync --hook --agent codebuddy' "$HOOKHOME/.codebuddy/settings.json" \
+    || fail "postinstall did not refresh the existing hook"
+  grep -q "upgraded the SessionStart hook(s)" "$TMP/postinstall.log" \
+    || fail "postinstall did not report the upgrade"
+
+  cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
+{"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
+EOF
+  HOME="$HOOKHOME" node bin/postinstall.js >"$TMP/postinstall2.log" 2>&1 \
+    || fail "postinstall exited non-zero when not a global install"
+  if [ -s "$TMP/postinstall2.log" ]; then fail "postinstall was not silent for a local install"; fi
+  grep -qF 'rulemux sync --agent codebuddy' "$HOOKHOME/.codebuddy/settings.json" \
+    || fail "a local install must not touch the host config"
+  ok "npm postinstall refreshes on global install, silent otherwise"
+else
+  ok "npm postinstall skipped (node not available)"
+fi
+
 echo
 echo "ALL SMOKE TESTS PASSED"

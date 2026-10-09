@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/hooks"
 )
@@ -109,11 +111,16 @@ const exampleConfig = `# rulemux configuration file
 # workspace = ["/abs/path/to/standalone"]   # plus a standalone workspace
 `
 
-// Init installs the SessionStart hook for the agent(s) named by --agent.
+// Init 有两个模式：
 //
-// --agent is REQUIRED. rulemux never scans the machine for installed agents;
-// you must explicitly say which agent(s) you want. Auto-detecting which agents
-// exist locally is unreliable, so the choice is always the user's.
+//   - 默认（安装）：为 --agent 指定的 agent 装 SessionStart 钩子，允许创建配置目录与文件
+//     —— 这是用户的显式动作。
+//   - --refresh（刷新）：只把「已存在的自家钩子条目」升级到当前格式。不创建任何文件或目录，
+//     未装过的一律跳过；别人的钩子条目与文件里其它键原样保留。npm 全局升级（postinstall）
+//     与用户手动调用都走这条路径，使旧格式钩子自动跟上（见 design「升级即生效」）。
+//
+// --agent is REQUIRED in install mode. rulemux never scans the machine for installed
+// agents; you must explicitly say which agent(s) you want.
 func Init(args []string) int {
 	f := ParseFlags(args)
 	if f.Has("help") || f.Has("h") {
@@ -122,6 +129,9 @@ func Init(args []string) int {
 	}
 
 	agentArg := f.Get("agent", "")
+	if f.Has("refresh") {
+		return refreshHooks(agentArg, f)
+	}
 	if agentArg == "" {
 		fmt.Fprintln(os.Stderr, "rulemux init: --agent is required")
 		fmt.Fprintln(os.Stderr, "  rulemux does NOT auto-detect agents installed on your machine.")
@@ -179,14 +189,80 @@ func Init(args []string) int {
 	return 0
 }
 
+// refreshHooks 刷新「已装」的自家钩子条目：未装的不创建，别人的条目不动。
+//
+// 永远返回 0（个别 agent 读不了 / 写不了只打警告并继续）—— 它同时被 npm postinstall
+// 调用，绝不能把安装流程拖成失败。
+func refreshHooks(agentArg string, f *Flags) int {
+	var targets []agents.Agent
+	if agentArg == "" {
+		targets = agents.All() // 没装过的会被逐个跳过
+	} else {
+		ts, err := parseAgents(agentArg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "rulemux init --refresh:", err)
+			return 2
+		}
+		targets = ts
+	}
+
+	ws, err := workspace(f.Get("workspace", ""))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rulemux: cannot determine workspace:", err)
+		return 1
+	}
+
+	fmt.Println("Refreshing SessionStart hooks (existing entries only):")
+	refreshed := 0
+	for _, a := range targets {
+		path, envUsed := a.HookFileAbsWithSource(ws)
+		src := ""
+		if envUsed != "" {
+			src = fmt.Sprintf(" [dir from $%s]", envUsed)
+		}
+
+		installed, cmd, err := hooks.Inspect(path, a)
+		switch {
+		case errors.Is(err, hooks.ErrRefreshUnsupported):
+			fmt.Printf("  · %-10s skipped: hook config format not verified yet%s\n", a.ID, src)
+			continue
+		case err != nil:
+			fmt.Printf("  ⚠ %-10s unreadable, left untouched%s: %v\n", a.ID, src, err)
+			continue
+		case !installed:
+			fmt.Printf("  · %-10s not installed, skipped%s\n", a.ID, src)
+			continue
+		}
+
+		want := hooks.TargetCommand(a)
+		if cmd == want {
+			fmt.Printf("  ✓ %-10s already up to date%s\n", a.ID, src)
+			continue
+		}
+		// 只重写我们自己那一条（含旧格式与 `--agent workbuddy` 这类别名写法）。
+		changed, err := hooks.Refresh(path, a)
+		if err != nil {
+			fmt.Printf("  ⚠ %-10s refresh failed, left untouched: %v\n", a.ID, err)
+			continue
+		}
+		if changed {
+			refreshed++
+			fmt.Printf("  ✓ %-10s refreshed: %q → %q%s\n", a.ID, cmd, want, src)
+		}
+	}
+	fmt.Printf("refreshed %d hook(s). Nothing else was touched: other tools' hooks and all other keys are preserved.\n", refreshed)
+	return 0
+}
+
 // InitHelp prints detailed English help for `rulemux init`.
 func InitHelp() {
 	fmt.Print(`rulemux init - install the SessionStart hook for one or more agents
 
 USAGE:
   rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]
+  rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]
 
---agent is REQUIRED. rulemux never scans your machine for installed agents;
+--agent is REQUIRED in install mode. rulemux never scans your machine for installed agents;
 you must name the agent(s) you want. This is deliberate: auto-detecting which
 agents exist locally is unreliable, so the choice is always yours.
 
@@ -206,7 +282,18 @@ The SessionStart hook is installed once into the user-level host config
 you do NOT need to run init once per workspace. Run it once per machine.
 Syncing still keys off the current workspace (cwd) to decide which rules apply.
 
+REFRESH (the upgrade path — refreshes, never installs):
+  rulemux init --refresh
+      Rewrites ONLY the SessionStart hooks rulemux itself already installed, so an
+      upgraded binary brings old hook commands up to date. It never creates a config
+      file or directory, never adds a hook that was not there before, and preserves
+      every other entry and every other key in the host config. Agents that were
+      never installed are skipped. Omitting --agent checks every registered agent.
+      This is what npm postinstall calls after a global upgrade; you can also call
+      it by hand after upgrading a binary that was not installed via npm.
+
 OTHER FLAGS:
+  --refresh           Refresh existing rulemux hooks only (see above).
   --config <path>     Config file (default ~/.rulemux/config.toml).
   --workspace <dir>   Workspace to install hooks into (default: current dir).
   --help, -h          Show this help.

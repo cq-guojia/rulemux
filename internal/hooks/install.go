@@ -6,6 +6,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,16 +38,104 @@ func Install(a agents.Agent, workspace string) (string, error) {
 	}
 }
 
-// installJSON 以 JSON 结构写入 SessionStart 钩子（hooks.SessionStart[]），
-// 保留配置文件里已有的其它内容。
+// ErrRefreshUnsupported 表示该 agent 的钩子配置格式尚未核实，因此刷新会跳过、绝不改文件。
+var ErrRefreshUnsupported = errors.New("hook config style not verified for refresh")
+
+// TargetCommand 是当前代码期望写进该 agent 钩子的完整命令行。
+//
+// 参数必须写进 command 整串，不能用单独的 args 字段：宿主（如 CodeBuddy）只执行 command
+// 字段本身、会丢弃 args（实测见 docs/design/external/agent-rules-dirs.md §二）。
+func TargetCommand(a agents.Agent) string {
+	return fmt.Sprintf("rulemux %s --agent %s", SubcommandFor(a), a.ID)
+}
+
+// hookEntry 构造该 agent 的一条 SessionStart 钩子分组。
+func hookEntry(a agents.Agent) map[string]interface{} {
+	return map[string]interface{}{
+		"matcher": "",
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"type":    "command",
+				"command": TargetCommand(a),
+			},
+		},
+	}
+}
+
+// installJSON 显式安装：写入 SessionStart 钩子，保留配置文件里已有的其它内容。
+// 只有显式安装才允许创建配置目录；刷新路径绝不创建（见 Refresh）。
 func installJSON(path string, a agents.Agent) error {
-	var doc map[string]interface{}
-	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
-		if err := json.Unmarshal(b, &doc); err != nil {
-			return fmt.Errorf("failed to parse existing hook config %s: %w", path, err)
-		}
+	_, err := writeHookJSON(path, a, true)
+	return err
+}
+
+// Inspect 报告该 agent 在宿主配置里的钩子现状（只读，不写盘）。
+//
+// installed=true 表示文件里已存在我们针对该 agent 的钩子（含旧格式、含 workbuddy 这类
+// 别名写法）；command 是那条钩子的完整命令行 —— 调用方与 TargetCommand 比较即可判断
+// 是否「已装但格式过期」。
+//
+// 文件不存在 / 为空 ⇒ (false, "", nil)；JSON 解析失败 ⇒ 返回错误（是否致命由调用方决定）；
+// 钩子格式尚未核实的 agent（codex）⇒ ErrRefreshUnsupported。
+func Inspect(path string, a agents.Agent) (installed bool, command string, err error) {
+	if err := checkRefreshable(a); err != nil {
+		return false, "", err
+	}
+	doc, err := loadHookJSON(path)
+	if err != nil || doc == nil {
+		return false, "", err
+	}
+	installed, command = inspectSessionStart(sessionStartList(doc), a)
+	return installed, command, nil
+}
+
+// Refresh 只把「已存在的自家钩子条目」重写成当前目标命令，其余一律不动：
+//
+//   - 文件不存在 ⇒ 不创建文件、不创建目录，返回 changed=false；
+//   - 已是最新 ⇒ 一个字节都不写（幂等，保持 mtime，让 postinstall 能做到无变化零输出）；
+//   - 别人的钩子条目、以及文件里其它键 ⇒ 原样保留；
+//   - 旧格式（缺 --hook）与别名条目（--agent workbuddy）⇒ 就地升级为当前命令。
+func Refresh(path string, a agents.Agent) (changed bool, err error) {
+	if err := checkRefreshable(a); err != nil {
+		return false, err
+	}
+	doc, err := loadHookJSON(path)
+	if err != nil || doc == nil {
+		return false, err
+	}
+	if installed, cur := inspectSessionStart(sessionStartList(doc), a); installed && cur == TargetCommand(a) {
+		return false, nil
+	}
+	return writeHookJSON(path, a, false)
+}
+
+// checkRefreshable 报告该 agent 是否支持「解析 + 刷新」自家钩子条目。
+func checkRefreshable(a agents.Agent) error {
+	switch a.Style {
+	case "claude", "trae", "json":
+		return nil
+	case "codex":
+		// codex 的钩子 schema 尚未核实（见 registry 的 Note）。不能拿未核实的 TOML 解析
+		// 结果去改用户文件 ⇒ 刷新直接跳过。它的 adapter 目前也装不上（Verified=false）。
+		return fmt.Errorf("%w (agent %s)", ErrRefreshUnsupported, a.ID)
+	default:
+		return fmt.Errorf("unknown hook config style %q", a.Style)
+	}
+}
+
+// writeHookJSON 是安装与刷新的共同写入核心。
+//
+// create=true 允许创建配置目录与文件（显式安装）；create=false 时文件不存在就直接跳过
+// —— 这是硬约束：刷新只写已存在的配置。（changed 表示是否真的改了文件。）
+func writeHookJSON(path string, a agents.Agent, create bool) (changed bool, err error) {
+	doc, err := loadHookJSON(path)
+	if err != nil {
+		return false, err
 	}
 	if doc == nil {
+		if !create {
+			return false, nil // 刷新不创建
+		}
 		doc = map[string]interface{}{}
 	}
 
@@ -56,34 +145,100 @@ func installJSON(path string, a agents.Agent) error {
 	}
 	list, _ := hooksMap["SessionStart"].([]interface{})
 
-	// 参数必须写进 command 整串，不能用单独的 args 字段：宿主（如 CodeBuddy）只执行
-	// command 字段本身、会丢弃 args（实测见 docs/design/external/agent-rules-dirs.md §二）。
-	// 旧式把参数放在 args 里的钩子会被执行成裸 `rulemux`（无参数，只打印帮助、什么都不干），
-	// 所以这里先剔除该 agent 的旧钩子、再统一写新式（幂等，且能把旧配置迁移过来）。
-	// 按「规范 ID + 全部别名」剔除旧条目：方案 A 后旧安装里的 `--agent workbuddy`
-	// 也是同一 agent 的钩子，必须一并清掉，否则会与新写的条目并存、同一 SessionStart 双触发。
+	// 已是最新 ⇒ 不写盘：幂等，且让 postinstall 只在真有变化时才说话。
+	if installed, cur := inspectSessionStart(list, a); installed && cur == TargetCommand(a) {
+		return false, nil
+	}
+
+	// 按「规范 ID + 全部别名」剔除我们这个 agent 的旧条目：方案 A 后旧安装里的
+	// `--agent workbuddy` 也是同一 agent 的钩子，必须一并清掉，否则会与新写的条目
+	// 并存、同一 SessionStart 双触发。别人的条目一律原样保留。
 	list = dropRulemuxHooks(list, a.MatchIDs())
-	list = append(list, map[string]interface{}{
-		"matcher": "",
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "command",
-				"command": fmt.Sprintf("rulemux %s --agent %s", SubcommandFor(a), a.ID),
-			},
-		},
-	})
+	list = append(list, hookEntry(a))
 	hooksMap["SessionStart"] = list
 	doc["hooks"] = hooksMap
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+	if create {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return false, err
+		}
 	}
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return err
+		return false, err
 	}
 	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644)
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// loadHookJSON 读取并解析钩子配置：文件不存在或为空 ⇒ (nil, nil)。
+func loadHookJSON(path string) (map[string]interface{}, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return nil, nil
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse existing hook config %s: %w", path, err)
+	}
+	if doc == nil {
+		doc = map[string]interface{}{}
+	}
+	return doc, nil
+}
+
+// sessionStartList 取出 doc 里 hooks.SessionStart 列表（缺失返回 nil）。
+func sessionStartList(doc map[string]interface{}) []interface{} {
+	hooksMap, _ := doc["hooks"].(map[string]interface{})
+	if hooksMap == nil {
+		return nil
+	}
+	list, _ := hooksMap["SessionStart"].([]interface{})
+	return list
+}
+
+// inspectSessionStart 在 SessionStart 列表里找本 agent 的钩子，返回是否已装与它的完整命令行。
+func inspectSessionStart(list []interface{}, a agents.Agent) (installed bool, command string) {
+	for _, g := range list {
+		if !isRulemuxHookFor(g, a.MatchIDs()) {
+			continue
+		}
+		if line, ok := firstCommandLine(g); ok {
+			return true, line
+		}
+	}
+	return false, ""
+}
+
+// firstCommandLine 返回一个 SessionStart 分组里第一条钩子的完整命令行。
+func firstCommandLine(g interface{}) (string, bool) {
+	gm, ok := g.(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	hs, ok := gm["hooks"].([]interface{})
+	if !ok {
+		return "", false
+	}
+	for _, h := range hs {
+		hm, ok := h.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if line, ok := commandLineOf(hm); ok {
+			return line, true
+		}
+	}
+	return "", false
 }
 
 // commandLineOf 返回一个 hook 的完整命令行：优先用 command 字段本身；若存在旧式 args

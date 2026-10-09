@@ -140,3 +140,51 @@
 （曾出现「A 工作区能读到暗号、B 工作区读不到」的现象，原因就是 B 没装钩子，不是配置或重装问题）。
 
 **现况：钩子装在 user 级一次即全局生效，无需在每个工作区跑 init。**
+
+---
+
+## 五、配置目录解析（路径怎么定位）
+
+> **来源**：本机 CodeBuddy **4.12.1** 安装产物直接取证（2026-10-09）。
+> 取证文件：`/root/.codebuddy-server-cn/bin/stable-757a5b2fd56bc7e1fcabb38b58d2ac1694f78f6d/extensions/genie/out/extension/index.js`（打包为压缩单行 JS，下面只做格式化摘录）。
+> **适用版本**：4.12.1（本机）；WorkBuddy 与它同源，共用同一份解析逻辑与同一钩子文件。
+
+### 5.1 已坐实：用户级配置目录可由环境变量覆盖
+
+产物中该段可逐字读出：
+
+```js
+CODEBUDDY_CONFIG_DIR_ENV = "CODEBUDDY_CONFIG_DIR";
+function getCodeBuddyHomeDir() {
+  const ir = process.env[CODEBUDDY_CONFIG_DIR_ENV];
+  return ir && "" !== ir.trim() ? ir : path.join(os.homedir(), USER_DATA_DIR_NAME);
+}
+function getCodeBuddyProjectsDir() { return path.join(getCodeBuddyHomeDir(), "projects"); }
+// USER_DATA_DIR_NAME = ".codebuddy"
+```
+
+| 项 | 结论 |
+|---|---|
+| 用户级配置目录 | `$CODEBUDDY_CONFIG_DIR`（去空白后非空时）**否则** `os.homedir()/.codebuddy` |
+| 我们的钩子文件 | 上述目录 + `/settings.json`（canary 已坐实 `~/.codebuddy/settings.json` 生效，见 §四） |
+| 是否走 XDG | ❌ **无** XDG 分支：产物是「`.codebuddy` 字面量 + `homedir()`」拼接，未见 `XDG_CONFIG_HOME` |
+| Windows / macOS 差异 | **未发现**配置目录层面的平台分支；Windows 由 `os.homedir()`（`%USERPROFILE%`）覆盖 |
+| 与安装目录的关系 | `~/.codebuddy` = **用户级配置/数据**（`settings.json`、`mcp.json`、`plugins/`、`skills/`…）；`~/.codebuddy-server-cn` = **程序主体**（VS Code 远程 server，`product.json` 的 `serverApplicationName`/`serverDataFolderName`，内含 `bin/`、`extensions/`、`data/`）。rulemux **从不写安装目录** |
+
+### 5.2 未坐实，故**不采用**：`WORKBUDDY_CONFIG_DIR`
+
+同名变量在产物里出现于 `extensions/genie/out/vendor/shim/node-safe-delete-shim.cjs:286-290`，
+但它与 `CODEBUDDY_CONFIG_DIR` 并列，仅用于拼 **npm 缓存日志**白名单
+（`<configDir>/binaries/node/cli-connector-cache/_logs`）。
+**没有任何证据表明它决定 `settings.json` 的位置** ⇒ rulemux **不采用**，留待 WorkBuddy 侧的
+canary 或官方文档坐实（记在 `PROGRESS.md` 待办里）。
+
+### 5.3 rulemux 据此怎么落地
+
+- `internal/agents/registry.go` 的 `codebuddy` 条目声明
+  `HookDirEnv: "CODEBUDDY_CONFIG_DIR"` + `HookFileBase: "settings.json"`；
+  `HookFileAbsWithSource()` 的顺序是 **环境变量（非空）> `~` 展开的字面量**。
+- `doctor` 与 `init --refresh` 在环境变量生效时都会标出 `[dir from $CODEBUDDY_CONFIG_DIR]`，
+  用户能一眼看出钩子写到了哪。若该变量出现过、但用户并不真的使用它，可按它给出的路径去核对。
+- **只填「已核实」的变量**：未核实的 agent（claude / trae / codex / opencode）该字段留空，
+  一律按 `~` 或工作区字面量走 —— 这一层**绝不猜**。

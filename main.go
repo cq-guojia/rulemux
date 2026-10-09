@@ -18,7 +18,7 @@ import (
 // It is a var (not a const) so the release pipeline can inject the real tag:
 //
 //	go build -ldflags="-X main.version=1.2.3"
-var version = "0.2.0"
+var version = "0.2.1"
 
 // usage prints the top-level help.
 //
@@ -34,6 +34,7 @@ USAGE:
   rulemux inject    --agent <id>   [--config <path>]                       Tier-2: print rules to stdout for hook injection
   rulemux init      --agent <id[,id...]> [--config <path>] [--workspace <dir>]
                                                                           Generate a sample config + install SessionStart hooks
+  rulemux init      --refresh [--agent <id[,id...]>]                        Refresh already-installed hooks to the current format
   rulemux doctor    [--config <path>] [--workspace <dir>]                  Environment self-check
   rulemux verify    --agent <id> [--clean] [--workspace <dir>]             Canary acceptance test
   rulemux uninstall --agent <id[,id...]> | --off | --all [--yes]           Remove rulemux hooks and synced files

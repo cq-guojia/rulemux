@@ -45,6 +45,13 @@ type Agent struct {
 	HookFile string
 	// HookAbs 表示 HookFile 是否为绝对路径（不拼工作区）。
 	HookAbs bool
+	// HookDirEnv 是「可覆盖用户级配置目录」的环境变量名。**只在已核实（有上游产物 / 官方文档
+	// 证据）时才可填写**；为空表示只按 ~ 展开。设了它且该变量非空时，钩子文件解析为
+	// <变量值>/<HookFileBase>，优先于 HookFile 的字面量 —— 因为用户可能把配置目录挪走了，
+	// 那时写默认位置等于写进一个他不会读的目录。
+	HookDirEnv string
+	// HookFileBase 是配置目录下的钩子文件名（仅当 HookDirEnv 生效时使用），如 settings.json。
+	HookFileBase string
 	// Style 是钩子配置的写入风格：claude / trae / json（均为 JSON）或 codex（TOML）。
 	Style string
 	// Verified 表示「规则目录 / 钩子落点」是否已经官方核实。未核实的在 doctor 里标 ⚠，
@@ -94,8 +101,16 @@ var registry = []Agent{
 		RulesDir: ".codebuddy/rules",
 		// 2026-10-08 起钩子落点为 user 级 host 配置（不再是每工作区的 .codebuddy/settings.json），
 		// 与 Hindsight 的做法一致，避免 hook 配置散落在各工作区、易被误改。
-		HookFile:         "~/.codebuddy/settings.json",
-		HookAbs:          true,
+		HookFile: "~/.codebuddy/settings.json",
+		HookAbs:  true,
+		// 已核实（2026-10-09，本机 4.12.1 产物 extensions/genie/out/extension/index.js）：
+		//   CODEBUDDY_CONFIG_DIR_ENV="CODEBUDDY_CONFIG_DIR"；
+		//   getCodeBuddyHomeDir() = env["CODEBUDDY_CONFIG_DIR"] || join(homedir(), ".codebuddy")
+		// ⇒ 用户用该变量挪走配置目录时必须跟随，否则钩子会被写进他不会读的位置。
+		// 注意：产物里另一个变量 WORKBUDDY_CONFIG_DIR 只在 safe-delete 的日志白名单里出现，
+		// 未能坐实它是配置目录 ⇒ 不采用（见 docs/design/external/agent-rules-dirs.md §五）。
+		HookDirEnv:       "CODEBUDDY_CONFIG_DIR",
+		HookFileBase:     "settings.json",
 		Style:            "claude",
 		Verified:         true,
 		NeedsFrontmatter: true,
@@ -202,10 +217,29 @@ func (a Agent) RulesDirAbs(workspace string) string {
 
 // HookFileAbs 返回该 agent 钩子配置文件的绝对路径。
 func (a Agent) HookFileAbs(workspace string) string {
+	p, _ := a.HookFileAbsWithSource(workspace)
+	return p
+}
+
+// HookFileAbsWithSource 与 HookFileAbs 相同，但额外返回「目录被哪个环境变量覆盖」
+// （未覆盖时为空串）。供 doctor 解释路径来源：用户设过环境变量时能一眼看出为什么是这个路径。
+func (a Agent) HookFileAbsWithSource(workspace string) (path string, envUsed string) {
 	if a.HookAbs {
-		return expandHome(a.HookFile)
+		if d := a.configDirOverride(); d != "" {
+			return filepath.Join(d, a.HookFileBase), a.HookDirEnv
+		}
+		return expandHome(a.HookFile), ""
 	}
-	return filepath.Join(workspace, a.HookFile)
+	return filepath.Join(workspace, a.HookFile), ""
+}
+
+// configDirOverride 返回环境变量指定的配置目录；变量未声明、为空或只有空白时返回空串
+// （此时调用方回退到 HookFile 的字面量）。
+func (a Agent) configDirOverride() string {
+	if a.HookDirEnv == "" || a.HookFileBase == "" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv(a.HookDirEnv))
 }
 
 // MatchIDs 返回「能唯一指名本 agent 的所有标识」：规范 ID + 全部别名。

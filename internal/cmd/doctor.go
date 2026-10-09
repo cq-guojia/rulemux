@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
+	"github.com/cq-guojia/rulemux/internal/hooks"
 )
 
 // Doctor 环境自检：配置是否就绪、本体是否在 PATH 上、各 agent 的规则目录与钩子安装情况。
@@ -87,11 +89,28 @@ func Doctor(args []string) int {
 			fmt.Println("      Rules dir: none (Tier-2, injected via SessionStart)")
 		}
 
-		hookPath := a.HookFileAbs(ws)
-		if b, err := os.ReadFile(hookPath); err == nil && strings.Contains(string(b), "rulemux") {
-			fmt.Printf("      Hook: ✓ installed → %s\n", hookPath)
-		} else {
-			fmt.Printf("      Hook: ✗ not installed → %s (run rulemux init)\n", hookPath)
+		// 钩子三态：已装且最新 / 已装但格式过期（如升级后还缺 --hook）/ 未装。
+		// 光看文件里有没有 "rulemux" 字样是不够的 —— 那样旧格式也会显示 ✓（见设计 §9.1）。
+		hookPath, envUsed := a.HookFileAbsWithSource(ws)
+		srcNote := ""
+		if envUsed != "" {
+			srcNote = fmt.Sprintf(" [dir from $%s]", envUsed)
+		}
+		installed, cmd, err := hooks.Inspect(hookPath, a)
+		switch {
+		case errors.Is(err, hooks.ErrRefreshUnsupported):
+			fmt.Printf("      Hook: ? unchecked → %s%s (hook config format not verified yet)\n", hookPath, srcNote)
+		case err != nil:
+			fmt.Printf("      Hook: ⚠ unreadable → %s%s: %v\n", hookPath, srcNote, err)
+		case !installed:
+			fmt.Printf("      Hook: ✗ not installed → %s%s (run rulemux init --agent %s)\n", hookPath, srcNote, a.ID)
+		case cmd == hooks.TargetCommand(a):
+			fmt.Printf("      Hook: ✓ installed, up to date → %s%s\n", hookPath, srcNote)
+		default:
+			fmt.Printf("      Hook: ⚠ installed but OUTDATED → %s%s\n", hookPath, srcNote)
+			fmt.Printf("            found:    %s\n", cmd)
+			fmt.Printf("            expected: %s\n", hooks.TargetCommand(a))
+			fmt.Printf("            fix: rulemux init --refresh\n")
 		}
 		if a.Note != "" {
 			fmt.Printf("      Note: %s\n", a.Note)
