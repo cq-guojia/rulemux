@@ -18,7 +18,7 @@ import (
 // It is a var (not a const) so the release pipeline can inject the real tag:
 //
 //	go build -ldflags="-X main.version=1.2.3"
-var version = "0.2.5"
+var version = "0.2.6"
 
 // usage prints the top-level help.
 //
