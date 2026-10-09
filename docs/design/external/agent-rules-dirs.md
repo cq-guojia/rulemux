@@ -16,7 +16,7 @@
 | **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | ❌ **不会**：会话开始即固定规则快照，改动要下一个会话才生效（见 §四） | `hookSpecificOutput{hookEventName:"SessionStart", additionalContext}`（2026-10-09 实证，见下） | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules`；`SessionHint=true` |
 | Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | 部分：`/compact` 会重读项目 `CLAUDE.md`，但 `.claude/rules/` 子目录**不保证**自动回读 | 同上（`hookSpecificOutput.additionalContext`） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
 | Trae | `.trae/rules/` | `.mdc` | ✅ 递归读，最多 3 层 | 待补 | 待补 | 待补 | 需 frontmatter |
-| WorkBuddy | `.workbuddy/rules/` 🔴（待 canary 实测校准，可能实际为 `.codebuddy/rules`，见 §五） | `.md`（带 alwaysApply:true） | ⚠️ 同 CodeBuddy 读平铺非隐藏 `.md` | ❌ 不会（会话开始固定快照） | 同上 | 5.7.6（本机实测） | **2026-10-09 起拆为独立 adapter**，钩子落到 `~/.workbuddy/settings.json`（不再复用 CodeBuddy 那份） |
+| WorkBuddy | **`.codebuddy/rules/`**（与 CodeBuddy **共享**，2026-10-09 三位置对照探针坐实，见 §5.4） | `.md`（带 alwaysApply:true） | ✅ 读平铺非隐藏 `.md` | ❌ 不会（会话开始固定快照） | 同上 | 5.7.6（本机实测） | **用户级**配置/钩子独立：`~/.workbuddy/settings.json`；**工作区级**规则目录与 CodeBuddy 相同 ⇒ 两者共享目录，需走并集同步 |
 | Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
 | OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
 | DeepSeek Harness | — | — | — | — | — | 移出范围 | 用户 2026-10-07 决定移出当前范围（最开放、支持插件，后续以插件市场解决） |
@@ -122,7 +122,7 @@
 4. ~~**钩子先于读规则**~~ ❌ **已推翻（2026-10-08 首证，2026-10-09 对照实测复证）** —— 实际是**读规则先于钩子写入**：宿主在会话开始瞬间固定规则快照，SessionStart 的写入发生在其后 ⇒ **本次会话读不到刚投递 / 刚变更的规则，要下一个会话才生效**。
    实证（本机 CodeBuddy 4.12.1，工作区 `/code/open-lab/rulemux`）：先删掉 `.codebuddy/rules/__rulemux__*.md`，再**开一个全新会话**，在该会话内问两个问题（明确禁止调用工具、只凭上下文回答）→ 结果 **「上下文里有没有该规则内容」= 无；「有没有收到『规则有变化，请开新会话』提示」= 有**。钩子确实跑过并把文件重新投递（否则不会检测到「新增」而输出提示），但该会话读不到 ⇒ **差一拍成立**，且「变化提示」（`SessionHint`）是此机制下唯一正确的兜底。
    预期：**再下一个会话**应为「能抄出规则标题 + 无提示」（无变更即不提示）。
-5. **WorkBuddy** ✅ —— 见 §五：本机 2026-10-09 实测其用户级配置为**独立**目录 `~/.workbuddy`（非 `~/.codebuddy`），故 2026-10-09 起已拆为独立 registry adapter；其工作区级 rules 目录（`.workbuddy/rules` vs `.codebuddy/rules`）仍待 canary 校准（🔴）。**此结论推翻了此前「WorkBuddy 复用 CodeBuddy 同一目录与机制」的推断。**
+5. **WorkBuddy** ✅ —— 见 §5.4：本机 2026-10-09 实测其**用户级**配置为独立目录 `~/.workbuddy`（非 `~/.codebuddy`），故已拆为独立 registry adapter；但**工作区级**规则目录三位置对照探针坐实为 `.codebuddy/rules`（与 CodeBuddy 共享），`.workbuddy/rules` 不被读。**「用户级独立」不等于「工作区级也独立」——曾据此误推落点，导致规则落进 WorkBuddy 从不读的目录。**
 
 > **更正说明**：本节此前的旧结论（"点文件会被读 ⇒ 保留 `.rulemux__`"，据称 2026-10-08 canary 念出 `RULEMUX-CANARY-43371345`）属**假阳性**——当时只验证了「文件被 copy 进目录」，**未用对照探针区分「隐藏 vs 非隐藏」**，把 copy 成功误当成加载成功。2026-10-08 用三探针对照后更正。**教训：canary 必须用对照探针，且以「内容是否进入本会话上下文」为判据，而非「文件是否落盘」。**
 
@@ -191,26 +191,31 @@ canary 或官方文档坐实（记在 `PROGRESS.md` 待办里）。
 - **只填「已核实」的变量**：未核实的 agent（claude / trae / codex / opencode）该字段留空，
   一律按 `~` 或工作区字面量走 —— 这一层**绝不猜**。
 
-### 5.4 WorkBuddy 是**独立**配置目录（2026-10-09 本机实测，已核实）
+### 5.4 WorkBuddy：用户级独立，工作区级与 CodeBuddy 共享（2026-10-09 本机实测，已核实）
 
-> **来源**：本机实测（`~/.workbuddy/settings.json` 实测为 WorkBuddy 的用户级钩子配置；
-> WorkBuddy 为独立 macOS Electron 应用 `/Applications/WorkBuddy.app/`，不与 CodeBuddy 共享
-> `~/.codebuddy`）。
-> **适用版本**：WorkBuddy 5.7.6（本机）；**状态**：✅ 已核实（本机 settings.json 实测）。
-> **配套**：[`../../PROGRESS.md`](../../PROGRESS.md)。
+> **来源**：本机实测两轮 —— ① 读取 `~/.workbuddy/settings.json`（WorkBuddy 的用户级钩子配置，
+> 内含 `officeFileAssociationsRepairMarker` 标着 `5.7.6` 与 `/Applications/WorkBuddy.app`）；
+> ② **三位置对照探针**：把带 `---\nalwaysApply: true\n---` 的探针各放一份进
+> `.workbuddy/rules/`、`\.codebuddy/rules/`、`.workbuddy/memory/`，开新会话后
+> **只有 `.codebuddy/rules/probe_b.md` 进入上下文**，WorkBuddy 自报路径即为该文件。
+> **适用版本**：WorkBuddy 5.7.6（本机）；**状态**：✅ 已核实。
+> **配套**：[`../features/dir-sync.md`](../features/dir-sync.md)「共享规则目录」一节。
 
 | 项 | 结论 |
 |---|---|
-| 用户级配置目录 | `~/.workbuddy`（**不是** `~/.codebuddy`） |
-| 钩子配置文件 | `~/.workbuddy/settings.json`（与 CodeBuddy 那份**互相独立**，WorkBuddy 不读 CodeBuddy 的） |
-| `WORKBUDDY_CONFIG_DIR` | 见 §5.2：仅在 safe-delete 日志白名单出现，未坐实为配置目录 ⇒ **不采用**；registry 中 `HookDirEnv` 留空，按 `~/.workbuddy` 字面量 |
-| 工作区级 rules 目录 | `.workbuddy/rules` 🔴 **待 canary 实测校准**（可能实为 `.codebuddy/rules`，待后续验证） |
+| **用户级**配置目录 | `~/.workbuddy`（**不是** `~/.codebuddy`） |
+| **用户级**钩子文件 | `~/.workbuddy/settings.json`（与 CodeBuddy 那份**互相独立**，WorkBuddy 不读 CodeBuddy 的） |
+| **工作区级** rules 目录 | **`.codebuddy/rules`（与 CodeBuddy 共享）**；`.workbuddy/rules` **不被读** |
+| `WORKBUDDY_CONFIG_DIR` | 见 §5.2：仅在 safe-delete 日志白名单出现，未坐实为配置目录 ⇒ **不采用**；registry 中 `HookDirEnv` 留空 |
+
+**⚠ 两层是两回事，别互相推断**：曾因「用户级配置目录独立」误推成「工作区级规则目录也独立」，
+把 `RulesDir` 写成 `.workbuddy/rules`，结果规则落进 WorkBuddy 从不读的目录，**canary 连续数个会话都读不到**。
+教训：用户级与工作区级必须**分别**实测，不能用一层的结论推另一层。
 
 **对 rulemux 的影响**：
 
-- `internal/agents/registry.go` 的 `workbuddy` 是**独立条目**（`HookFile: "~/.workbuddy/settings.json"`、`HookAbs: true`），
-  不再作为 `codebuddy` 的别名收纳。此前的「方案 A」（别名合并）被本实测推翻：别名方案会把钩子写进
-  `~/.codebuddy/settings.json`（CodeBuddy 那份），WorkBuddy 根本不读 ⇒ 钩子永不触发。
-- `doctor` / `init --refresh` 对 `workbuddy` 比对的是 `~/.workbuddy/settings.json`，与 `codebuddy` 互不干扰。
-- 历史遗留：若曾在「别名时代」用 `init --agent workbuddy` 安装，钩子被写进了 `~/.codebuddy/settings.json`
-  （CodeBuddy 那份、WorkBuddy 不读），属孤儿，无需迁移；重装（拆后）会写进正确的 `~/.workbuddy/settings.json`。
+- `workbuddy` 是 registry 中的**独立条目**（`HookFile: "~/.workbuddy/settings.json"`、`HookAbs: true`），
+  不再是 `codebuddy` 的别名（别名方案会把钩子写进 WorkBuddy 不读的 `~/.codebuddy/settings.json`）。
+- 但 `RulesDir` 是 `.codebuddy/rules`，与 `codebuddy` **共享** ⇒ 同步走并集、卸载走收敛
+  （`agents.SharingRulesDir` / `config.SourcesForAny`），否则两个 agent 会互删对方文件。
+- 历史遗留：曾按 `.workbuddy/rules` 落过盘的工作区，那个目录是孤儿（WorkBuddy 不读），需手动删除。

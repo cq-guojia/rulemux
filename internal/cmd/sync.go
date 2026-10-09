@@ -118,19 +118,25 @@ func Sync(args []string) int {
 	exit := 0
 	changed := false
 	var processed []string
+	doneDirs := map[string]bool{} // 共享同一目录的 agent 只处理一次（见下）
 	for _, a := range targets {
 		if a.Tier == agents.Tier2 {
 			// Tier-2 没有规则目录可丢文件，由 inject 子命令负责注入
 			continue
 		}
 		dir := a.RulesDirAbs(ws)
-		// 每个 agent 独立处理：各自管自己的规则目录（2026-10-09 起 workbuddy 是独立条目，
-		// RulesDir 为 .workbuddy/rules，不再与 codebuddy 共用），因此不需要「同目录合并」。
-		// ⚠ 前提是两个 agent 的 RulesDir 不同：engine 的删残留是「整目录下带 __rulemux__ 前缀
-		// 但不在本次计划内的文件一律删」（engine/sync.go:164-183），一旦将来 canary 证明
-		// WorkBuddy 实际读 .codebuddy/rules 而把两者 RulesDir 改成同一个，它们会互相把对方的
-		// 文件当残留删掉 ⇒ 文件来回消失。届时须走「文件名带 agent 前缀」的方案 B。
-		srcs := cfg.SourcesFor(a.ID, ws)
+		// 共享同一规则目录的 agent（codebuddy / workbuddy 都是 .codebuddy/rules）必须**按并集**
+		// 同步：engine 的删残留是「整目录下带 __rulemux__ 前缀、不在本次计划内的一律删」
+		// （engine/sync.go:164-185），若各自只算自己的 sources，就会互相把对方的文件当残留
+		// 删掉 ⇒ 两个钩子轮流触发时文件来回消失。取并集后谁跑都不会删别人的。
+		//
+		// 同一目录也可能被 targets 里的多个 agent 命中（手动 sync 不带 --agent 时），
+		// 并集结果相同 ⇒ 第二次是纯白跑，还会重复记账，故按目录去重。
+		if doneDirs[dir] {
+			continue
+		}
+		doneDirs[dir] = true
+		srcs := cfg.SourcesForAny(unionAgentIDs(a, ws), ws)
 		create := hook && requestedID != "" && a.ID == requestedID
 		res, err := engine.Sync(dir, srcs, a.NeedsFrontmatter, create)
 		if err != nil {
@@ -224,7 +230,8 @@ func cascade(cfg *config.Config, ws string, done map[string]bool) {
 		if _, err := os.Stat(dir); err != nil {
 			continue // 目录不在（或不可读）⇒ 不碰、更不建
 		}
-		srcs := cfg.SourcesFor(a.ID, ws)
+		// 同主循环：共享目录取并集，避免删掉另一方的文件。
+		srcs := cfg.SourcesForAny(unionAgentIDs(a, ws), ws)
 		if len(srcs) == 0 {
 			continue // want 为空 ⇒ 不碰
 		}
@@ -273,7 +280,8 @@ func syncAll(cfg *config.Config) int {
 		}
 		for _, a := range agentsFromLedger(l.AgentsFor(ws)) {
 			dir := a.RulesDirAbs(ws)
-			res, err := engine.Sync(dir, cfg.SourcesFor(a.ID, ws), a.NeedsFrontmatter, false)
+			// 同主循环：共享目录取并集，避免删掉另一方的文件。
+			res, err := engine.Sync(dir, cfg.SourcesForAny(unionAgentIDs(a, ws), ws), a.NeedsFrontmatter, false)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s in %s: %v\n", a.ID, ws, err)
 				exit = 1
@@ -382,6 +390,48 @@ func emitChangeNotice(w io.Writer, protocol string) {
 
 // targetAgents 决定本次处理哪些 agent；未指定则处理全部「已验证」的 Tier-1。
 // 未做好的 agent（Verified==false）一律不参与，从源头保证只动做好的适配。
+// hookedPeers 返回「与 a 共享同一规则目录、且还装着 rulemux 钩子」的 agent（含 a 自己）。
+//
+// 「还装着」是判断某个 agent 是否仍在使用的唯一依据：卸载 = 摘钩子，钩子一没它就自然
+// 退出并集，因此**不需要任何额外的状态文件**。
+//
+// 若共享组里一个都没装钩子（纯手动 sync 的场景）⇒ 退回该共享组全部 agent，
+// 保证手动跑 `rulemux sync` 仍有东西落。
+//
+// ⚠ 卸载侧调用时必须在 `hooks.Uninstall` **之前**取好结果：钩子一摘就判不出谁还在用。
+func hookedPeers(a agents.Agent, ws string) []agents.Agent {
+	group := agents.SharingRulesDir(a)
+	var hooked []agents.Agent
+	for _, b := range group {
+		if hookInstalled(b, ws) {
+			hooked = append(hooked, b)
+		}
+	}
+	if len(hooked) == 0 {
+		return group // 一个都没装 ⇒ 退回整组（手动 sync 兜底）
+	}
+	return hooked
+}
+
+// hookInstalled 报告该 agent 是否还装着 rulemux 的 SessionStart 钩子。
+//
+// 读不了、解析失败、格式未核实（codex 的 TOML）一律按「未装」降级 —— 绝不因为读不了
+// 配置就中断同步，更不能据此误删别人的文件。
+func hookInstalled(a agents.Agent, ws string) bool {
+	installed, _, err := hooks.Inspect(a.HookFileAbs(ws), a)
+	return err == nil && installed
+}
+
+// unionAgentIDs 返回参与并集的 agent 规范 ID 列表（供 config.SourcesForAny 使用）。
+func unionAgentIDs(a agents.Agent, ws string) []string {
+	peers := hookedPeers(a, ws)
+	ids := make([]string, 0, len(peers))
+	for _, p := range peers {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
 func targetAgents(id string) []agents.Agent {
 	if id != "" {
 		a, ok := agents.Get(id)

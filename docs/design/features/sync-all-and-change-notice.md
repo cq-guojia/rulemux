@@ -86,9 +86,17 @@
 
 **2026-10-09 实测推翻「方案 A」**：本机实测表明 WorkBuddy 有**独立**的用户级配置目录 `~/.workbuddy` 与独立钩子文件 `~/.workbuddy/settings.json`，**不读** CodeBuddy 的 `~/.codebuddy/settings.json`。因此：
 
-- **已撤销方案 A 的别名合并**，改为 WorkBuddy 作为 `registry.go` 里**独立条目**（`RulesDir: ".workbuddy/rules"`、`HookFile: "~/.workbuddy/settings.json"`）；`ByRulesDir` 合并逻辑不再需要（两者 `RulesDir` 本就不同）。
+- **已撤销方案 A 的别名合并**，改为 WorkBuddy 作为 `registry.go` 里**独立条目**（`HookFile: "~/.workbuddy/settings.json"`）；两者钩子各装各的，互不影响。
 - 用户面分离仍保留：安装时把用户写的 `--agent workbuddy` 原样透传到钩子命令与回显（`hooks.TargetCommandFor` + `Install` 的 display 参数）；`Refresh`/`doctor` 比对改用 `ExpectedCommand`，沿用文件里已有的 `--agent` 标识，自愈或 `init --refresh` 都不会把 workbuddy 悄悄改回 codebuddy。
-- 见 `external/agent-rules-dirs.md` §5.4（WorkBuddy 独立配置目录，已核实，适用版本 5.7.6）。
+
+**⚠️ 后续更正（同日，三位置对照探针）**：工作区级规则目录实测为 **`.codebuddy/rules`**（与 CodeBuddy **共享**），并非上面一度推断的 `.workbuddy/rules` —— 见 `external/agent-rules-dirs.md` §5.4。**「用户级独立」≠「工作区级独立」**。
+
+⇒ 因此 `RulesDir` 取 `.codebuddy/rules`，两者**共享目录**，「每个 agent 独立处理」必须升级为：
+
+- **同步取并集**：`agents.SharingRulesDir(a)` 找出同目录的 agent，`config.SourcesForAny(ids, ws)` 取它们 sources 的并集，`engine.Sync` 一次落齐 ⇒ 谁跑都不会删别人的（`ByRulesDir`+`unionSources` 的能力以这个形式**回来了**）。
+- **「谁算在用」= 还装着钩子**（`hookedPeers` / `hookInstalled`，基于 `hooks.Inspect`）：卸载即摘钩子、天然退出并集，**不新增任何状态文件**。共享组内一个都没装（纯手动 `sync`）⇒ 退回该组全部 agent。
+- **卸载改为收敛**：`pruneRulesDir` 用 `engine.Sync(dir, remainingSrcs, false)` 把目录收敛到「仍在用 agent 的应有集合」；剩余为空 ⇒ want 为空 ⇒ 全清（自然覆盖 `--all`）。⚠ 剩余集合必须在 `hooks.Uninstall` **之前**算好。
+- 详见 `dir-sync.md`「共享规则目录」一节。
 
 ## 四、改动二：账本升级为「工作区 × Agent」
 

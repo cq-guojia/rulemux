@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/cq-guojia/rulemux/internal/agents"
+	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/engine"
 	"github.com/cq-guojia/rulemux/internal/hooks"
 	"github.com/cq-guojia/rulemux/internal/state"
@@ -70,7 +70,20 @@ func Uninstall(args []string) int {
 		}
 	}
 
+	// 收敛目录需要知道「卸载后还有谁在用这个目录」，而这依赖配置（要算剩余 agent 的文件集合）。
+	// 读不到配置 ⇒ 不动任何文件（只摘钩子），宁可留残留也不误删仍在用 agent 的文件。
+	cfg, cfgErr := config.Load(f.Get("config", config.DefaultPath()))
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ cannot read config (%v): synced files are left untouched\n", cfgErr)
+	} else if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ invalid config (%v): synced files are left untouched\n", err)
+		cfg = nil
+	}
+
 	for _, a := range targets {
+		// ⚠ 必须先于 hooks.Uninstall 计算：判据是「谁还装着钩子」，钩子一摘就判不出来了。
+		keep := remainingPeers(a, ws)
+
 		if err := hooks.Uninstall(a, ws); err != nil {
 			fmt.Fprintf(os.Stderr, "  ✗ %-10s hook: %v\n", a.ID, err)
 		} else {
@@ -78,19 +91,21 @@ func Uninstall(args []string) int {
 		}
 
 		if dir := a.RulesDirAbs(ws); dir != "" {
-			removed, err := removeRuleFiles(dir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ✗ %-10s files: %v\n", a.ID, err)
-			} else if len(removed) > 0 {
-				fmt.Printf("  ✓ %-10s removed %d synced file(s) from %s\n", a.ID, len(removed), dir)
-			} else {
+			deleted, untouched := pruneRulesDir(cfg, dir, keep, ws, a.NeedsFrontmatter)
+			switch {
+			case untouched:
+				fmt.Printf("  · %-10s files untouched (%s is not a declared workspace, or config unreadable)\n", a.ID, ws)
+			case deleted > 0:
+				fmt.Printf("  ✓ %-10s removed %d file(s) no longer needed in %s (kept %d still in use)\n",
+					a.ID, deleted, dir, len(keep))
+			default:
 				fmt.Printf("  · %-10s no synced files in %s\n", a.ID, dir)
 			}
 		}
 
 		// Revisit the other workspaces recorded in the ledger: the hook is now gone,
 		// so without this sweep their residue would never be removed.
-		if cleaned, skipped := sweepRecordedWorkspaces(a, ws); cleaned > 0 || skipped > 0 {
+		if cleaned, skipped := sweepRecordedWorkspaces(a, ws, cfg, keep); cleaned > 0 || skipped > 0 {
 			fmt.Printf("  ✓ %-10s other workspaces: removed %d residue file(s); skipped %d workspace(s) that no longer exist (kept in the ledger — revisited if the path reappears)\n",
 				a.ID, cleaned, skipped)
 		}
@@ -137,7 +152,7 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 // 返回：清理掉的文件数、因工作区已不存在而跳过的工作区数。
 // 说明：即便路径已不存在也不从账本剔除——万一该工作区日后重现（如重新 clone），
 // 下一次卸载仍会回访并清理它。
-func sweepRecordedWorkspaces(a agents.Agent, current string) (cleaned, skipped int) {
+func sweepRecordedWorkspaces(a agents.Agent, current string, cfg *config.Config, keep []agents.Agent) (cleaned, skipped int) {
 	if a.RulesDir == "" {
 		return 0, 0 // Tier-2 磁盘上不留任何文件，无需回访
 	}
@@ -146,29 +161,58 @@ func sweepRecordedWorkspaces(a agents.Agent, current string) (cleaned, skipped i
 			skipped++
 			continue // 工作区已被删除，本次无从清理
 		}
-		removed, err := removeRuleFiles(a.RulesDirAbs(ws))
-		if err != nil {
-			continue
-		}
-		cleaned += len(removed)
+		deleted, _ := pruneRulesDir(cfg, a.RulesDirAbs(ws), keep, ws, a.NeedsFrontmatter)
+		cleaned += deleted
 	}
 	return cleaned, skipped
 }
 
-// removeRuleFiles deletes every __rulemux__* file in dir (Tier-1 leftovers).
-func removeRuleFiles(dir string) ([]string, error) {
-	matches, err := filepath.Glob(filepath.Join(dir, engine.Prefix+"*"))
-	if err != nil {
-		return nil, err
-	}
-	var removed []string
-	for _, m := range matches {
-		if err := os.Remove(m); err != nil {
-			return removed, err
+// remainingPeers 返回「卸载 a 之后，仍在使用同一规则目录」的 agent。
+//
+// 判据是「还装着钩子」（hooks.Inspect），所以**必须在 hooks.Uninstall 之前调用**：
+// 钩子一摘，a 的兄弟们也判不出谁还在用了。
+func remainingPeers(a agents.Agent, ws string) []agents.Agent {
+	var out []agents.Agent
+	for _, b := range agents.SharingRulesDir(a) {
+		if b.ID == a.ID {
+			continue
 		}
-		removed = append(removed, filepath.Base(m))
+		if hookInstalled(b, ws) {
+			out = append(out, b)
+		}
 	}
-	return removed, nil
+	return out
+}
+
+// pruneRulesDir 把规则目录收敛到 keep 中那些 agent 应有的文件集合：
+// 删掉不再有人要的，保留还在用的。keep 为空 ⇒ want 为空 ⇒ 全部删除（正是 --all 的全清语义）。
+//
+// 走 engine.Sync 而不是自己 Glob 删除，好处有三个：
+//   - create=false ⇒ 目录不存在就跳过，守住「只写已存在目录」的铁律；
+//   - 复用 engine 的删残留口径（跳过子目录、只认 __rulemux__ 前缀），不会误删用户自己的文件；
+//   - 目录终态与 sync 完全一致。
+//
+// 返回：删掉的文件数、是否因「工作区未被配置声明 / 配置不可读」而完全没动。
+func pruneRulesDir(cfg *config.Config, dir string, keep []agents.Agent, ws string, frontmatter bool) (deleted int, untouched bool) {
+	if cfg == nil {
+		return 0, true // 配置不可读 ⇒ 不动文件，宁可留残留也不误删
+	}
+	if !cfg.DeclaresWorkspace(ws) {
+		return 0, true // 未声明的工作区 ⇒ 与 sync 同一条防线，不碰
+	}
+	ids := make([]string, 0, len(keep))
+	for _, b := range keep {
+		ids = append(ids, b.ID)
+	}
+	res, err := engine.Sync(dir, cfg.SourcesForAny(ids, ws), frontmatter, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ failed to prune %s: %v\n", dir, err)
+		return 0, true
+	}
+	if res.SkippedNoDir {
+		return 0, true
+	}
+	return len(res.Deleted), false
 }
 
 // UninstallHelp prints detailed English help for `rulemux uninstall`.

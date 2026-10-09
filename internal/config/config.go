@@ -237,6 +237,45 @@ func (c *Config) SourcesFor(agentID, workspace string) []Source {
 	return out
 }
 
+// SourcesForAny 返回在指定工作区下、应投递给 agentIDs 中**任一** agent 的源规则的**并集**。
+//
+// 与 SourcesFor 的差别只在 agent 那一维：命中任一 id 即收录（agents 为空视为命中全部），
+// 且每条 source 只收录一次、保持 c.Sources 原序 —— 所以对共享规则目录的多个 agent
+// 传进它们的 ID 列表，得到的就是该目录「应有文件」的完整集合。
+//
+// 用途：共享同一工作区规则目录的 agent（如 codebuddy 与 workbuddy 都落 .codebuddy/rules）
+// 必须按并集同步，否则 engine 的删残留会把另一方的文件当残留删掉。
+//
+// ⚠ 不要拿 SourcesFor("", ws) 当「全量」用：那只匹配 agents 字段为空的 source，语义不同。
+func (c *Config) SourcesForAny(agentIDs []string, workspace string) []Source {
+	if len(agentIDs) == 0 {
+		// 没有任何 agent 在要 ⇒ 该目录不该有任何文件（卸载收敛到"无人使用"时的全清场景）。
+		// 不能落到下面的循环：agents 字段为空的 source 会被误判为命中，文件反而被留下。
+		return nil
+	}
+	out := make([]Source, 0, len(c.Sources))
+	for _, s := range c.Sources {
+		if len(s.Agents) != 0 && !containsAnyFold(s.Agents, agentIDs) {
+			continue
+		}
+		if !s.MatchesWorkspace(workspace) {
+			continue
+		}
+		out = append(out, s) // 一条只收录一次：命中任一 id 即 break 出循环
+	}
+	return out
+}
+
+// containsAnyFold 报告 list 与 ids 是否存在交集（忽略大小写）。
+func containsAnyFold(list, ids []string) bool {
+	for _, id := range ids {
+		if containsFold(list, id) {
+			return true
+		}
+	}
+	return false
+}
+
 // DeclaresWorkspace 报告「该工作区是否被配置里任何一条 [[source]] 覆盖」。
 //
 // 用途：sync 的守卫 —— 若 cwd 不属于配置声明的工作区，则整体跳过（不建、不删、

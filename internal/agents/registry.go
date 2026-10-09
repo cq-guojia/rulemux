@@ -122,13 +122,17 @@ var registry = []Agent{
 	},
 	{
 		// WorkBuddy 是独立应用（macOS Electron，/Applications/WorkBuddy.app/），有自己独立的
-		// 用户级配置目录 ~/.workbuddy 与钩子文件 ~/.workbuddy/settings.json（2026-10-09 本机实测）。
+		// **用户级**配置目录 ~/.workbuddy 与钩子文件 ~/.workbuddy/settings.json（2026-10-09 实测）。
 		// 它不读 CodeBuddy 的 ~/.codebuddy/settings.json，故拆为独立条目；此前当成别名收纳
-		// （方案 A）会把钩子写错目录、永不触发。工作区级 rules 目录（.workbuddy/rules vs
-		// .codebuddy/rules）待 canary 实测校准，先标 🔴。
+		// （方案 A）会把钩子写错目录、永不触发。
+		//
+		// ⚠ 但**工作区级**规则目录与 CodeBuddy 相同，是 .codebuddy/rules（2026-10-09 三位置
+		// 对照探针坐实：只有放进 .codebuddy/rules 的探针进入 WorkBuddy 会话上下文，放进
+		// .workbuddy/rules 的不被读）。「用户级独立」不等于「工作区级也独立」，别再据此推断。
+		// ⇒ 它与 codebuddy 共享规则目录，同步走并集、卸载走收敛（见 SharingRulesDir）。
 		ID:       "workbuddy",
 		Tier:     Tier1,
-		RulesDir: ".workbuddy/rules", // 🔴 待 canary 实测校准（.workbuddy/rules vs .codebuddy/rules）
+		RulesDir: ".codebuddy/rules", // 与 codebuddy 共享；2026-10-09 探针实测坐实，非推断
 		HookFile: "~/.workbuddy/settings.json",
 		HookAbs:  true,
 		// WORKBUDDY_CONFIG_DIR 仅出现在 safe-delete 日志白名单（见 external/agent-rules-dirs.md §五），
@@ -140,7 +144,7 @@ var registry = []Agent{
 		NeedsFrontmatter: true,
 		SessionHint:      true,
 		HintProtocol:     ProtocolSessionStartAdditionalContext,
-		Note:             "Independent app (macOS Electron, /Applications/WorkBuddy.app/). Local inspection 2026-10-09 proved it has its OWN user-level config dir ~/.workbuddy and hook file ~/.workbuddy/settings.json — it does NOT read CodeBuddy's ~/.codebuddy/settings.json, so it is a separate registry entry (previously wrongly folded into codebuddy as an alias, design §三 plan A). RulesDir is .workbuddy/rules 🔴 pending canary confirmation (vs .codebuddy/rules). WORKBUDDY_CONFIG_DIR is only in a safe-delete log whitelist, not adopted (external/agent-rules-dirs.md §五).",
+		Note:             "Independent app (macOS Electron, /Applications/WorkBuddy.app/). Local inspection 2026-10-09 proved it has its OWN user-level config dir ~/.workbuddy and hook file ~/.workbuddy/settings.json — it does NOT read CodeBuddy's ~/.codebuddy/settings.json, so it is a separate registry entry (previously wrongly folded into codebuddy as an alias, design §三 plan A). BUT its WORKSPACE-level rules dir is .codebuddy/rules, the same as CodeBuddy (2026-10-09 three-position canary: only the probe in .codebuddy/rules reached the session context; .workbuddy/rules was never read) — so the two agents SHARE a rules dir and need union-on-sync / prune-on-uninstall (see SharingRulesDir). WORKBUDDY_CONFIG_DIR is only in a safe-delete log whitelist, not adopted (external/agent-rules-dirs.md §五).",
 	},
 	{
 		ID:       "trae",
@@ -236,6 +240,33 @@ func (a Agent) RulesDirAbs(workspace string) string {
 		return a.RulesDir
 	}
 	return filepath.Join(workspace, a.RulesDir)
+}
+
+// SharingRulesDir 返回「与 a 落进同一个工作区规则目录」的 agent 列表（含 a 自己）。
+//
+// 目前只有 codebuddy 与 workbuddy 共享 `.codebuddy/rules`（2026-10-09 探针实测坐实）；
+// claude / trae 各用各的目录，codex / opencode 不落盘（RulesDir 为空）⇒ 它们只会匹配到自己，
+// 调用方无须为它们做特殊处理。
+//
+// 共享目录意味着：任一方同步时的「应有文件集合」必须是**所有共享者的并集**，否则
+// engine 的删残留（整目录扫 __rulemux__ 前缀、不在本次计划内就删）会把另一方的文件
+// 当残留删掉 —— 表现为两个 agent 的钩子轮流触发时文件来回消失。
+//
+// 只收 Tier-1：Tier-2 的 RulesDir 为空，天然不匹配任何非空目录。
+func SharingRulesDir(a Agent) []Agent {
+	if a.RulesDir == "" {
+		return []Agent{a}
+	}
+	out := []Agent{a}
+	for _, b := range All() {
+		if b.ID == a.ID || b.Tier != Tier1 {
+			continue
+		}
+		if b.RulesDir == a.RulesDir {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // HookFileAbs 返回该 agent 钩子配置文件的绝对路径。

@@ -45,11 +45,13 @@ func TestSupportedOnlyVerified(t *testing.T) {
 	if got, want := wb.HookFileAbs(""), ExpandHome("~/.workbuddy/settings.json"); got != want {
 		t.Errorf("workbuddy HookFileAbs = %q, want %q", got, want)
 	}
-	if wb.RulesDir != ".workbuddy/rules" {
-		t.Errorf("workbuddy RulesDir = %q, want .workbuddy/rules", wb.RulesDir)
+	// 工作区级规则目录与 codebuddy 相同（2026-10-09 三位置探针坐实：WorkBuddy 只读
+	// .codebuddy/rules，.workbuddy/rules 不被读）。用户级独立 ≠ 工作区级独立。
+	if wb.RulesDir != ".codebuddy/rules" {
+		t.Errorf("workbuddy RulesDir = %q, want .codebuddy/rules", wb.RulesDir)
 	}
 	if wb.HookFileAbs("") == ExpandHome("~/.codebuddy/settings.json") {
-		t.Error("workbuddy 不应再指向 ~/.codebuddy/settings.json")
+		t.Error("workbuddy 的钩子不应指向 ~/.codebuddy/settings.json（钩子仍是自己的 ~/.workbuddy）")
 	}
 
 	// codebuddy 不再把 workbuddy 当别名收纳
@@ -59,6 +61,47 @@ func TestSupportedOnlyVerified(t *testing.T) {
 	}
 	if !contains(cb.Aliases, "codebuddy-cn") {
 		t.Error("codebuddy 应保留 codebuddy-cn 别名")
+	}
+}
+
+// TestSharingRulesDir：codebuddy 与 workbuddy 共享 .codebuddy/rules ⇒ 必须互相出现在
+// 对方的共享列表里；claude / trae 各用各的目录 ⇒ 只匹配到自己；Tier-2 不落盘 ⇒ 同样只有自己。
+func TestSharingRulesDir(t *testing.T) {
+	ids := func(as []Agent) []string {
+		out := make([]string, 0, len(as))
+		for _, a := range as {
+			out = append(out, a.ID)
+		}
+		return out
+	}
+
+	for _, id := range []string{"codebuddy", "workbuddy"} {
+		a, _ := Get(id)
+		got := ids(SharingRulesDir(a))
+		if !contains(got, "codebuddy") || !contains(got, "workbuddy") {
+			t.Errorf("%s 的共享列表应含 codebuddy 与 workbuddy, got %v", id, got)
+		}
+		if !contains(got, id) {
+			t.Errorf("%s 的共享列表应含自己, got %v", id, got)
+		}
+	}
+
+	// 不共享目录的：只匹配到自己
+	for _, id := range []string{"claude", "trae"} {
+		a, _ := Get(id)
+		got := ids(SharingRulesDir(a))
+		if len(got) != 1 || got[0] != id {
+			t.Errorf("%s 的共享列表应只有自己, got %v", id, got)
+		}
+	}
+
+	// Tier-2（RulesDir 为空，不落盘）：只有自己
+	for _, id := range []string{"codex", "opencode"} {
+		a, _ := Get(id)
+		got := ids(SharingRulesDir(a))
+		if len(got) != 1 || got[0] != id {
+			t.Errorf("%s（Tier-2）的共享列表应只有自己, got %v", id, got)
+		}
 	}
 }
 

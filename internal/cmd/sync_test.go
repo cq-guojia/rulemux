@@ -279,3 +279,104 @@ func TestCascadeNeverCreatesDirs(t *testing.T) {
 		}
 	}
 }
+
+// installHook 在假 HOME 下为指定 agent 写一条 rulemux SessionStart 钩子，
+// 使 hookInstalled(...) 判定为「已装」。返回写入的文件路径。
+func installHook(t *testing.T, home, dirName, agentID string) string {
+	t.Helper()
+	p := filepath.Join(home, dirName, "settings.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --hook --agent ` + agentID + `"}]}]}}`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func mustExist(t *testing.T, p string) {
+	t.Helper()
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("期望存在 %s: %v", p, err)
+	}
+}
+
+// TestSyncSharedRulesDir_NoMutualDeletion：codebuddy 与 workbuddy 共享 .codebuddy/rules。
+// 两个 agent 各自只投一部分 source，若不同步取并集，后跑的那个会把先跑的文件当残留删掉
+// ⇒ 两个钩子轮流触发时文件来回消失。本用例锁住「不互删」。
+func TestSyncSharedRulesDir_NoMutualDeletion(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := os.MkdirAll(filepath.Join(ws, ".codebuddy", "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := filepath.Join(tmp, "a.md") // 只投 workbuddy
+	b := filepath.Join(tmp, "b.md") // 只投 codebuddy
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, []byte("# x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfgPath := writeConfig(t, tmp,
+		"[[source]]\npath = \""+a+"\"\nagents = [\"workbuddy\"]\n\n"+
+			"[[source]]\npath = \""+b+"\"\nagents = [\"codebuddy\"]\n")
+
+	installHook(t, home, ".workbuddy", "workbuddy")
+	installHook(t, home, ".codebuddy", "codebuddy")
+
+	dir := filepath.Join(ws, ".codebuddy", "rules")
+	fa := filepath.Join(dir, "__rulemux__a.md")
+	fb := filepath.Join(dir, "__rulemux__b.md")
+
+	// workbuddy 的钩子先跑：并集 ⇒ 两个文件都落
+	_ = captureStdout(t, func() {
+		Sync([]string{"--config", cfgPath, "--workspace", ws, "--hook", "--agent", "workbuddy"})
+	})
+	mustExist(t, fa)
+	mustExist(t, fb)
+
+	// codebuddy 的钩子再跑：不得把 workbuddy 的 a.md 当残留删掉
+	_ = captureStdout(t, func() {
+		Sync([]string{"--config", cfgPath, "--workspace", ws, "--hook", "--agent", "codebuddy"})
+	})
+	mustExist(t, fa)
+	mustExist(t, fb)
+}
+
+// TestSyncSharedRulesDir_FallsBackToWholeGroupWhenNoHook：共享组里一个钩子都没装时
+// （纯手动 sync 场景）必须退回整组并集，否则手动跑什么都不落。
+func TestSyncSharedRulesDir_FallsBackToWholeGroupWhenNoHook(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := os.MkdirAll(filepath.Join(ws, ".codebuddy", "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := filepath.Join(tmp, "a.md")
+	b := filepath.Join(tmp, "b.md")
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, []byte("# x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfgPath := writeConfig(t, tmp,
+		"[[source]]\npath = \""+a+"\"\nagents = [\"workbuddy\"]\n\n"+
+			"[[source]]\npath = \""+b+"\"\nagents = [\"codebuddy\"]\n")
+
+	// 一个钩子都不装
+	_ = captureStdout(t, func() {
+		Sync([]string{"--config", cfgPath, "--workspace", ws})
+	})
+
+	dir := filepath.Join(ws, ".codebuddy", "rules")
+	mustExist(t, filepath.Join(dir, "__rulemux__a.md"))
+	mustExist(t, filepath.Join(dir, "__rulemux__b.md"))
+}

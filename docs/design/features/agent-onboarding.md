@@ -16,6 +16,12 @@
 要核实并记录到 [`external/agent-rules-dirs.md`](../external/agent-rules-dirs.md)（每条带出处 `文件:行号` 或包版本，并标适用版本）：
 
 - [ ] 工作区规则目录在哪、扩展名是什么、是否读目录下**全部**文件
+- [ ] ⚠ **工作区规则目录必须单独实测**（对照探针：把同内容探针分别放进候选目录，开新会话问它读没读到）——
+  **不要由「用户级配置目录是否独立」推断工作区级**：WorkBuddy 就是用户级独立（`~/.workbuddy`）但工作区级
+  仍与 CodeBuddy 相同（`.codebuddy/rules`），曾据此误推落点、连续数个会话读不到（见
+  [`external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §5.4）
+- [ ] 该目录是否**与已注册的其它 agent 相同**（相同 ⇒ 共享目录：同步须取并集、卸载须收敛，
+  见 [`dir-sync.md`](dir-sync.md)「共享规则目录」）
 - [ ] 是否有目录模式；无目录（只认单文件 `AGENTS.md`）⇒ 判为 **Tier-2**，走注入
 - [ ] hooks 配置文件的落点与 schema；是否支持 `type:"command"` 直接 spawn 二进制
 - [ ] hook 的**会话生命周期事件**有哪些（`SessionStart` 等）
@@ -29,7 +35,9 @@
 
 - [ ] `ID`（配置里 `agents` 字段写它）、可选 `Aliases`
 - [ ] `Tier`：`Tier1`（有目录，真拷贝）或 `Tier2`（无目录，走注入）
-- [ ] `RulesDir`：规则目录，相对工作区根；Tier-2 留空 `""`（`RulesDirAbs` 返回空串 ⇒ 卸载时不找文件）
+- [ ] `RulesDir`：规则目录，相对工作区根；Tier-2 留空 `""`（`RulesDirAbs` 返回空串 ⇒ 卸载时不找文件）。
+      可能与其它 agent **相同**（共享目录，如 codebuddy 与 workbuddy 都是 `.codebuddy/rules`）——
+      此时 `SharingRulesDir` 会把它们归为一组，同步自动取并集、卸载自动收敛，**无须为该 agent 写特殊逻辑**
 - [ ] `HookFile` + `HookAbs`：
   - 钩子在 user 级 host 配置 ⇒ `HookFile: "~/..."` + `HookAbs: true`（**现在 codebuddy / workbuddy / codex 都是这种**，见 [`architecture.md`](../architecture.md) §五）
   - 钩子在工作区级 ⇒ 相对路径 + `HookAbs: false`
