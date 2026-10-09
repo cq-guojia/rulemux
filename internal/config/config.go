@@ -176,11 +176,48 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// 顺序要紧：先把 "~" 展开成绝对路径，再展开组引用 —— 组引用合并时按**同一形态的
+	// 绝对路径**去重，才不会出现 "/a.md" 与 "~/a.md" 被当成两个文件而重复投递。
+	c.expandHomes()
+
 	if err := c.resolveGroups(); err != nil {
 		return nil, err
 	}
 	c.canonicalizeAgents()
 	return c, nil
+}
+
+// expandHomes 把配置里所有路径值中的 "~" / "~/" 展开为当前用户的 HOME，
+// 使同一份配置能跨机器、跨用户复用（不必硬编码 /Users/xxx 这类前缀）。
+//
+// 覆盖四处：Source.Paths、Source.Workspaces、FileGroup.Paths、WorkspaceGroup.Workspaces。
+// 含 glob 的值（如 "~/proj/*"）同样先展开再匹配，单段 "*" / 跨段 "**" 的语义不变。
+//
+// 展开逻辑复用 agents.ExpandHome（全项目 "~" 展开的单一真源），此处不做第二份实现；
+// 取不到 HOME 时它会原样返回，绝不静默改坏用户写的路径。
+func (c *Config) expandHomes() {
+	for i := range c.Sources {
+		c.Sources[i].Paths = expandHomesAll(c.Sources[i].Paths)
+		c.Sources[i].Workspaces = expandHomesAll(c.Sources[i].Workspaces)
+	}
+	for i := range c.FileGroups {
+		c.FileGroups[i].Paths = expandHomesAll(c.FileGroups[i].Paths)
+	}
+	for i := range c.WorkspaceGroups {
+		c.WorkspaceGroups[i].Workspaces = expandHomesAll(c.WorkspaceGroups[i].Workspaces)
+	}
+}
+
+// expandHomesAll 把一组路径里的 "~" / "~/" 展开为 HOME；空切片原样返回。
+func expandHomesAll(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]string, len(in))
+	for i, p := range in {
+		out[i] = agents.ExpandHome(p)
+	}
+	return out
 }
 
 // SourcesFor 返回在指定工作区下、应投递给指定 agent 的源规则。

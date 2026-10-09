@@ -2,11 +2,13 @@
 # 默认位置 ~/.rulemux/config.toml（目录可任意指定，非必须工作区）
 #
 # path      = 源文件路径（磁盘任意位置）。单个：path = "a.md"；数组：path = ["a.md", "b.md"]
+#             "~" 或 "~/" 开头会展开为你的 HOME —— 同一份配置可跨机器复用，不必硬编码用户名
 # agents    = 投递给哪些 agent；省略 = 全部
 # workspace = 适用于哪些工作区；单个或数组都行；省略 / "*" / "all" = 所有工作区
 #             支持业界标准 glob："*" 单段、"**" 跨段递归，可出现在中间，例如：
 #               workspace = "/abs/**/B"   # 匹配 /abs 下任意深度的名为 B 的工作区
 #               workspace = "**/B"        # 匹配任意位置、任意层级名为 B 的工作区
+#             workspace 同样支持 "~" 开头，且可与 glob 混用：workspace = "~/Agent.Workspace/*"
 
 [[source]]
 path = ["C:/rules/team-conventions.md", "C:/rules/style.md"]
@@ -17,6 +19,12 @@ agents = ["claude", "codebuddy", "trae"]
 path = "D:/notes/project-a.txt"
 agents = ["codex"]
 workspace = ["/path/to/proj-a", "/path/to/proj-b"]
+
+# 用 "~" 的写法（同一份配置跨机器通用，不必写死 /Users/xxx）：
+[[source]]
+path = ["~/Agent.Workspace/00.RULES/base.md"]
+agents = ["codebuddy"]
+workspace = ["~/Agent.Workspace/*"]
 
 # agents 取值：
 #   Tier-1（真实拷贝，进规则目录）：claude / codebuddy / workbuddy / trae

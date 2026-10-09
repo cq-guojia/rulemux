@@ -66,3 +66,26 @@ MCP 缓存 `installed_servers_cache.json` 中条目状态为 `"connected"`、`"c
   即 **CodeBuddy skills marketplace 自带的版本检查器**（记录远端版本 / 上次尝试 / 上次成功 / 失败次数）在拉新版。
 
 **对 rulemux 的意义**：不要误以为「做一个 MCP 就能白嫖自动更新」——那是市场机制，不是 MCP 的能力；而 rulemux 是单二进制 + 钩子，走不了插件市场。升级策略已拍板为「包管理器手动更新」，见 [`../requirements.md`](../requirements.md) §五。
+
+## 五、它的路径型配置支持 `~`（2026-10-09 核实）
+
+> **类型**：外部事实（第三方工具侧）
+> **适用版本**：`@vectorize-io/hindsight-coding-agents` **0.6.1**（容器内 linux，取自 `~/.hindsight/coding-agents/package.json`）
+> **状态**：🟢 **已核实**（直接读 dist 源码，非文档推测）；⚠ **用户 macOS 上的那份版本待复核**
+> **来源**：`~/.hindsight/coding-agents/dist/index.js:305-308`（`configuredDir`）
+> **配套**：[`../config-groups.md`](../config-groups.md)（rulemux 据此决定配置侧也支持 `~`）
+
+```js
+function configuredDir(dir) {
+  const expanded = dir === "~" || dir.startsWith("~/") ? join5(homedir2(), dir.slice(1)) : dir;
+  return normalize(expanded).replace(new RegExp(`\\${sep}+$`), "");
+}
+```
+
+| 项 | 结论 |
+|---|---|
+| 支持的写法 | `~` 与 `~/` 两种，展开为 `homedir()` |
+| 服务哪些配置项 | `mapPathToBank`（经 `mapLookup`，`index.js:316`）与 `optInPaths`（经 `isOptedIn`，`index.js:338`） |
+| 不支持 | `~user` 形式（代码里只判 `dir === "~"` 与 `startsWith("~/")`） |
+
+**对 rulemux 的意义**：「配置里的路径支持 `~`」是同类工具的通行做法 —— 用户据此要求 rulemux 对齐，以免同一份 `config.toml` 在 NAS（`/workspace/...`）与本机 macOS（`/Users/GuoJia/...`）之间要靠 `sed` 换前缀。rulemux 已于 2026-10-09 实现，真源为 `agents.ExpandHome`（同时服务钩子路径与配置路径），见 `config-groups.md`。

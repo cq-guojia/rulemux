@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -382,5 +383,143 @@ func TestDeclaresWorkspace(t *testing.T) {
 	empty := &Config{}
 	if empty.DeclaresWorkspace("/proj/a") {
 		t.Fatal("空配置不该声明任何工作区")
+	}
+}
+
+// tildeHome 造一个假的 HOME 并让 os.UserHomeDir() 认它，返回其绝对路径。
+//
+// 先 EvalSymlinks 是因为 MatchesWorkspace 会解析符号链接：macOS 上 t.TempDir() 常是
+// /var/...（真实路径 /private/var/...），不先解析会让「配置的 ~/」与「解析后的工作区」
+// 对不上而误判失败。
+func tildeHome(t *testing.T) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		home = t.TempDir()
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows 走这个变量
+	return home
+}
+
+func writeConfig(t *testing.T, content string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestExpandHomes_Paths 校验配置里的 "~" / "~/" 被展开为 HOME，
+// 而非 "~" 开头的绝对路径必须原样保留（回归保护）。
+func TestExpandHomes_Paths(t *testing.T) {
+	home := tildeHome(t)
+	p := writeConfig(t, `[[file_group]]
+name = "base"
+path = ["~/00.RULES/100.BASE.md"]
+
+[[source]]
+path = "~/00.RULES/direct.md"
+
+[[source]]
+path = ["/abs/no-tilde.md", "~"]
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := c.FileGroups[0].Paths[0], filepath.Join(home, "00.RULES", "100.BASE.md"); got != want {
+		t.Errorf("file_group.path 未展开: got %q, want %q", got, want)
+	}
+	if got, want := c.Sources[0].Paths[0], filepath.Join(home, "00.RULES", "direct.md"); got != want {
+		t.Errorf("source.path 未展开: got %q, want %q", got, want)
+	}
+	// 绝对路径不许被动过
+	if got := c.Sources[1].Paths[0]; got != "/abs/no-tilde.md" {
+		t.Errorf("非 ~ 开头的绝对路径被改动: %q", got)
+	}
+	// 裸 "~" = HOME 本身
+	if got := c.Sources[1].Paths[1]; got != home {
+		t.Errorf("裸 ~ 应展开为 HOME 本身: got %q, want %q", got, home)
+	}
+}
+
+// TestExpandHomes_WorkspaceGlob 校验含 glob 的 workspace 先展开再匹配，
+// 单段 "*" 只匹配直接子目录一级的既有语义不变。
+func TestExpandHomes_WorkspaceGlob(t *testing.T) {
+	home := tildeHome(t)
+	p := writeConfig(t, `[[source]]
+path = ["~/00.RULES/a.md"]
+workspace = ["~/Agent.Workspace/*"]
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := c.Sources[0].Workspaces[0], filepath.Join(home, "Agent.Workspace", "*"); got != want {
+		t.Fatalf("workspace 未展开: got %q, want %q", got, want)
+	}
+	// 直接子目录一级 ⇒ 命中
+	if !c.Sources[0].MatchesWorkspace(filepath.Join(home, "Agent.Workspace", "Explore")) {
+		t.Error("~/Agent.Workspace/* 应匹配其直接子目录")
+	}
+	// 更深一层 ⇒ 不命中（单段 * 不递归）
+	if c.Sources[0].MatchesWorkspace(filepath.Join(home, "Agent.Workspace", "a", "b")) {
+		t.Error("单段 * 不该递归匹配更深层")
+	}
+	// 别的目录 ⇒ 不命中
+	if c.Sources[0].MatchesWorkspace(filepath.Join(home, "Other", "x")) {
+		t.Error("不该匹配 ~/Agent.Workspace 之外的目录")
+	}
+}
+
+// TestExpandHomes_GroupInheritance 校验组引用（use）展开后拿到的同样是已展开的绝对路径
+// —— 展开必须在 resolveGroups 之前完成，否则 "/a.md" 与 "~/a.md" 会被当成两个文件。
+func TestExpandHomes_GroupInheritance(t *testing.T) {
+	home := tildeHome(t)
+	p := writeConfig(t, `[[file_group]]
+name = "base"
+path = ["~/00.RULES/100.BASE.md"]
+
+[[file_group]]
+name = "work"
+use = ["base"]
+path = ["~/00.RULES/200.WORKSPACE.md"]
+
+[[source]]
+groups = ["work"]
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		filepath.Join(home, "00.RULES", "100.BASE.md"),
+		filepath.Join(home, "00.RULES", "200.WORKSPACE.md"),
+	}
+	got := c.Sources[0].Paths
+	if len(got) != len(want) {
+		t.Fatalf("继承后应有 %d 个文件, got %d: %v", len(want), len(got), got)
+	}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("继承来的路径未展开或缺失: want %q in %v", w, got)
+		}
+	}
+	for _, g := range got {
+		if strings.HasPrefix(g, "~") {
+			t.Errorf("组展开后仍残留 ~ 路径: %q", g)
+		}
 	}
 }

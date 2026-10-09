@@ -64,6 +64,7 @@ workspace = ["/standalone"] # 也可混具体路径
 - 解析时：`groups` 递归展开写入 `Paths`；`workspace_groups` 递归展开写入 `Workspaces`；原有的 `path` / `workspace` 字段保持原值，与组展开结果**合并**。
 - `groups` / `path` 可只用一个或并存；`workspace_groups` / `workspace` 同理。
 - 嵌套深度不限，但必须无环。
+- **路径支持 `~` 展开**：`path` / `workspace`（含 `file_group` / `workspace_group` 组内）写 `~` 或 `~/` 开头会展开为 HOME，因此同一份配置可跨机器、跨用户复用，不必硬编码 `/Users/xxx` 这类前缀；含 glob 的值（如 `~/proj/*`）同样先展开再匹配，glob 语义不变。展开在**组引用展开之前**完成（`Load` → `expandHomes` → `resolveGroups`），所以 `"/a.md"` 与 `"~/a.md"` 不会被当成两个文件而重复投递。实现真源是 `agents.ExpandHome`，配置侧不另做一份。
 
 ## 4. 解析与展开语义
 

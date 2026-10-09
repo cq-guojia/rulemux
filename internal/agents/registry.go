@@ -251,7 +251,7 @@ func (a Agent) HookFileAbsWithSource(workspace string) (path string, envUsed str
 		if d := a.configDirOverride(); d != "" {
 			return filepath.Join(d, a.HookFileBase), a.HookDirEnv
 		}
-		return expandHome(a.HookFile), ""
+		return ExpandHome(a.HookFile), ""
 	}
 	return filepath.Join(workspace, a.HookFile), ""
 }
@@ -277,12 +277,23 @@ func (a Agent) MatchIDs() []string {
 	return out
 }
 
-// expandHome 把 ~/ 开头的路径展开为当前用户的 HOME。
-func expandHome(p string) string {
-	if strings.HasPrefix(p, "~/") {
-		if h, err := os.UserHomeDir(); err == nil && h != "" {
-			return filepath.Join(h, p[2:])
-		}
+// ExpandHome 把 "~" 或 "~/" 开头的路径展开为当前用户的 HOME。
+//
+// 它是全项目「~ 展开」的单一真源：agents 包用它解析钩子文件路径，config 包用它解析
+// 配置里的 path / workspace —— 同一逻辑不许出现第二份副本。
+//
+// 取不到 HOME（异常环境）时**原样返回**，绝不静默改坏用户写的路径。
+// 不支持 "~user" 形式（无需求、无参照）。
+func ExpandHome(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p
 	}
-	return p
+	h, err := os.UserHomeDir()
+	if err != nil || h == "" {
+		return p // 降级：原样返回
+	}
+	if p == "~" {
+		return h
+	}
+	return filepath.Join(h, p[2:])
 }

@@ -42,13 +42,13 @@ func TestSupportedOnlyVerified(t *testing.T) {
 	if !ok {
 		t.Fatal("Get(\"workbuddy\") 应解析到独立条目")
 	}
-	if got, want := wb.HookFileAbs(""), expandHome("~/.workbuddy/settings.json"); got != want {
+	if got, want := wb.HookFileAbs(""), ExpandHome("~/.workbuddy/settings.json"); got != want {
 		t.Errorf("workbuddy HookFileAbs = %q, want %q", got, want)
 	}
 	if wb.RulesDir != ".workbuddy/rules" {
 		t.Errorf("workbuddy RulesDir = %q, want .workbuddy/rules", wb.RulesDir)
 	}
-	if wb.HookFileAbs("") == expandHome("~/.codebuddy/settings.json") {
+	if wb.HookFileAbs("") == ExpandHome("~/.codebuddy/settings.json") {
 		t.Error("workbuddy 不应再指向 ~/.codebuddy/settings.json")
 	}
 

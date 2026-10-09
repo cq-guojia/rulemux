@@ -31,6 +31,9 @@ const exampleConfig = `# rulemux configuration file
 #   path      Source file(s); may live anywhere on disk. Both forms work:
 #               path = "/abs/path/to/your-rules.md"          # a single file
 #               path = ["/abs/path/a.md", "/abs/path/b.md"]  # a list (shares agents/workspace below)
+#             A leading "~" or "~/" is expanded to your home directory, so the same
+#             config works on every machine without hardcoding a username:
+#               path = "~/Agent.Workspace/00.RULES/base.md"
 #
 #   agents    Which agents receive this batch; omitted = every *supported* agent.
 #             Current verified values (installable):
@@ -52,6 +55,9 @@ const exampleConfig = `# rulemux configuration file
 #             segments and may appear in the middle, e.g.:
 #               workspace = "/abs/**/B"                 # any depth under /abs named B
 #               workspace = "**/B"                      # B at any location or nesting level
+#             A leading "~" / "~/" is expanded to your home directory here as well,
+#             and still works with globs:
+#               workspace = "~/Agent.Workspace/*"
 #
 # --- Advanced: bundle things into "groups" to avoid repetition -------------------
 # Once you have many files, bundle your common files / workspaces into groups and
