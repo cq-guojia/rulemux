@@ -48,6 +48,6 @@ rulemux 适配 = **Go 二进制把规则真实拷贝进 `<cwd>/.dsh/rules`** + *
 | 安装/刷新/检查/卸载 | ✅ | `internal/hooks/dsh.go`（幂等标记块、`[]` 归一、保留他人行）+ `install.go` 七处分派 |
 | CLI 输出分支 | ✅ | `init.go`（plugin registered）/ `doctor.go`（Plugin 三态）/ `uninstall.go`（plugin removed） |
 | 文档回写 | ✅ | 本节 + `design/features/dir-sync.md` DSH 一节 |
-| **canary 坐实** | 🔴 待办 | 本机未装 dsh；需装一次 dsh，`rulemux verify` + 新会话核验注入后置 `Verified=true` |
+| **canary 坐实** | 🔴 待办（已先行开放） | 2026-10-10 用户拍板把 `Verified` 置 `true` 先行开放（本机无 dsh 跑不了 canary）；真机待办不变：装 dsh → `rulemux verify --agent dsh` → 新会话核验注入 |
 
 设计细节沿用前面各节：`Tier1`（真实拷贝）+ 插件只读 `__rulemux__*`、首轮注入一次、compaction 补回（仅在宿主能证明确实丢了时才补，避免每轮重注）。

@@ -198,8 +198,9 @@ var registry = []Agent{
 		//     that natively reads a rules dir.
 		// Reusing the existing "user-level config dir override" mechanism for DSH_HOME is exact:
 		// dsh resolves its home as $DSH_HOME else ~/.dsh (hindsight installer.ts:1742-1745).
-		// 🔴 NOT yet canary-verified (no dsh runtime on this machine) ⇒ Verified=false gates
-		// install/sync until a real dsh session confirms the injection (docs/worklog/dsh-adapter.md).
+		// 2026-10-10 用户拍板「先行开放」（本机无 dsh 可跑 canary）⇒ Verified=true 让 init/verify 可用。
+		// ⚠ 语义漂移：本仓库 Verified 原义为「canary 坐实」，此处是「由用户决定先行开放」；
+		// 注入链路仍未在真机坐实，跑过一次真 dsh 后据此复核（docs/worklog/dsh-adapter.md）。
 		ID:       "dsh",
 		Aliases:  []string{"deepseek", "deepseek-harness"},
 		Tier:     Tier1,
@@ -210,11 +211,12 @@ var registry = []Agent{
 		HookDirEnv:   "DSH_HOME",
 		HookFileBase: "cordis.patch.yml",
 		Style:        "dsh",
-		Verified:     false,
+		// 先行开放（见上）；canary 坐实后复核语义。
+		Verified: true,
 		// 插件每会话首轮现读 .dsh/rules ⇒ 无 CodeBuddy 式「差一拍」，不需要变化提示。
 		SessionHint:  false,
 		HintProtocol: "",
-		Note:         "Plugin-first host: loads a native Cordis plugin from $DSH_HOME/cordis.patch.yml and has NO hook binary (hindsight src/dsh.ts:1-24, installer.ts:1716-1788). rulemux syncs real copies into .dsh/rules and installs a minimal Cordis plugin that injects them once at agent/pre-step. 🔴 canary pending: confirm the injection on a real dsh install, then set Verified=true (docs/worklog/dsh-adapter.md).",
+		Note:         "Plugin-first host: loads a native Cordis plugin from $DSH_HOME/cordis.patch.yml and has NO hook binary (hindsight src/dsh.ts:1-24, installer.ts:1716-1788). rulemux syncs real copies into .dsh/rules and installs a minimal Cordis plugin that injects them once at agent/pre-step. Enabled 2026-10-10 by user decision (no dsh runtime was available to run canary); the injection chain is still unverified on a real dsh — re-check after one real session (docs/worklog/dsh-adapter.md).",
 	},
 }
 
