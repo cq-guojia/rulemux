@@ -192,7 +192,7 @@ agents exist locally is unreliable, so the choice is always yours.
 
 SUPPORTED AGENTS (value of --agent; only VERIFIED agents can be installed):
   codebuddy   CodeBuddy   Tier-1  .codebuddy/rules/   [verified — installable]
-  workbuddy   WorkBuddy   Tier-1  .codebuddy/rules/   [verified — shares CodeBuddy dir]
+              aliases: workbuddy, codebuddy-cn (exactly the same agent, dir and hook)
 
 The following are registered but NOT YET verified, so init refuses to install them
 until their adapter is canary-tested and flipped to verified:

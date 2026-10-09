@@ -19,6 +19,8 @@
 - [ ] 是否有目录模式；无目录（只认单文件 `AGENTS.md`）⇒ 判为 **Tier-2**，走注入
 - [ ] hooks 配置文件的落点与 schema；是否支持 `type:"command"` 直接 spawn 二进制
 - [ ] hook 的**会话生命周期事件**有哪些（`SessionStart` 等）
+- [ ] **会话内是否会重读规则目录**（不会 ⇒ 需要「变化提示」`SessionHint`；会热重载 ⇒ 保持 false）
+- [ ] hook 的 stdout **输出协议**（能否用 `hookSpecificOutput.additionalContext` 注入）⇒ 决定 `HintProtocol`
 
 只有核实完成后才允许标 `Verified=true`。未核实前： **`Verified=false` 且不得投入实现依据**。
 
@@ -45,7 +47,7 @@
 ## 三、删除动作（uninstall）——最易漏的一项
 
 - [ ] `internal/hooks/uninstall*.go` 给该 Style 加**移除**分支，且只删 rulemux 自己那条（现有 `isRulemuxHook` / `blockIsRulemux`）
-- [ ] 文件清理走 `removeRuleFiles(dir)`，它只 glob `.rulemux__` 前缀 ⇒ **用户的源文件与规则目录里的其它文件天然不受影响**（详见 §五）
+- [ ] 文件清理走 `removeRuleFiles(dir)`，它只 glob `__rulemux__` 前缀 ⇒ **用户的源文件与规则目录里的其它文件天然不受影响**（详见 §五）
 - [ ] Tier-2（`RulesDir == ""`）**磁盘上不留文件**，卸载只需删钩子——不要为它去找"残留文件"
 - [ ] **跨工作区清理**：钩子若在 user 级（全局），卸载时必须按工作区账本回访其它工作区，否则残留再无机会被删除（见 §四）
 
@@ -54,9 +56,12 @@
 > 背景：钩子装在 user 级 ⇒ 对所有工作区全局生效；但规则文件落在**各工作区本地**。
 > 一旦卸载移除了钩子，就不再有 sync 触发 ⇒ 其它工作区的残留永不会被自动清理。
 
-- [ ] Tier-1 同步成功后调用 `state.Record(ws)` 记账（`sync.go` 已接）
+- [ ] Tier-1 同步成功后调用 `state.Record(ws, agentID)` 记账（**账本 v2 = 工作区 × Agent**，一个工作区可对应多个 agent）
+- [ ] **只在「确有处理」时记账**：被守卫跳过、或目录不存在被 `create=false` 跳过时**不记**（否则会把无关工作区灌进账本）
 - [ ] 卸载时调用 `sweepRecordedWorkspaces` 按账本逐个工作区回访清理
-- [ ] **账本只增不减**：即便工作区已被删除/清空也保留记录 ⇒ 路径日后重现（如重新 clone）仍会被回访
+- [ ] **账本只增不减**：即便工作区已被删除/清空也保留记录 ⇒ 路径日后重现（如重新 clone）仍会被回访。
+      唯一例外：`rulemux sync --all` 的 GC 会清掉**确实不存在（ENOENT）**的条目（权限/断连等错误一律保留）
+- [ ] v1 → v2 迁移**绝不丢条目**：老条目的 agents 以哨兵 `state.AnyAgent`（`"*"` = 全部已支持）占位
 - [ ] 卸载**必须**先把要回访的工作区列给用户确认（破坏性操作，需明示）
 
 ## 五、不可逾越的红线

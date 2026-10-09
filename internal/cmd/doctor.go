@@ -78,7 +78,7 @@ func Doctor(args []string) int {
 		fmt.Printf("  %s %-10s %s\n", mark, a.ID, a.Tier)
 
 		if dir := a.RulesDirAbs(ws); dir != "" {
-			state := "directory does not exist (created on first sync)"
+			state := "directory does not exist (only this agent's own session hook creates it)"
 			if st, err := os.Stat(dir); err == nil && st.IsDir() {
 				state = "directory exists"
 			}

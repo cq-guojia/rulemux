@@ -18,7 +18,7 @@ import (
 // It is a var (not a const) so the release pipeline can inject the real tag:
 //
 //	go build -ldflags="-X main.version=1.2.3"
-var version = "0.1.4"
+var version = "0.2.0"
 
 // usage prints the top-level help.
 //
@@ -28,7 +28,9 @@ func usage() {
 	fmt.Fprint(os.Stderr, `rulemux - one set of rules, delivered to every AI coding agent
 
 USAGE:
-  rulemux sync      [--agent <id>] [--config <path>] [--workspace <dir>]   Sync rules (invoked by each agent's SessionStart hook)
+  rulemux sync      [--hook] [--agent <id>] [--config <path>] [--workspace <dir>]
+                                                                          Sync rules (--hook = invoked by an agent's SessionStart hook)
+  rulemux sync --all [--config <path>]                                    Sync every workspace recorded in the ledger (never reads cwd)
   rulemux inject    --agent <id>   [--config <path>]                       Tier-2: print rules to stdout for hook injection
   rulemux init      --agent <id[,id...]> [--config <path>] [--workspace <dir>]
                                                                           Generate a sample config + install SessionStart hooks

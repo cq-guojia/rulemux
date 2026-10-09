@@ -19,7 +19,9 @@ func SubcommandFor(a agents.Agent) string {
 	if a.Tier == agents.Tier2 {
 		return "inject"
 	}
-	return "sync"
+	// Tier-1 必须带 --hook：它是「本次调用来自会话钩子」的唯一信号源，决定
+	// 能否创建该 agent 的规则目录（设计 §二 原则 1）与能否向 stdout 写变化提示（§六）。
+	return "sync --hook"
 }
 
 // Install 为指定 agent 安装 SessionStart 钩子，返回写入的配置文件路径（幂等）。
@@ -27,7 +29,7 @@ func Install(a agents.Agent, workspace string) (string, error) {
 	path := a.HookFileAbs(workspace)
 	switch a.Style {
 	case "claude", "trae", "json":
-		return path, installJSON(path, a.ID, SubcommandFor(a))
+		return path, installJSON(path, a)
 	case "codex":
 		return path, installCodex(path, a.ID)
 	default:
@@ -37,7 +39,7 @@ func Install(a agents.Agent, workspace string) (string, error) {
 
 // installJSON 以 JSON 结构写入 SessionStart 钩子（hooks.SessionStart[]），
 // 保留配置文件里已有的其它内容。
-func installJSON(path, agentID, subcmd string) error {
+func installJSON(path string, a agents.Agent) error {
 	var doc map[string]interface{}
 	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
 		if err := json.Unmarshal(b, &doc); err != nil {
@@ -58,13 +60,15 @@ func installJSON(path, agentID, subcmd string) error {
 	// command 字段本身、会丢弃 args（实测见 docs/design/external/agent-rules-dirs.md §二）。
 	// 旧式把参数放在 args 里的钩子会被执行成裸 `rulemux`（无参数，只打印帮助、什么都不干），
 	// 所以这里先剔除该 agent 的旧钩子、再统一写新式（幂等，且能把旧配置迁移过来）。
-	list = dropRulemuxHooks(list, agentID)
+	// 按「规范 ID + 全部别名」剔除旧条目：方案 A 后旧安装里的 `--agent workbuddy`
+	// 也是同一 agent 的钩子，必须一并清掉，否则会与新写的条目并存、同一 SessionStart 双触发。
+	list = dropRulemuxHooks(list, a.MatchIDs())
 	list = append(list, map[string]interface{}{
 		"matcher": "",
 		"hooks": []interface{}{
 			map[string]interface{}{
 				"type":    "command",
-				"command": fmt.Sprintf("rulemux %s --agent %s", subcmd, agentID),
+				"command": fmt.Sprintf("rulemux %s --agent %s", SubcommandFor(a), a.ID),
 			},
 		},
 	})
@@ -100,8 +104,9 @@ func commandLineOf(hm map[string]interface{}) (string, bool) {
 	return strings.Join(parts, " "), true
 }
 
-// isRulemuxHookFor 报告一个 SessionStart 分组是否本工具针对 agentID 的钩子（新旧写法都认）。
-func isRulemuxHookFor(g interface{}, agentID string) bool {
+// isRulemuxHookFor 报告一个 SessionStart 分组是否本工具针对 ids 中任一标识的钩子
+// （新旧写法都认）。ids 通常是 agent.MatchIDs()（规范 ID + 全部别名）。
+func isRulemuxHookFor(g interface{}, ids []string) bool {
 	gm, ok := g.(map[string]interface{})
 	if !ok {
 		return false
@@ -124,19 +129,21 @@ func isRulemuxHookFor(g interface{}, agentID string) bool {
 			continue
 		}
 		for i, f := range fields {
-			if (f == "--agent" && i+1 < len(fields) && fields[i+1] == agentID) || f == "--agent="+agentID {
-				return true
+			for _, id := range ids {
+				if (f == "--agent" && i+1 < len(fields) && fields[i+1] == id) || f == "--agent="+id {
+					return true
+				}
 			}
 		}
 	}
 	return false
 }
 
-// dropRulemuxHooks 返回剔除「本工具针对 agentID 的钩子」后的列表，其余条目原样保留。
-func dropRulemuxHooks(list []interface{}, agentID string) []interface{} {
+// dropRulemuxHooks 返回剔除「本工具针对 ids 中任一标识的钩子」后的列表，其余条目原样保留。
+func dropRulemuxHooks(list []interface{}, ids []string) []interface{} {
 	kept := make([]interface{}, 0, len(list))
 	for _, g := range list {
-		if isRulemuxHookFor(g, agentID) {
+		if isRulemuxHookFor(g, ids) {
 			continue
 		}
 		kept = append(kept, g)
@@ -185,7 +192,7 @@ func Uninstall(a agents.Agent, workspace string) error {
 	path := a.HookFileAbs(workspace)
 	switch a.Style {
 	case "claude", "trae", "json":
-		return uninstallJSON(path, a.ID)
+		return uninstallJSON(path, a)
 	case "codex":
 		return uninstallCodex(path, a.ID)
 	default:
@@ -195,7 +202,7 @@ func Uninstall(a agents.Agent, workspace string) error {
 
 // uninstallJSON removes the rulemux SessionStart entry (matching this agentID)
 // from a JSON hook config, preserving every other key/entry in the file.
-func uninstallJSON(path, agentID string) error {
+func uninstallJSON(path string, a agents.Agent) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -218,7 +225,7 @@ func uninstallJSON(path, agentID string) error {
 	if !ok {
 		return nil
 	}
-	kept := dropRulemuxHooks(list, agentID)
+	kept := dropRulemuxHooks(list, a.MatchIDs())
 	if len(kept) == 0 {
 		delete(hooksMap, "SessionStart")
 	} else {

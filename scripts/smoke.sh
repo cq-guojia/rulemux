@@ -50,39 +50,39 @@ EOF
 # 2. init: reuse the existing config, and install the hook into the user-level host config
 "$BIN" init --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/init.log" 2>&1 || fail "init exited non-zero"
 grep -q "config exists" "$TMP/init.log" || fail "init did not reuse the existing config"
-grep -q '"rulemux"' "$HOOK_CFG" || fail "hook was not written to $HOOK_CFG"
+grep -q 'rulemux sync' "$HOOK_CFG" || fail "hook was not written to $HOOK_CFG"
 ok "init installs the hook into the user-level host config"
 
 # Idempotent: initializing again must not add a second rulemux hook
-before="$(grep -o '"rulemux"' "$HOOK_CFG" | wc -l)"
+before="$(grep -o 'rulemux sync' "$HOOK_CFG" | wc -l)"
 "$BIN" init --agent "$AGENT" --config "$CFG" --workspace "$WS" >/dev/null 2>&1
-after="$(grep -o '"rulemux"' "$HOOK_CFG" | wc -l)"
+after="$(grep -o 'rulemux sync' "$HOOK_CFG" | wc -l)"
 [ "$before" = "$after" ] || fail "init is not idempotent: $before -> $after"
 ok "init is idempotent"
 
-# 3. sync: files land in the rules dir carrying the .rulemux__ prefix
-"$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync1.log" 2>&1 || fail "sync exited non-zero"
-[ -f "$WS/$RULES_REL/.rulemux__a.md" ]  || fail "missing .rulemux__a.md"
-[ -f "$WS/$RULES_REL/.rulemux__b.txt" ] || fail "missing .rulemux__b.txt"
+# 3. sync: files land in the rules dir carrying the __rulemux__ prefix
+"$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync1.log" 2>&1 || fail "sync exited non-zero"
+[ -f "$WS/$RULES_REL/__rulemux__a.md" ]  || fail "missing __rulemux__a.md"
+[ -f "$WS/$RULES_REL/__rulemux__b.txt" ] || fail "missing __rulemux__b.txt"
 ok "sync drops prefixed files into the rules dir"
 
 # 4. Idempotent: a second sync skips everything
-"$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync2.log" 2>&1
+"$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync2.log" 2>&1
 grep -q "Unchanged, skipped" "$TMP/sync2.log" || fail "second sync did not skip (not idempotent)"
 if grep -q "Added:" "$TMP/sync2.log"; then fail "second sync added files again"; fi
 ok "sync is idempotent (skips unchanged files)"
 
 # 5. The user's own files are never touched
 echo "mine" > "$WS/$RULES_REL/my-own.md"
-"$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" >/dev/null 2>&1
+"$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >/dev/null 2>&1
 [ -f "$WS/$RULES_REL/my-own.md" ] || fail "the user's own file was deleted"
 ok "user files are left alone"
 
 # 6. Changing the source overwrites the copy
 printf 'rule A v2\n' > "$TMP/src/a.md"
-"$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync3.log" 2>&1
+"$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync3.log" 2>&1
 grep -q "Updated:" "$TMP/sync3.log" || fail "content change did not trigger an update"
-grep -q "rule A v2" "$WS/$RULES_REL/.rulemux__a.md" || fail "updated content is wrong"
+grep -q "rule A v2" "$WS/$RULES_REL/__rulemux__a.md" || fail "updated content is wrong"
 ok "source change overwrites the copy"
 
 # 7. Dropping a source removes its residue (free to add and remove)
@@ -90,10 +90,10 @@ cat > "$CFG" <<EOF
 [[source]]
 path = ["$TMP/src/a.md"]
 EOF
-"$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync4.log" 2>&1
+"$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync4.log" 2>&1
 grep -q "Removed residue" "$TMP/sync4.log" || fail "residue was not removed"
-[ ! -f "$WS/$RULES_REL/.rulemux__b.txt" ] || fail "residue .rulemux__b.txt still present"
-[ -f "$WS/$RULES_REL/.rulemux__a.md" ]    || fail ".rulemux__a.md was wrongly deleted"
+[ ! -f "$WS/$RULES_REL/__rulemux__b.txt" ] || fail "residue __rulemux__b.txt still present"
+[ -f "$WS/$RULES_REL/__rulemux__a.md" ]    || fail "__rulemux__a.md was wrongly deleted"
 ok "residue is cleaned up"
 
 # 8. Unverified agents stay switched off (the feature switch must hold)
@@ -113,9 +113,9 @@ ok "doctor self-check"
 
 # 10. verify canary: written into the rules dir, then removed by --clean
 "$BIN" verify --agent "$AGENT" --workspace "$WS" >"$TMP/verify.log" 2>&1
-[ -f "$WS/$RULES_REL/.rulemux__canary.md" ] || fail "canary was not written"
+[ -f "$WS/$RULES_REL/__rulemux__canary.md" ] || fail "canary was not written"
 "$BIN" verify --agent "$AGENT" --clean --workspace "$WS" >/dev/null 2>&1
-[ ! -f "$WS/$RULES_REL/.rulemux__canary.md" ] || fail "canary was not cleaned"
+[ ! -f "$WS/$RULES_REL/__rulemux__canary.md" ] || fail "canary was not cleaned"
 ok "verify writes and cleans the canary"
 
 # 11. Workspace matching: only workspaces declared in the config receive files
@@ -126,19 +126,26 @@ path = ["$TMP/src/a.md"]
 workspace = ["$TMP/wsA"]
 EOF
 # wsB is not in the declared list => nothing should land there
-"$BIN" sync --agent "$AGENT" --config "$TMP/ws.toml" --workspace "$TMP/wsB" >/dev/null 2>&1
-[ ! -f "$TMP/wsB/$RULES_REL/.rulemux__a.md" ] || fail "an undeclared workspace received files"
+"$BIN" sync --hook --agent "$AGENT" --config "$TMP/ws.toml" --workspace "$TMP/wsB" >/dev/null 2>&1
+[ ! -f "$TMP/wsB/$RULES_REL/__rulemux__a.md" ] || fail "an undeclared workspace received files"
+# ...and it must NOT wipe what is already there: an undeclared workspace is skipped
+# entirely (no create / no delete / no ledger write). Safety regression check.
+mkdir -p "$TMP/wsB/$RULES_REL"
+echo "stale" > "$TMP/wsB/$RULES_REL/__rulemux__stale.md"
+"$BIN" sync --hook --agent "$AGENT" --config "$TMP/ws.toml" --workspace "$TMP/wsB" >/dev/null 2>&1
+[ -f "$TMP/wsB/$RULES_REL/__rulemux__stale.md" ] || fail "an undeclared workspace was wiped"
 # wsA is declared => files land there
-"$BIN" sync --agent "$AGENT" --config "$TMP/ws.toml" --workspace "$TMP/wsA" >/dev/null 2>&1
-[ -f "$TMP/wsA/$RULES_REL/.rulemux__a.md" ] || fail "the declared workspace did not receive files"
+"$BIN" sync --hook --agent "$AGENT" --config "$TMP/ws.toml" --workspace "$TMP/wsA" >/dev/null 2>&1
+[ -f "$TMP/wsA/$RULES_REL/__rulemux__a.md" ] || fail "the declared workspace did not receive files"
 ok "workspace matching"
 
 # 12. Ledger: uninstalling from one workspace also sweeps the other recorded ones.
-# Prior steps synced into $WS, wsA and wsB, so all three are in the ledger.
+# Prior steps synced into $WS and wsA, so both are in the ledger (wsB is undeclared
+# and therefore skipped => never recorded).
 "$BIN" uninstall --agent "$AGENT" --workspace "$TMP/wsB" --yes >"$TMP/uninstall.log" 2>&1 || fail "uninstall exited non-zero"
-[ ! -f "$TMP/wsB/$RULES_REL/.rulemux__a.md" ] || fail "wsB residue was not removed"
-[ ! -f "$TMP/wsA/$RULES_REL/.rulemux__a.md" ] || fail "ledger sweep missed wsA"
-[ ! -f "$WS/$RULES_REL/.rulemux__a.md" ]     || fail "ledger sweep missed $WS"
+[ ! -f "$TMP/wsB/$RULES_REL/__rulemux__a.md" ] || fail "wsB residue was not removed"
+[ ! -f "$TMP/wsA/$RULES_REL/__rulemux__a.md" ] || fail "ledger sweep missed wsA"
+[ ! -f "$WS/$RULES_REL/__rulemux__a.md" ]     || fail "ledger sweep missed $WS"
 [ -f "$WS/$RULES_REL/my-own.md" ]            || fail "uninstall deleted the user's own file"
 ok "uninstall sweeps every recorded workspace (user files kept)"
 

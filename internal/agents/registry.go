@@ -53,9 +53,23 @@ type Agent struct {
 	// NeedsFrontmatter 表示落盘文件必须带 alwaysApply:true 的 YAML 头，该 agent 才会在
 	// 会话开始自动加载规则（CodeBuddy/WorkBuddy 实测如此）。Tier-2 无意义。
 	NeedsFrontmatter bool
+	// SessionHint 表示该 agent 的会话钩子在「规则确有变化」时应给模型注入一句话
+	// （提示用户重开会话生效）。前提：该 agent 在会话内**不会**重读规则目录 ——
+	// 若某家会热重载，就应保持 false（见设计 §六「per-agent」）。
+	SessionHint bool
+	// HintProtocol 是提示的输出协议标识；空串 = 不提示（此时 SessionHint 也应为 false）。
+	HintProtocol string
 	// Note 备注。
 	Note string
 }
+
+// ProtocolSessionStartAdditionalContext 是 Claude 系宿主（Claude Code / CodeBuddy 等）认的
+// SessionStart 注入协议：stdout 输出
+//
+//	{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"…"}}
+//
+// 已由本机 Hindsight 的 codebuddy-sessionstart-hook.js 实证（见设计 §六）。
+const ProtocolSessionStartAdditionalContext = "session-start-additional-context"
 
 // registry 是当前支持的全部 agent。
 var registry = []Agent{
@@ -71,8 +85,11 @@ var registry = []Agent{
 		Note:     "Verified via official docs: .claude/rules/*.md is read at session start; SessionStart can exec-spawn a binary. However the canary has not landed in this workspace yet (open bug, see T11 / external/agent-rules-dirs.md section 4) - still needs one Claude Code session to confirm.",
 	},
 	{
-		ID:       "codebuddy",
-		Aliases:  []string{"codebuddy-cn"},
+		ID: "codebuddy",
+		// workbuddy 复用完全相同的机制（同一 .codebuddy/rules 目录、同一 user 级钩子文件），
+		// 按「完全相同的 agent 就是同一个 agent」并为一个条目、以别名收纳 ——
+		// 而不是在同步逻辑里做「同目录合并」的特殊处理（见设计 §三 方案 A）。
+		Aliases:  []string{"codebuddy-cn", "workbuddy"},
 		Tier:     Tier1,
 		RulesDir: ".codebuddy/rules",
 		// 2026-10-08 起钩子落点为 user 级 host 配置（不再是每工作区的 .codebuddy/settings.json），
@@ -82,18 +99,10 @@ var registry = []Agent{
 		Style:            "claude",
 		Verified:         true,
 		NeedsFrontmatter: true,
-		Note:             "Canary re-confirmed 2026-10-08: CodeBuddy auto-loads FLAT, NON-hidden .md files under .codebuddy/rules that carry an alwaysApply:true frontmatter; dot-prefixed (hidden) files are SKIPPED, and the RULE.mdc subdir layout is NOT relied on (its load behaviour was inconsistent across runs). rulemux therefore writes __rulemux__<name>.md with a frontmatter header. Hook lives in the user-level ~/.codebuddy/settings.json; see external/agent-rules-dirs.md.",
-	},
-	{
-		ID:               "workbuddy",
-		Tier:             Tier1,
-		RulesDir:         ".codebuddy/rules",
-		HookFile:         "~/.codebuddy/settings.json",
-		HookAbs:          true,
-		Style:            "claude",
-		Verified:         true,
-		NeedsFrontmatter: true,
-		Note:             "Reuses the CodeBuddy mechanism (same .codebuddy/rules dir, same alwaysApply:true frontmatter requirement; canary confirmed together with it). Both share one directory, so sync merges both agents' sources before computing deletions to avoid them deleting each other's files. Hook location is also the user-level host config.",
+		// 会话开始即固定规则快照 ⇒ 改动/新增要下一次会话才生效 ⇒ 有变化时给模型一句话。
+		SessionHint:  true,
+		HintProtocol: ProtocolSessionStartAdditionalContext,
+		Note:         "Canary re-confirmed 2026-10-08: CodeBuddy auto-loads FLAT, NON-hidden .md files under .codebuddy/rules that carry an alwaysApply:true frontmatter; dot-prefixed (hidden) files are SKIPPED, and the RULE.mdc subdir layout is NOT relied on (its load behaviour was inconsistent across runs). rulemux therefore writes __rulemux__<name>.md with a frontmatter header. Hook lives in the user-level ~/.codebuddy/settings.json; see external/agent-rules-dirs.md. WorkBuddy reuses this exact mechanism and is therefore carried as the alias \"workbuddy\" on this single entry (design §三 plan A), instead of a separate registry row plus a shared-directory merge.",
 	},
 	{
 		ID:       "trae",
@@ -199,18 +208,15 @@ func (a Agent) HookFileAbs(workspace string) string {
 	return filepath.Join(workspace, a.HookFile)
 }
 
-// ByRulesDir 返回所有与给定相对规则目录相同的 Tier-1 agent。
-// 用于「多个 agent 共用同一目录」时合并计算应保留文件集合，避免互相删掉对方的文件。
-func ByRulesDir(rulesDirRel string) []Agent {
-	if rulesDirRel == "" {
-		return nil
-	}
-	var out []Agent
-	for _, a := range registry {
-		if a.Tier == Tier1 && a.RulesDir == rulesDirRel {
-			out = append(out, a)
-		}
-	}
+// MatchIDs 返回「能唯一指名本 agent 的所有标识」：规范 ID + 全部别名。
+//
+// 用于钩子条目的识别与清理：方案 A 把 workbuddy 并为 codebuddy 的别名后，
+// 旧安装里那条 `--agent workbuddy` 的钩子若只按规范 ID 匹配就会成为孤儿
+// （同一 SessionStart 仍可能并发跑两次）。见设计 §9.1 迁移清单。
+func (a Agent) MatchIDs() []string {
+	out := make([]string, 0, 1+len(a.Aliases))
+	out = append(out, a.ID)
+	out = append(out, a.Aliases...)
 	return out
 }
 

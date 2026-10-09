@@ -18,9 +18,11 @@ workspace rules directory**. You manage them in one place; they take effect ever
 
 - rulemux **does not own or maintain any rule content**. Your source files stay yours — rulemux
   only copies them. Which agents / workspaces they apply to is declared in your config.
-- **The session hook is only the courier.** It is not used to inject text. Files are really copied
-  into the directory the agent loads natively, so they enjoy static-prefix semantics: they never
-  fade out mid-conversation, and they never accumulate.
+- **The session hook is (almost) only the courier.** Rule *content* is never injected: files are
+  really copied into the directory the agent loads natively, so they enjoy static-prefix semantics
+  (never fade out mid-conversation, never accumulate). The single, deliberate exception is one
+  **transient notice line** the hook emits when it detects that the rules really changed — it asks
+  you to start a new session. See §5.3.
 - Invariants: **no symlinks** (real copies only) and **free add/remove** (delete a source from the
   config and its copy disappears on the next sync).
 
@@ -37,8 +39,7 @@ directory and hook location have been confirmed by a real canary test. Today:
 
 | Agent | Tier | Rules directory | Status |
 |---|---|---|---|
-| **codebuddy** | Tier-1 (real copy) | `.codebuddy/rules/` | ✅ **Verified — installable** |
-| **workbuddy** | Tier-1 (real copy) | `.codebuddy/rules/` (shared with CodeBuddy) | ✅ **Verified — installable** |
+| **codebuddy** | Tier-1 (real copy) | `.codebuddy/rules/` | ✅ **Verified — installable** (`workbuddy` / `codebuddy-cn` are aliases of it: same agent, same dir, same hook) |
 | claude (Claude Code) | Tier-1 | `.claude/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
 | trae (Trae) | Tier-1 | `.trae/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
 | codex | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |
@@ -88,7 +89,9 @@ rulemux init --agent codebuddy
 rulemux doctor    # 3. Self-check: binary/PATH, agents, config validity
 rulemux verify    # 4. Canary check: drop a probe and ask the agent to recite its token
 
-# From now on every new session triggers `rulemux sync --agent codebuddy` automatically.
+# From now on every new session triggers `rulemux sync --hook --agent codebuddy` automatically.
+
+rulemux sync --all   # optional: re-align EVERY workspace recorded in the ledger, in one shot
 
 rulemux uninstall --agent codebuddy   # remove rulemux again (--yes skips the confirmation)
 ```
@@ -165,13 +168,23 @@ Things worth knowing:
 ### 5.3 What sync does, and what it never touches
 
 On every sync rulemux computes the set of prefixed files that should exist, then removes any
-`.rulemux__*` file that is not in that set, copies/overwrites the ones that are missing or changed,
+`__rulemux__*` file that is not in that set, copies/overwrites the ones that are missing or changed,
 and skips the rest.
 
-- Destination name: `.rulemux__` + source basename (a short hash is appended on name collisions).
+- Destination name: `__rulemux__` + source basename (a short hash is appended on name collisions).
 - **Your source files are only ever read** — never modified or deleted.
-- **Files without the `.rulemux__` prefix in the rules directory are never touched**, so your own
+- **Files without the `__rulemux__` prefix in the rules directory are never touched**, so your own
   rule files stay safe.
+
+> ⚠️ **Run `rulemux sync` after editing your config or source docs**
+> After you edit `~/.rulemux/config.toml` (adding/removing a `[[source]]`, changing `path`) or any
+> source rule document, run `rulemux sync --agent codebuddy` (omit `--agent` to sync every supported
+> agent).
+> - **If you run sync**: the next new session reads the updated rules.
+> - **If you don't**: CodeBuddy / WorkBuddy still auto-sync on every session start via the SessionStart
+>   hook, but the harness fixes the rule snapshot at the **start of the session** (before the hook runs),
+>   so the current session still sees the old version — the update only takes effect on the **second**
+>   new session.
 
 ---
 
@@ -184,7 +197,7 @@ rulemux uninstall --agent codebuddy --yes    # skip the confirmation prompt
 ```
 
 It removes rulemux's own hook entry (other tools' hooks in the same file are preserved) and deletes
-the `.rulemux__*` files it previously delivered. Because the hook lives in the user-level config,
+the `__rulemux__*` files it previously delivered. Because the hook lives in the user-level config,
 rulemux also **revisits every workspace recorded in its ledger** (`~/.rulemux/workspaces.json`) and
 cleans those too — otherwise, with the hook gone, that residue could never be removed again. You are
 shown the list of workspaces before anything is deleted.
@@ -195,7 +208,8 @@ shown the list of workspaces before anything is deleted.
 
 | Command | What it does |
 |---|---|
-| `rulemux sync [--agent <id>] [--config <path>] [--workspace <dir>]` | Sync rules (called by each agent's SessionStart hook) |
+| `rulemux sync [--hook] [--agent <id>] [--config <path>] [--workspace <dir>]` | Sync rules. `--hook` = this run comes from an agent's SessionStart hook (only then may it create the rules dir and emit the change notice); omit `--agent` to target every supported agent |
+| `rulemux sync --all [--config <path>]` | Manually re-align every workspace recorded in the ledger (never reads cwd, never creates dirs, prunes ledger entries whose directory is gone). Mutually exclusive with `--hook` / `--agent` / `--workspace` |
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2: print rules to stdout for hook injection |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | Write a sample config and install the SessionStart hook |
 | `rulemux doctor [--config <path>] [--workspace <dir>]` | Environment self-check |

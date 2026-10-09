@@ -11,17 +11,22 @@
 
 ## 一、总表（除 CodeBuddy 外均待核实）
 
-| Agent | 工作区规则目录 | 扩展名 / 结构 | 读目录全部？ | 适用版本 | 备注 |
-|---|---|---|---|---|---|
-| **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules` |
-| Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
-| Trae | `.trae/rules/` | `.mdc` | ✅ 递归读，最多 3 层 | 待补 | 需 frontmatter |
-| WorkBuddy | `.codebuddy/rules/`（复用 CodeBuddy 机制） | 同上 | 同上（随 CodeBuddy 一并坐实） | 4.12.1（本机，复用） | 与 CodeBuddy **共用同一目录** |
-| Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | 待补 | — |
-| OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | 待补 | — |
-| DeepSeek Harness | — | — | — | 移出范围 | 用户 2026-10-07 决定移出当前范围（最开放、支持插件，后续以插件市场解决） |
+| Agent | 工作区规则目录 | 扩展名 / 结构 | 读目录全部？ | 会话内重读？ | hook stdout 协议 | 适用版本 | 备注 |
+|---|---|---|---|---|---|---|---|
+| **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | ❌ **不会**：会话开始即固定规则快照，改动要下一个会话才生效（见 §四） | `hookSpecificOutput{hookEventName:"SessionStart", additionalContext}`（2026-10-09 实证，见下） | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules`；`SessionHint=true` |
+| Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | 部分：`/compact` 会重读项目 `CLAUDE.md`，但 `.claude/rules/` 子目录**不保证**自动回读 | 同上（`hookSpecificOutput.additionalContext`） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
+| Trae | `.trae/rules/` | `.mdc` | ✅ 递归读，最多 3 层 | 待补 | 待补 | 待补 | 需 frontmatter |
+| WorkBuddy | `.codebuddy/rules/`（**与 CodeBuddy 完全相同**） | 同上 | 同上 | 同上 | 同上 | 4.12.1（本机，复用） | **2026-10-09 起并作 CodeBuddy 的别名 `workbuddy`**，不再单列 adapter |
+| Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
+| OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
+| DeepSeek Harness | — | — | — | — | — | 移出范围 | 用户 2026-10-07 决定移出当前范围（最开放、支持插件，后续以插件市场解决） |
 
 > ⚠️ **扩展名 / 结构各家不同** ⇒ 同步器必须**按 agent 分别落格式**，不能一个 `.md` 通吃。
+>
+> ⚠️ **「会话内重读？」+「hook stdout 协议」这两列是「是否开启变化提示」的判据**（落地为
+> `internal/agents/registry.go` 的 `SessionHint` / `HintProtocol` 字段）。结论：**会话内不会重读 ⇒ 需要提示**；
+> 会热重载的 agent 应保持 `SessionHint=false`。当前**没有任何 Tier-1 agent 被坐实热重载** ⇒ 现状都开启提示（待逐个核实）。
+> `hookSpecificOutput{SessionStart, additionalContext}` 的实证来源：本机 `~/.hindsight/coding-agents/dist/codebuddy-sessionstart-hook.js:2915-2918, 3940-3945`。
 
 ## 二、CodeBuddy 已核实事实（本机 4.12.1）
 

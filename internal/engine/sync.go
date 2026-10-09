@@ -84,19 +84,44 @@ type SyncResult struct {
 	Skipped []string // 内容一致跳过的
 	Deleted []string // 清掉的残留
 	Missing []string // 源文件不存在的
+	Errors  []string // 单文件写/删失败（不中断其余处理，也不抬进程退出码）
+
+	// SkippedNoDir 表示目标目录不存在、而本次不允许创建（create=false），
+	// 于是整次同步被跳过（不建、不读、不删）。见设计 §二 原则 2。
+	SkippedNoDir bool
+}
+
+// HasChanges 报告本次是否对目标目录产生了实质变化（新增 / 修改 / 删除）。
+//
+// 这就是「变化提示」的判据 —— 注意它**不包含** Missing：源文件不存在时磁盘
+// 并没有任何变化，提示用户重开会话只会白折腾。见设计 §六。
+func (r *SyncResult) HasChanges() bool {
+	return len(r.Copied)+len(r.Updated)+len(r.Deleted) > 0
 }
 
 // IsEmpty 报告本次同步是否没有任何变更（全是跳过或压根没有源）。
 func (r *SyncResult) IsEmpty() bool {
-	return len(r.Copied)+len(r.Updated)+len(r.Deleted)+len(r.Missing) == 0
+	return len(r.Copied)+len(r.Updated)+len(r.Deleted)+len(r.Missing)+len(r.Errors) == 0 && !r.SkippedNoDir
 }
 
 // Sync 把源列表同步进目标目录。整个过程无状态文件，靠内容比对 + 前缀删残留保证幂等。
 // autoApplyFrontmatter 为 true 时（CodeBuddy/WorkBuddy），每个落盘文件前置 alwaysApply:true 头；
 // 比对与写入都基于「加头后」的内容，保证幂等。
-func Sync(dir string, srcs []config.Source, autoApplyFrontmatter bool) (*SyncResult, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create rules directory %s: %w", dir, err)
+//
+// create 控制「能否创建目标目录」——只有该 agent **自己的会话 hook** 调用时才为 true。
+// create=false 且目录不存在时，整次同步立即返回（不建、不读、不删），
+// 这是「只写已存在目录」这条铁律的落点（见 docs/design/features/sync-all-and-change-notice.md §二）。
+//
+// 单文件失败（写 / 删）不再中断整次同步：记入 Errors 后继续，既保证已完成的结果能被
+// 上层看见（变化提示据此判定），也不会因一个文件拖垮整次同步。
+func Sync(dir string, srcs []config.Source, autoApplyFrontmatter, create bool) (*SyncResult, error) {
+	if _, err := os.Stat(dir); err != nil {
+		if !create {
+			return &SyncResult{SkippedNoDir: true}, nil
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("failed to create rules directory %s: %w", dir, err)
+		}
 	}
 
 	plan := BuildPlan(dir, srcs)
@@ -121,12 +146,18 @@ func Sync(dir string, srcs []config.Source, autoApplyFrontmatter bool) (*SyncRes
 			continue
 		}
 		if err := os.WriteFile(it.DstPath, data, 0o644); err != nil {
-			return nil, fmt.Errorf("failed to write %s: %w", it.DstPath, err)
+			res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", it.DstName, err))
+			continue
 		}
-		if errOld == nil {
+		switch {
+		case errOld == nil:
 			res.Updated = append(res.Updated, it.DstName)
-		} else {
+		case os.IsNotExist(errOld):
 			res.Copied = append(res.Copied, it.DstName)
+		default:
+			// 目标存在但读不动（权限 / IO）——文件确实被覆盖了，但语义上不是「新增」。
+			res.Errors = append(res.Errors, fmt.Sprintf("%s: unreadable before overwrite: %v", it.DstName, errOld))
+			res.Updated = append(res.Updated, it.DstName)
 		}
 	}
 
@@ -147,7 +178,8 @@ func Sync(dir string, srcs []config.Source, autoApplyFrontmatter bool) (*SyncRes
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
-			return nil, fmt.Errorf("failed to remove residue %s: %w", name, err)
+			res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", name, err))
+			continue
 		}
 		res.Deleted = append(res.Deleted, name)
 	}

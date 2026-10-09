@@ -68,6 +68,7 @@ func workspace(v string) (string, error) {
 // 绝不扫描机器上的 agent。
 func parseAgents(s string) ([]agents.Agent, error) {
 	var out []agents.Agent
+	seen := map[string]bool{}
 	for _, p := range strings.Split(s, ",") {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -80,6 +81,11 @@ func parseAgents(s string) ([]agents.Agent, error) {
 		if !a.Verified {
 			return nil, fmt.Errorf("agent %q is not installable yet: only verified agents are supported: %s (the other adapters are still in progress and cannot be installed until ready)", a.ID, agents.SupportedSummary())
 		}
+		// 别名去重：codebuddy,workbuddy 指的是同一个 agent（设计 §三 方案 A）。
+		if seen[a.ID] {
+			continue
+		}
+		seen[a.ID] = true
 		out = append(out, a)
 	}
 	if len(out) == 0 {

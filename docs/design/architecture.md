@@ -18,6 +18,10 @@
 3. **结论**：要「和 `AGENTS.md` 一模一样」（永不淡出 / 不累积 / 恒定 token）＝ **必须走 harness 原生加载的规则文件 / 目录**（即静态前缀语义）。
 
 > ⚠️ 由此定下铁律（Tier-1）：**hook 只当「投递员」，不负责注入。** 验收判据见 [`requirements.md`](requirements.md) §三（A1–A3）。
+>
+> **已登记的唯一例外（2026-10-09）**：Tier-1 在 SessionStart 后若检测到规则**有变化**（新增 / 修改 / 删除任一），会经 hook 输出**恰好一条瞬态提示**（"规则有变化，请新开会话生效"）。
+> 它**不含规则正文**、**只发一次**、**无变化则零输出**（stdout 字节级为空），属"一次性、可过期"的元信息，**不承担 A1–A3 的规则投递职责**（规则投递仍 100% 走原生目录）。
+> 详见 [`features/sync-all-and-change-notice.md`](features/sync-all-and-change-notice.md) §六。
 
 ## 二、方案选型与 Tier 分层
 
@@ -42,7 +46,7 @@
 
 | 层 | 代码位置 | 职责 |
 |---|---|---|
-| **统一方法（核心引擎）** | `internal/engine/` | 文件怎么命名（前缀 `.rulemux__`）、怎么比对内容、怎么覆盖/跳过、怎么删残留、Tier-2 怎么渲染注入 —— **只有一份实现** |
+| **统一方法（核心引擎）** | `internal/engine/` | 文件怎么命名（前缀 `__rulemux__`）、怎么比对内容、怎么覆盖/跳过、怎么删残留、Tier-2 怎么渲染注入 —— **只有一份实现** |
 | **每 agent 单独定义（适配器）** | `internal/agents/registry.go` | 一张注册表声明每个 agent 的：Tier、规则目录、钩子落点、是否已核实 |
 | **调用（子命令）** | `internal/cmd/` | 查适配器拿到「落到哪」→ 调引擎的统一方法 |
 
@@ -73,4 +77,4 @@
 - codebuddy 已坐实 `.codebuddy/rules` 在打开该工作区时由 SessionStart 钩子先于规则加载触发（`external/agent-rules-dirs.md` §四），cwd 即该工作区根，`rulemux sync` 由此自匹配；
 - user 级会全局触发、需运行时判别工作区，反而更脆。
 
-**既有能力**：注册表 `Agent.HookAbs` 已支持 user 级落点（`codex` 即 `HookAbs:true` + `~/.codex/config.toml`），故若日后需要可一键切换，但当前默认保持 workspace 级。
+**既有能力**：注册表 `Agent.HookAbs` 已支持 user 级落点（`codex` 即 `HookAbs:true` + `~/.codex/config.toml`），故若日后需要可一键切换；**当前默认即 user 级**（2026-10-08 已切换）。

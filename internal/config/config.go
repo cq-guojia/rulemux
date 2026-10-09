@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/cq-guojia/rulemux/internal/agents"
 )
 
 // Source 是配置里列出的一条源规则（可含一个或多个文件）。
@@ -177,6 +179,7 @@ func Load(path string) (*Config, error) {
 	if err := c.resolveGroups(); err != nil {
 		return nil, err
 	}
+	c.canonicalizeAgents()
 	return c, nil
 }
 
@@ -195,6 +198,23 @@ func (c *Config) SourcesFor(agentID, workspace string) []Source {
 		out = append(out, s)
 	}
 	return out
+}
+
+// DeclaresWorkspace 报告「该工作区是否被配置里任何一条 [[source]] 覆盖」。
+//
+// 用途：sync 的守卫 —— 若 cwd 不属于配置声明的工作区，则整体跳过（不建、不删、
+// 不记账）。否则「空 want ⇒ 删残留」会清空一个我们无权管辖的目录。
+// 见 docs/design/features/sync-all-and-change-notice.md §二「清空的正确姿势」/ §八。
+//
+// 注意：省略 workspace、或写 "*"/"**"/"all" 的 source 适用于所有工作区，
+// 因此只要配置里有这类全局 source，任意路径都会被判为「已声明」。
+func (c *Config) DeclaresWorkspace(ws string) bool {
+	for _, s := range c.Sources {
+		if s.MatchesWorkspace(ws) {
+			return true
+		}
+	}
+	return false
 }
 
 // MatchesWorkspace 报告该条 source 是否适用于给定工作区。
@@ -248,6 +268,12 @@ func parsePaths(val string) []string {
 	return nil
 }
 
+// ResolvePath 把路径转绝对并规范化；能解析符号链接就解析（失败回退原规范化值）。
+//
+// 导出供 state（账本入库）等包复用同一口径 —— 否则同一物理工作区经软链打开时会被
+// 记成两个不同的工作区。见 docs/design/features/sync-all-and-change-notice.md §四。
+func ResolvePath(p string) string { return resolvePath(p) }
+
 // resolvePath 把路径转绝对并规范化；能解析符号链接就解析（失败回退原规范化值），
 // 避免工作区经软链接打开时与配置里的真实路径对不上而漏配。
 func resolvePath(p string) string {
@@ -279,9 +305,11 @@ func samePath(a, b string) bool {
 }
 
 // globMatch 按业界公认的 glob 语义做整路径匹配：
-//   "*"  匹配单个路径段（不含 "/"）
-//   "**" 匹配零个或多个路径段（含 "/"），可出现在中间或末尾，用于"中间段统一"等场景
-//   "?"、"[...]" 由 path/filepath.Match 处理
+//
+//	"*"  匹配单个路径段（不含 "/"）
+//	"**" 匹配零个或多个路径段（含 "/"），可出现在中间或末尾，用于"中间段统一"等场景
+//	"?"、"[...]" 由 path/filepath.Match 处理
+//
 // 匹配前统一去掉前导 "/"，使绝对/相对写法都能对齐。
 func globMatch(pattern, name string) bool {
 	pattern = strings.TrimLeft(pattern, "/")
@@ -486,4 +514,36 @@ func containsStr(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// canonicalizeAgents 把每条 source 的 agents 值归一为注册表里的规范 ID（别名 → 规范 ID）。
+//
+// 否则用户在配置里写别名（如 agents = ["workbuddy"]）时，SourcesFor 用规范 ID 去匹配
+// 会**静默漏投**。这是「别名归一」四个入口之一（见设计 §十 #4）。
+func (c *Config) canonicalizeAgents() {
+	for i := range c.Sources {
+		c.Sources[i].Agents = canonicalAgents(c.Sources[i].Agents)
+	}
+}
+
+// canonicalAgents 把一组 agent 名归一为规范 ID 并去重（保持首次出现顺序）。
+// 注册表里查不到的名字原样保留 —— 它不会命中任何 agent，语义等价于「没有这个 agent」。
+func canonicalAgents(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, x := range in {
+		id := x
+		if a, ok := agents.Get(x); ok {
+			id = a.ID
+		}
+		if id == "" || seen[strings.ToLower(id)] {
+			continue
+		}
+		seen[strings.ToLower(id)] = true
+		out = append(out, id)
+	}
+	return out
 }

@@ -16,8 +16,9 @@
 
 - rulemux **不持有、不维护任何规则内容**。源文件完全由你维护，rulemux 只负责复制；
   「适用于哪些 agent / 哪些工作区」在你的配置里声明。
-- **会话钩子只当「投递员」，不用来注入文本**。文件是真正拷进 agent 原生加载的目录，
+- **会话钩子（几乎）只当「投递员」**：规则**正文**从不注入，文件是真正拷进 agent 原生加载的目录，
   因此享有静态前缀语义 —— 不会随对话老化淡出，也不会每轮累积。
+  唯一刻意的例外：当钩子检测到规则**确有变化**时，会注入**一条瞬态提示**，请你新开会话（见 §5.3）。
 - 底线：**不用软链**（一律真实拷贝）、**加删自由**（配置里删掉某源文件，下次同步它的副本即消失）。
 
 > 为什么不直接用钩子注入？注入落在上下文的动态区，压缩时会被摘要掉（淡出），
@@ -32,8 +33,7 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 
 | Agent | 层级 | 规则目录 | 状态 |
 |---|---|---|---|
-| **codebuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/` | ✅ **已验证，可安装** |
-| **workbuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/`（与 CodeBuddy 共用） | ✅ **已验证，可安装** |
+| **codebuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/` | ✅ **已验证，可安装**（`workbuddy` / `codebuddy-cn` 是它的别名：同一 agent、同一目录、同一钩子） |
 | claude（Claude Code） | Tier-1 | `.claude/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
 | trae（Trae） | Tier-1 | `.trae/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
 | codex | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |
@@ -81,7 +81,9 @@ rulemux init --agent codebuddy
 rulemux doctor    # 3. 自检：二进制/PATH、各 agent 状态、配置合法性
 rulemux verify    # 4. canary 验收：投放探针，开新会话让 agent 念出暗号
 
-# 此后每次开新会话，都会自动触发 rulemux sync --agent codebuddy
+# 此后每次开新会话，都会自动触发 rulemux sync --hook --agent codebuddy
+
+rulemux sync --all   # 可选：一条命令把账本里记录过的所有工作区重新对齐
 
 rulemux uninstall --agent codebuddy   # 卸载（--yes 跳过确认）
 ```
@@ -154,12 +156,22 @@ workspace        = ["/path/to/standalone"] # 也可与 workspace_groups 同时�
 
 ### 5.3 同步做了什么，以及绝不碰什么
 
-每次同步：算出「应该存在的带前缀文件集合」，目标目录里不在这个集合中的 `.rulemux__*` 一律删除（删残留），
+每次同步：算出「应该存在的带前缀文件集合」，目标目录里不在这个集合中的 `__rulemux__*` 一律删除（删残留），
 缺失或内容不一致的复制/覆盖，其余跳过。
 
-- 目标文件名：`.rulemux__` + 源 basename（同名冲突时追加短 hash）。
+- 目标文件名：`__rulemux__` + 源 basename（同名冲突时追加短 hash）。
 - **源文件只被读取** —— 绝不修改、绝不删除。
-- **规则目录里不带 `.rulemux__` 前缀的文件绝不触碰**，你自己的规则文件始终安全。
+- **规则目录里不带 `__rulemux__` 前缀的文件绝不触碰**，你自己的规则文件始终安全。
+
+> ⚠️ **规则改了，要等下一个会话生效 —— 而且 agent 会主动告诉你**
+> SessionStart 钩子每次会话都会同步、并把文件真正拷到磁盘。但 harness 在会话**开始瞬间**就固定了规则快照
+> （早于钩子执行），所以本次会话读到的仍是旧版，改动要**下一个**会话才会被加载。
+> 钩子检测到规则**确有变化**（新增 / 修改 / 删除）时，会注入**一句话**请模型转告你「请新开会话」；
+> **没有变化时它一个字节都不输出**。
+>
+> 想一次性把所有工作区都对齐？`rulemux sync --all` 会遍历账本（`~/.rulemux/workspaces.json`）里记录过的
+> 每个工作区重新同步。它**绝不创建**规则目录（只有该 agent 自己的会话钩子才会创建），并顺手清掉账本里
+> 「目录已经不存在」的条目。
 
 ---
 
@@ -171,7 +183,7 @@ rulemux uninstall --off                      # 全部 agent（--all 等价）
 rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 ```
 
-它会移除 rulemux 自己的钩子条目（同一文件里其它工具的钩子会保留），并删掉此前投递的 `.rulemux__*` 文件。
+它会移除 rulemux 自己的钩子条目（同一文件里其它工具的钩子会保留），并删掉此前投递的 `__rulemux__*` 文件。
 由于钩子在 user 级配置里，rulemux 还会**按账本（~/.rulemux/workspaces.json）回访所有记录过的工作区**
 一并清理 —— 否则钩子一去，那些残留就再没机会被删掉了。删除前会把要回访的工作区列表给你确认。
 
@@ -181,7 +193,8 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 
 | 命令 | 作用 |
 |---|---|
-| `rulemux sync [--agent <id>] [--config <path>] [--workspace <dir>]` | 同步规则（由各 agent 的 SessionStart 钩子调用） |
+| `rulemux sync [--hook] [--agent <id>] [--config <path>] [--workspace <dir>]` | 同步规则。`--hook` = 本次由某 agent 的 SessionStart 钩子调起（**只有此时**才允许创建规则目录、才可能输出变化提示）；省略 `--agent` 则针对全部已支持 agent |
+| `rulemux sync --all [--config <path>]` | 手动把账本里记录过的所有工作区重新对齐（不读 cwd、绝不创建目录、顺手 GC 掉目录已不在的条目）。与 `--hook` / `--agent` / `--workspace` 互斥 |
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2：把规则输出到 stdout 供钩子注入 |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | 生成示例配置并安装 SessionStart 钩子 |
 | `rulemux doctor [--config <path>] [--workspace <dir>]` | 环境自检 |

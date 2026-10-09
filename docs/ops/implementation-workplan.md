@@ -79,7 +79,7 @@ rulemux sync --agent X   /   rulemux inject --agent X
 | W7 | **编译出二进制** | P0 | ✅ Go 1.27.1 编译通过，`go vet` 无告警 |
 | W8 | 核心引擎单测（命名/比对/删残留/幂等）+ 冒烟脚本 | P1 | ✅ `go test ./...` 通过 + `scripts/smoke.sh` 10/10 |
 | W9 | canary 实测：点文件 / CodeBuddy 结构 / 钩子时序 / Codex 注入 | P1 | 🚧 **部分**：CodeBuddy/WorkBuddy ✅；Claude ❌（open bug，T11）；trae / codex / opencode 仍待 |
-| W10 | 据实测校准未核实项（落点、前缀是否改非点） | P1 | ✅ 据 CodeBuddy 实测校准：前缀保持 `.rulemux__`（点文件会被读），落点确认为 `.codebuddy/rules` |
+| W10 | 据实测校准未核实项（落点、前缀是否改非点） | P1 | ✅ 据 CodeBuddy 实测校准：前缀保持 `__rulemux__`（点文件会被读），落点确认为 `.codebuddy/rules` |
 | W11 | GitHub Actions 交叉编译 + Release | P2 | ⬜ |
 | W12 | T7：`package.json` 加 `files` 字段 | P2 | ⬜ |
 | W13 | 排查 Claude 侧 sync 未落地（open bug，T11） | P0 | ⬜ |
@@ -123,8 +123,8 @@ rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号
 
 同步算法（每次 `sync`）：
 
-1. 计算「当前配置应生成的带前缀文件名集合」S（`.rulemux__` + 源 basename，同名冲突加短 hash）。
-2. 枚举目标目录所有 `.rulemux__*`：不在 S 中的 ⇒ **删除**（删残留）。
+1. 计算「当前配置应生成的带前缀文件名集合」S（`__rulemux__` + 源 basename，同名冲突加短 hash）。
+2. 枚举目标目录所有 `__rulemux__*`：不在 S 中的 ⇒ **删除**（删残留）。
 3. S 中每项：目标不存在 ⇒ 复制；内容一致 ⇒ 跳过；不一致 ⇒ **覆盖**。
 4. 不带前缀的文件（用户自己的）**一律不碰**。
 
@@ -142,7 +142,7 @@ rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号
 | codex | ⬜ 钩子落点 `~/.codex/config.toml` 与 schema（`[features] codex_hooks` + `[[hooks.SessionStart]]`） |
 | opencode | ⬜ 钩子落点与注入方式 |
 
-**全局校准**：各 agent 的「读全部 .md」是否**跳过点开头的隐藏文件** —— CodeBuddy 已证明会读点文件 ⇒ 前缀保持 `.rulemux__`；trae / codex / opencode 仍待实测确认（若某家跳过 ⇒ 把 `internal/engine/sync.go` 的 `Prefix` 改成非点前缀 `rulemux__`）。
+**全局校准**：各 agent 的「读全部 .md」是否**跳过点开头的隐藏文件** —— CodeBuddy 已证明会读点文件 ⇒ 前缀保持 `__rulemux__`；trae / codex / opencode 仍待实测确认（若某家跳过 ⇒ 把 `internal/engine/sync.go` 的 `Prefix` 改成非点前缀 `rulemux__`）。
 
 ---
 

@@ -31,6 +31,10 @@
 
 > ⚠️ **A1–A3 是硬指标**：Tier-1 必须满足；Tier-2（单文件 agent 走 hooks 注入）启用即视为该 agent **降级、未达 A3 验收**。每个 agent 接完都要按 [`features/verification.md`](features/verification.md) 实测。
 
+> **例外登记（2026-10-09）**：Tier-1 的 SessionStart hook 在检测到规则**有变化**（新增 / 修改 / 删除任一）时，会注入**恰好一条瞬态提示**（提示用户重开会话生效）。
+> 该提示**不含规则正文、只发一次、无变化零输出**，**不参与 A1–A3 对"规则投递"的判定**（规则仍 100% 走原生目录）；仅 §五"不把注入当主方案 / hook 只当投递员"这一条因此获得一个显式例外。
+> 详见 [`features/sync-all-and-change-notice.md`](features/sync-all-and-change-notice.md) §六。
+
 ## 四、支持范围
 
 - **Tier-1（读整个规则文件夹 ⇒ 真实拷贝丢文件）**：Claude Code、CodeBuddy、Trae、WorkBuddy。

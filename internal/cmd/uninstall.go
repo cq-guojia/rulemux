@@ -45,7 +45,8 @@ func Uninstall(args []string) int {
 
 	var targets []agents.Agent
 	if all {
-		targets = agents.All()
+		// 与 sync 统一口径：只有「能装进去的」才需要卸（未验证 agent 从不产生产物）。
+		targets = agents.Supported()
 	} else {
 		ts, err := parseAgents(agentArg)
 		if err != nil {
@@ -195,7 +196,7 @@ CONFIRMATION:
   cancels safely.
   Pass --yes to skip the prompt (for scripts / CI).
 
-Supported (verified) ids: codebuddy, workbuddy.
+Supported (verified) ids: codebuddy (aliases: workbuddy, codebuddy-cn).
 Other registered agents (claude / trae / codex / opencode) are NOT yet verified and
 cannot be installed or removed until their adapter is canary-tested.
 

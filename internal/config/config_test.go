@@ -77,9 +77,9 @@ func TestSourcesFor(t *testing.T) {
 // 省略 / "*" / "all" = 所有工作区；单个或数组按路径匹配。
 func TestWorkspaceMatching(t *testing.T) {
 	c := &Config{Sources: []Source{
-		{Paths: []string{"omit"}},                                 // 省略 = 所有
-		{Paths: []string{"star"}, Workspaces: []string{"*"}},       // * = 所有
-		{Paths: []string{"word"}, Workspaces: []string{"all"}},     // all = 所有
+		{Paths: []string{"omit"}},                              // 省略 = 所有
+		{Paths: []string{"star"}, Workspaces: []string{"*"}},   // * = 所有
+		{Paths: []string{"word"}, Workspaces: []string{"all"}}, // all = 所有
 		{Paths: []string{"single"}, Workspaces: []string{"/tmp/proj1"}},
 		{Paths: []string{"multi"}, Workspaces: []string{"/tmp/p2", "/tmp/p3"}},
 	}}
@@ -353,5 +353,34 @@ groups = ["x"]
 	}
 	if _, err := Load(p); err == nil {
 		t.Fatal("重复定义组名应报错")
+	}
+}
+
+// TestDeclaresWorkspace 校验 sync 守卫：该工作区是否被配置里任何一条 source 覆盖。
+func TestDeclaresWorkspace(t *testing.T) {
+	c := &Config{Sources: []Source{
+		{Paths: []string{"a"}, Workspaces: []string{"/proj/a"}},
+		{Paths: []string{"b"}, Workspaces: []string{"/proj/**"}},
+	}}
+	if !c.DeclaresWorkspace("/proj/a") {
+		t.Fatal("/proj/a 应被声明")
+	}
+	if !c.DeclaresWorkspace("/proj/a/deep") {
+		t.Fatal("/proj/** 应覆盖任意深度")
+	}
+	if c.DeclaresWorkspace("/tmp/other") {
+		t.Fatal("/tmp/other 不该被声明")
+	}
+
+	// 省略 workspace 的全局 source ⇒ 任意路径都算已声明。
+	global := &Config{Sources: []Source{{Paths: []string{"x"}}}}
+	if !global.DeclaresWorkspace("/whatever") {
+		t.Fatal("全局 source 应使任意路径都被声明")
+	}
+
+	// 空配置 ⇒ 谁都不声明。
+	empty := &Config{}
+	if empty.DeclaresWorkspace("/proj/a") {
+		t.Fatal("空配置不该声明任何工作区")
 	}
 }
