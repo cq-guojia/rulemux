@@ -145,7 +145,7 @@ func writeHookJSON(path string, a agents.Agent, create bool) (changed bool, err 
 	}
 	list, _ := hooksMap["SessionStart"].([]interface{})
 
-	// 已是最新 ⇒ 不写盘：幂等，且让 postinstall 只在真有变化时才说话。
+	// 已是最新 ⇒ 不写盘：幂等，且让调用方（sync 自愈 / init --refresh）只在真有变化时才说话。
 	if installed, cur := inspectSessionStart(list, a); installed && cur == TargetCommand(a) {
 		return false, nil
 	}

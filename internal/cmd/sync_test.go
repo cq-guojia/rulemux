@@ -8,6 +8,56 @@ import (
 	"testing"
 )
 
+// TestSyncSelfHealsOutdatedHook：不依赖任何 npm 安装脚本 —— 一次普通 sync 就应把
+// 「我们自己那条旧格式钩子」就地升级，且不碰别人的条目与文件里其它键。
+// 见 docs/design/features/agent-onboarding.md §二「升级刷新」。
+func TestSyncSelfHealsOutdatedHook(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(filepath.Join(home, ".codebuddy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	hookPath := filepath.Join(home, ".codebuddy", "settings.json")
+	seed := `{"theme":"dark","hooks":{"SessionStart":[` +
+		`{"hooks":[{"type":"command","command":"node \"/other.js\""}]},` +
+		`{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent codebuddy"}]}]}}`
+	if err := os.WriteFile(hookPath, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = captureStdout(t, func() {
+		Sync([]string{"--config", cfgPath, "--workspace", ws, "--agent", "codebuddy"})
+	})
+
+	b, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "rulemux sync --hook --agent codebuddy") {
+		t.Fatalf("旧格式钩子未被自愈: %s", got)
+	}
+	if !strings.Contains(got, `node \"/other.js\"`) {
+		t.Fatalf("别家的钩子被改动: %s", got)
+	}
+	if !strings.Contains(got, `"theme": "dark"`) {
+		t.Fatalf("文件里其它键丢失: %s", got)
+	}
+}
+
 // captureStdout 临时接管 os.Stdout，返回 fn 执行期间写出的全部内容。
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()

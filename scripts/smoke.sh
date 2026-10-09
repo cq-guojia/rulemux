@@ -209,31 +209,36 @@ grep -q "installed but OUTDATED" "$TMP/doctor2.log" || fail "doctor did not flag
 grep -q "rulemux init --refresh" "$TMP/doctor2.log" || fail "doctor did not point at the fix"
 ok "doctor flags outdated hooks"
 
-# 16. npm postinstall: refresh on a global install, stay silent otherwise and
-# never fail the install.
-if command -v node >/dev/null 2>&1; then
-  cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
-{"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
+# 16. Hook self-heal — no npm install scripts involved at all: a plain `sync` must
+# rewrite our own outdated hook entry, and touch nothing else.
+cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
+{
+  "theme": "dark",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "node \"/other.js\""}]},
+      {"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}
+    ]
+  }
+}
 EOF
-  HOME="$HOOKHOME" npm_config_global=true node bin/postinstall.js >"$TMP/postinstall.log" 2>&1 \
-    || fail "postinstall exited non-zero"
-  grep -qF 'rulemux sync --hook --agent codebuddy' "$HOOKHOME/.codebuddy/settings.json" \
-    || fail "postinstall did not refresh the existing hook"
-  grep -q "upgraded the SessionStart hook(s)" "$TMP/postinstall.log" \
-    || fail "postinstall did not report the upgrade"
+HOME="$HOOKHOME" "$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/heal.log" 2>&1 \
+  || fail "sync exited non-zero while self-healing"
+grep -qF 'rulemux sync --hook --agent codebuddy' "$HOOKHOME/.codebuddy/settings.json" \
+  || fail "sync did not self-heal the outdated hook"
+grep -qF 'node \"/other.js\"' "$HOOKHOME/.codebuddy/settings.json" \
+  || fail "self-heal damaged another tool's hook"
+grep -qF '"theme": "dark"' "$HOOKHOME/.codebuddy/settings.json" \
+  || fail "self-heal dropped an unrelated key"
+grep -q "updated the SessionStart hook" "$TMP/heal.log" \
+  || fail "self-heal did not report the update on stderr"
+ok "sync self-heals an outdated hook (no npm scripts involved)"
 
-  cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
-{"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
-EOF
-  HOME="$HOOKHOME" node bin/postinstall.js >"$TMP/postinstall2.log" 2>&1 \
-    || fail "postinstall exited non-zero when not a global install"
-  if [ -s "$TMP/postinstall2.log" ]; then fail "postinstall was not silent for a local install"; fi
-  grep -qF 'rulemux sync --agent codebuddy' "$HOOKHOME/.codebuddy/settings.json" \
-    || fail "a local install must not touch the host config"
-  ok "npm postinstall refreshes on global install, silent otherwise"
-else
-  ok "npm postinstall skipped (node not available)"
-fi
+# ...and it never conjures a host config where none exists
+rm -rf "$HOOKHOME/.codebuddy"
+HOME="$HOOKHOME" "$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" >/dev/null 2>&1
+[ ! -e "$HOOKHOME/.codebuddy" ] || fail "self-heal created a host config out of nowhere"
+ok "self-heal never creates host config"
 
 echo
 echo "ALL SMOKE TESTS PASSED"

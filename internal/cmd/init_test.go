@@ -120,7 +120,7 @@ func TestInitRefresh_NeverCreates(t *testing.T) {
 }
 
 // TestInitRefresh_UnreadableConfigIsNotFatal：配置读不了 / 解析失败只警告，
-// 绝不改文件、绝不返回失败 —— 它会被 npm postinstall 调用，不能污染安装结果。
+// 绝不改文件、绝不返回失败 —— 它可能被脚本批量调用，不能污染调用方的结果。
 func TestInitRefresh_UnreadableConfigIsNotFatal(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

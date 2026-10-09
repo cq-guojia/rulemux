@@ -67,9 +67,10 @@ npm i -g rulemux
 **没有自动更新**。升级手动、交给包管理器（`go install …@latest`，将来 Homebrew / Scoop / apt）。
 这是刻意决策，见 [`docs/design/requirements.md`](docs/design/requirements.md) §五。
 
-**升级会自动把你的钩子刷新到当前格式。** 钩子命令会随版本变化（0.2.0 起加了 `--hook`），所以
-`npm i -g rulemux@latest` 之后，npm 的 `postinstall` 会**只重写 rulemux 自己装过的那条** SessionStart
-钩子 —— 别的条目、别的键一个字节都不动。非 npm 方式升级的，自己跑一条即可：
+**升级后钩子会自己跟上当前格式——不依赖 npm 的安装脚本。** 钩子命令会随版本变化（0.2.0 起加了
+`--hook`），所以升级后**首次**有 Agent 调起 `rulemux sync` 时，它会**只重写 rulemux 自己装过的那条**
+SessionStart 钩子为当前格式 —— 别的条目、别的键一个字节都不动，也绝不创建任何文件。这段逻辑在二进制
+里，因此**任何安装方式都生效**，也不需要 npm 放行任何安装脚本。想立刻手动做一次：
 
 ```bash
 rulemux init --refresh   # 只刷新「我们自己装过的」钩子：不新增、不创建任何文件或目录
@@ -209,7 +210,7 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 | `rulemux sync --all [--config <path>]` | 手动把账本里记录过的所有工作区重新对齐（不读 cwd、绝不创建目录、顺手 GC 掉目录已不在的条目）。与 `--hook` / `--agent` / `--workspace` 互斥 |
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2：把规则输出到 stdout 供钩子注入 |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | 生成示例配置并安装 SessionStart 钩子 |
-| `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | **只刷新** rulemux 自己装过的钩子（npm `postinstall` 调用的就是它）：不新增、不创建任何文件或目录、文件里其它条目与其它键一律原样保留 |
+| `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | **只刷新** rulemux 自己装过的钩子（升级后首次 `sync` 会自动做一次，这条用于手动强制）：不新增、不创建任何文件或目录、文件里其它条目与其它键一律原样保留 |
 | `rulemux doctor [--config <path>] [--workspace <dir>]` | 环境自检 |
 | `rulemux verify --agent <id> [--clean] [--workspace <dir>]` | canary 验收 |
 | `rulemux uninstall --agent <id[,id...]> \| --off \| --all [--yes]` | 移除钩子与已投递文件 |

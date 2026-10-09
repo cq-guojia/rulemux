@@ -75,9 +75,14 @@ There is **no auto-update**. Upgrades are manual and handled by your package man
 (`go install …@latest`, Homebrew/Scoop/apt later on). This is a deliberate decision — see
 [design/requirements.md](docs/design/requirements.md) §五.
 
-**An upgrade keeps your hooks current.** A hook command can change between releases (0.2.0 added
-`--hook`), so after `npm i -g rulemux@latest` the npm `postinstall` step rewrites the SessionStart
-hooks rulemux itself had installed — and touches nothing else. For non-npm upgrades, run it yourself:
+**An upgrade keeps your hooks current — by itself, with no npm install scripts.** A hook command can
+change between releases (0.2.0 added `--hook`), so rulemux fixes its own stale hook the next time an
+agent runs it: the first `rulemux sync` after an upgrade rewrites rulemux's own SessionStart entry
+into the current format. Nothing else is touched — other tools' hooks and every other key stay as they
+were, and nothing is ever created. Because this lives in the binary, it works no matter how rulemux was
+installed and needs no `postinstall` allow-list from npm.
+
+You can also do it on demand:
 
 ```bash
 rulemux init --refresh   # rewrite rulemux's OWN hooks only: never installs, never creates files
@@ -224,7 +229,7 @@ shown the list of workspaces before anything is deleted.
 | `rulemux sync --all [--config <path>]` | Manually re-align every workspace recorded in the ledger (never reads cwd, never creates dirs, prunes ledger entries whose directory is gone). Mutually exclusive with `--hook` / `--agent` / `--workspace` |
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2: print rules to stdout for hook injection |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | Write a sample config and install the SessionStart hook |
-| `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | Refresh **only** the hooks rulemux already installed (npm `postinstall` calls this). Never adds a hook, never creates a file or directory, preserves every other entry and key in the host config |
+| `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | Refresh **only** the hooks rulemux already installed. This also happens by itself on the first sync after an upgrade; use this to force it. Never adds a hook, never creates a file or directory, preserves every other entry and key in the host config |
 | `rulemux doctor [--config <path>] [--workspace <dir>]` | Environment self-check |
 | `rulemux verify --agent <id> [--clean] [--workspace <dir>]` | Canary acceptance test |
 | `rulemux uninstall --agent <id[,id...]> \| --off \| --all [--yes]` | Remove hooks and delivered files |

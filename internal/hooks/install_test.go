@@ -174,7 +174,7 @@ func TestRefresh_UpgradesOldHookAndKeepsEverythingElse(t *testing.T) {
 	}
 }
 
-// 幂等：已是最新时一个字节都不写（postinstall 靠它做到「无变化零输出」）。
+// 幂等：已是最新时一个字节都不写（调用方靠它做到「无变化零输出」）。
 func TestRefresh_NoWriteWhenAlreadyCurrent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	seed := `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --hook --agent codebuddy"}]}]}}`

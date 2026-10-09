@@ -116,8 +116,8 @@ const exampleConfig = `# rulemux configuration file
 //   - 默认（安装）：为 --agent 指定的 agent 装 SessionStart 钩子，允许创建配置目录与文件
 //     —— 这是用户的显式动作。
 //   - --refresh（刷新）：只把「已存在的自家钩子条目」升级到当前格式。不创建任何文件或目录，
-//     未装过的一律跳过；别人的钩子条目与文件里其它键原样保留。npm 全局升级（postinstall）
-//     与用户手动调用都走这条路径，使旧格式钩子自动跟上（见 design「升级即生效」）。
+//     未装过的一律跳过；别人的钩子条目与文件里其它键原样保留。**主路径是 sync 的自愈**
+//     （见 healHooks）；这条命令供手动 / 诊断使用（见 design「升级即生效」）。
 //
 // --agent is REQUIRED in install mode. rulemux never scans the machine for installed
 // agents; you must explicitly say which agent(s) you want.
@@ -191,8 +191,8 @@ func Init(args []string) int {
 
 // refreshHooks 刷新「已装」的自家钩子条目：未装的不创建，别人的条目不动。
 //
-// 永远返回 0（个别 agent 读不了 / 写不了只打警告并继续）—— 它同时被 npm postinstall
-// 调用，绝不能把安装流程拖成失败。
+// 永远返回 0（个别 agent 读不了 / 写不了只打警告并继续）—— 它也可能被脚本批量调用，
+// 绝不能因为个别 agent 失败就中断。
 func refreshHooks(agentArg string, f *Flags) int {
 	var targets []agents.Agent
 	if agentArg == "" {
@@ -289,8 +289,9 @@ REFRESH (the upgrade path — refreshes, never installs):
       file or directory, never adds a hook that was not there before, and preserves
       every other entry and every other key in the host config. Agents that were
       never installed are skipped. Omitting --agent checks every registered agent.
-      This is what npm postinstall calls after a global upgrade; you can also call
-      it by hand after upgrading a binary that was not installed via npm.
+      rulemux usually does this by itself: the first sync after an upgrade rewrites
+      its own stale hook, with no npm install scripts involved. This command is for
+      doing it on demand.
 
 OTHER FLAGS:
   --refresh           Refresh existing rulemux hooks only (see above).

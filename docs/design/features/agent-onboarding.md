@@ -47,8 +47,12 @@
 - [ ] 写入**必须幂等**：同 agent 重复安装不产生第二条（`installJSON` 先比对「已存在且等于当前目标命令」就直接不写盘）
 - [ ] **升级刷新**：新二进制必须能把旧格式钩子就地升级。`hooks.Refresh` 复用同一套识别口径，
       **只重写我们自己那条**（含 `--agent <别名>` 的历史写法）、**不创建文件或目录**（`create=false`）、
-      **幂等**（已是最新一个字节都不写）。入口：`rulemux init --refresh`（无 `--agent` 时遍历全部已注册
-      agent，只刷已装者）+ npm `postinstall`（全局安装后自动跑，任何异常都静默 exit 0）
+      **幂等**（已是最新一个字节都不写）。入口二选一：
+      ① **二进制自愈（主路径）**——任何一次 `sync`（含「旧格式钩子调起、不带 `--hook`」那种）都会顺手
+      检查并修复自己那条钩子 ⇒ 任何安装方式、任何 npm 脚本策略下都生效；
+      ② `rulemux init --refresh`（无 `--agent` 时遍历全部已注册 agent，只刷已装者）——手动/诊断用。
+      ⚠️ **不要依赖 npm 安装脚本**：npm 11 起 `postinstall` 需要 `allow-scripts` 白名单放行，
+      押它迟早静默失效（2026-10-09 实测被警告拦过）。参见 `internal/cmd/sync.go` 的 `healHooks`
 - [ ] **必须保留文件里已有内容**，只追加 rulemux 那一条（不覆盖别家钩子——本机 Hindsight 的钩子就与 rulemux 并存，见 [`external/hindsight.md`](../external/hindsight.md)）
 - [ ] `SubcommandFor`：Tier-1 用 `sync`，Tier-2 用 `inject`
 - [ ] `internal/cmd/init.go` 的帮助文本与可安装清单更新（只允许 Verified）

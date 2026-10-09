@@ -10,6 +10,7 @@ import (
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/engine"
+	"github.com/cq-guojia/rulemux/internal/hooks"
 	"github.com/cq-guojia/rulemux/internal/state"
 )
 
@@ -100,6 +101,12 @@ func Sync(args []string) int {
 		return 1
 	}
 
+	// 自愈（不依赖 npm 的安装脚本）：顺手把「我们自己装过的那条钩子」升级到当前格式。
+	// 任何安装方式（npm / tarball / 容器入口 / go install）都会在下一次 sync 时自动跟上；
+	// 旧格式钩子（缺 --hook）正是在这里被修好的 —— 因为它调起我们时也不带 --hook，
+	// 所以这条自愈必须在「非 hook 路径」同样生效。
+	healHooks(ws, targets)
+
 	// 只有 hook 点名的那一个 agent 才允许创建自己的规则目录（设计 §二 原则 1）。
 	requestedID := ""
 	if requested != "" {
@@ -168,6 +175,28 @@ func Sync(args []string) int {
 		}
 	}
 	return exit
+}
+
+// healHooks 把 targets 里每个 agent「已存在的自家钩子」升级到当前格式（幂等）。
+//
+// 这是「升级即生效」的自愈路径，替代原先依赖 npm postinstall 的做法：npm 11 起安装脚本
+// 默认需要白名单放行（`allow-scripts`），靠它迟早会静默失效 —— 不押在别人的策略上。
+//
+// 硬规则（与 init --refresh 同一口径）：只重写已存在的自家条目；没装过不创建、别人的条目
+// 与其它键不碰、已是最新不写盘。诊断一律走 stderr，绝不污染 stdout 的协议输出。
+func healHooks(ws string, targets []agents.Agent) {
+	for _, a := range targets {
+		path := a.HookFileAbs(ws)
+		installed, cmd, err := hooks.Inspect(path, a)
+		if err != nil || !installed || cmd == hooks.TargetCommand(a) {
+			continue // 读不了 / 没装过 / 已是最新 ⇒ 什么都不做
+		}
+		if _, err := hooks.Refresh(path, a); err != nil {
+			fmt.Fprintf(os.Stderr, "rulemux: warning: could not update the SessionStart hook in %s: %v\n", path, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "rulemux: updated the SessionStart hook to the current format (%s)\n", cmd)
+	}
 }
 
 // cascade 顺手同步该工作区历史上用过的**其它** Tier-1 agent。
@@ -305,16 +334,18 @@ func agentsFromLedger(ids []string) []agents.Agent {
 //
 // 背景（2026-10-09 实测）：宿主确实会把这段内容注入模型上下文，但若只写"请转告用户"，
 // 模型在忙于回答用户问题时经常不转述 ⇒ 用户看不到任何提示。故改为「先输出警告」的硬指令。
-const changeNotice = "rulemux: the rule files synced into this workspace just changed " +
-	"(added / updated / removed). The rules already loaded in THIS session are the previous version.\n" +
+const changeNotice = "rulemux: the rule files that rulemux injects into this workspace were just " +
+	"updated (added / updated / removed). The copies this session already loaded are the previous " +
+	"version.\n" +
 	"\n" +
 	"BEFORE you do anything else — before any other text, tool call, or answer — start your reply with a " +
 	"clearly marked WARNING that tells the user, in the language you are currently using with them, " +
 	"something equivalent to:\n" +
-	"  \"⚠️ Rules changed: this session still holds the previous version. Start a NEW session for the " +
-	"change to take effect.\"\n" +
-	"Express it in the user's language — do NOT copy this English wording verbatim. " +
-	"Then continue with the user's request."
+	"  \"⚠️ The rule files rulemux injected into this workspace have been updated. This session still " +
+	"holds the previous version — start a NEW session for the update to take effect.\"\n" +
+	"Always name what was updated (the rule files rulemux injected into this workspace): a bare \"the " +
+	"rules changed\" leaves the user guessing which rules. Express it in the user's language — do NOT " +
+	"copy this English wording verbatim. Then continue with the user's request."
 
 // hookOutput / hookPayload 是宿主认的注入协议外壳。
 type hookOutput struct {
