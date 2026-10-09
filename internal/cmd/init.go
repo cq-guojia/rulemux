@@ -196,7 +196,9 @@ func Init(args []string) int {
 func refreshHooks(agentArg string, f *Flags) int {
 	var targets []agents.Agent
 	if agentArg == "" {
-		targets = agents.All() // 没装过的会被逐个跳过
+		// 只遍历「已核实」的 agent（与 sync、安装的范围一致）：未核实的不去读它们的配置，
+		// 既省几次无意义的文件读取，也不会刷出"登记了但没实现"的噪音行。
+		targets = agents.Supported()
 	} else {
 		ts, err := parseAgents(agentArg)
 		if err != nil {
@@ -288,7 +290,7 @@ REFRESH (the upgrade path — refreshes, never installs):
       upgraded binary brings old hook commands up to date. It never creates a config
       file or directory, never adds a hook that was not there before, and preserves
       every other entry and every other key in the host config. Agents that were
-      never installed are skipped. Omitting --agent checks every registered agent.
+      never installed are skipped. Omitting --agent checks every supported agent.
       rulemux usually does this by itself: the first sync after an upgrade rewrites
       its own stale hook, with no npm install scripts involved. This command is for
       doing it on demand.

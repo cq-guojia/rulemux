@@ -50,7 +50,8 @@
       **幂等**（已是最新一个字节都不写）。入口二选一：
       ① **二进制自愈（主路径）**——任何一次 `sync`（含「旧格式钩子调起、不带 `--hook`」那种）都会顺手
       检查并修复自己那条钩子 ⇒ 任何安装方式、任何 npm 脚本策略下都生效；
-      ② `rulemux init --refresh`（无 `--agent` 时遍历全部已注册 agent，只刷已装者）——手动/诊断用。
+      ② `rulemux init --refresh`（无 `--agent` 时只遍历**已核实**的 agent = `Supported()`，只刷已装者）
+      ——手动 / 诊断用。范围与 `sync` 一致：未核实的 agent 连配置都不去读
       ⚠️ **不要依赖 npm 安装脚本**：npm 11 起 `postinstall` 需要 `allow-scripts` 白名单放行，
       押它迟早静默失效（2026-10-09 实测被警告拦过）。参见 `internal/cmd/sync.go` 的 `healHooks`
 - [ ] **必须保留文件里已有内容**，只追加 rulemux 那一条（不覆盖别家钩子——本机 Hindsight 的钩子就与 rulemux 并存，见 [`external/hindsight.md`](../external/hindsight.md)）
