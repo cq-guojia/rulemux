@@ -43,23 +43,9 @@
 
 ## 三、下一步
 
-**本轮目标：接入 Trae CN（把它从 `Verified=false` 推到「可安装」）。**
-**范围**：本轮**只做 Trae CN**；国际版暂不匹配 —— 将来接入时再判定「两者是同一机制、还是并作别名、还是两条独立条目」。
-核实一律按 [`design/features/agent-onboarding.md`](design/features/agent-onboarding.md) 的清单来（先读源码与文档，禁止靠运行时试探猜）：
+**Trae CN 接入已封板（2026-10-09，随 `v0.3.0` 发版）**：规则目录 `.trae/rules`、hook 落点 `~/.trae-cn/hooks.json`（CN）/ `~/.trae`（intl）、`SessionHint` 决策（保持 OFF）均已落定，详见 [`PROGRESS-HISTORY.md`](PROGRESS-HISTORY.md)。
 
-1. **核实外部事实（阻塞项，先做完再动手）**：
-   - 工作区规则目录是否 `.trae/rules`、扩展名 `.mdc` 还是 `.md`、是否读目录下全部 / 递归几层；
-   - **T1：`.mdc` 的 frontmatter 怎么写才无条件常驻** —— `alwaysApply` / `globs` / `description` 三者的语义要读到实现（写法不对 ⇒ 规则只在命中 glob 时生效，达不到「等价 `AGENTS.md`」）；
-   - **T6：hooks 配置的落点与 schema** —— `hooks.json` 在工作区根还是 `.trae/hooks.json`，是否支持 `type:"command"` 直接 spawn 二进制。
-   - 结论回写 [`design/external/agent-rules-dirs.md`](design/external/agent-rules-dirs.md)，每条标适用版本与出处。
-2. **对照探针 canary（T4）**：按 [`design/features/verification.md`](design/features/verification.md) 用**对照探针**
-   （同内容探针分放候选位置 → 开新会话问「读到了吗」），以「内容是否进入上下文」为判据，不以「文件是否落盘」为准。
-3. **代码侧**：按核实结果填 `registry.go` 的 trae 条目（`RulesDir` / `NeedsFrontmatter` / frontmatter 写法 /
-   `SessionHint` / `HintProtocol`），并确认 hooks 落点；坐实后 `Verified=true`，即可 `init --agent trae`。
-   ⚠ 若 Trae 的规则目录与 codebuddy/workbuddy 相同，走 `SharingRulesDir` 自动分组，不必另写逻辑
-   （见 [`features/dir-sync.md`](features/dir-sync.md)「共享规则目录」）。
-
-**其余（非本轮）**：
+**其余待办**：
 
 - T11 **Claude 侧 sync 未落地**（open bug）：开 Claude Code 会话确认 `rulemux sync --agent claude` 是否生成 `.claude/rules/__rulemux__*`。
 - **Codex / OpenCode** 接入（Tier-2 注入，落点与 schema 待查）。

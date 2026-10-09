@@ -155,6 +155,7 @@
 - 协议分支写在 `cmd/sync.go` 的输出函数里；`hooks/install.go` 只按 per-agent 字段参数化 hook 条目。
 - 提示**只挂 SessionStart**，不新增 `UserPromptSubmit`（会累积）。
 - **前置 canary（必须先做）**：坐实 CodeBuddy/WorkBuddy 是否真消费 `hookSpecificOutput.additionalContext`。**未坐实前 `SessionHint`/`HintProtocol` 不写死。**
+- **per-agent 决策落定（2026-10-09，随 `v0.3.0` 封板）**：CodeBuddy/WorkBuddy 经实测确认"会话开始固定快照、不热重载" ⇒ `SessionHint:true` + `HintProtocol` 已写死；**trae 经用户确认"会话开始即读取 `.trae/rules`（首会话即得）" ⇒ `SessionHint` 保持 `false`（不设 `HintProtocol`），无需"请新开会话"提示**——该决策只依赖"会话内加载语义"，与"host 是否渲染 `additionalContext`"无关，故那条 canary 对 trae 不适用。统一原则：**仅对「会话内不重读规则目录」的 agent 开 `SessionHint`**。
 
 **Tier-2 的通道语义（须明确）**：Tier-2（`inject`）的 stdout 是**规则正文载荷**；§六的 stdout 是**提示协议**。二者**按 agent 互斥**（Tier-2 不走提示），文档与代码都要写清，避免后续混用。
 
@@ -210,7 +211,7 @@
 
 ### 9.3 动工前的实证（canary）
 
-1. **【阻塞 §六 协议常量】** CodeBuddy/WorkBuddy 是否真消费 `hookSpecificOutput.additionalContext`。
+1. ~~**【阻塞 §六 协议常量】** CodeBuddy/WorkBuddy 是否真消费 `hookSpecificOutput.additionalContext`~~ → **已坐实（2026-10-09，`v0.2.2`）**：宿主确实把 `additionalContext` 注入模型上下文（见 §六 输出通道证据），`SessionHint:true` 已写死。
 2. 用**对照探针**复核"读规则先于 hook 写入"。
 3. ~~WorkBuddy 是否读 `.codebuddy/rules` 下与 CodeBuddy 同一批文件（方案 A 的前提）~~ → **2026-10-09 已答：否**。WorkBuddy 有独立配置目录 `~/.workbuddy`（§5.4），方案 A 前提不成立；**仍待测**：其工作区级 rules 目录究竟是 `.workbuddy/rules` 还是 `.codebuddy/rules`（🔴，本次先以 `.workbuddy/rules` 占位）。
 4. "无变化 ⇒ stdout 为空"时 host 不把空 stdout 当上下文注入。
