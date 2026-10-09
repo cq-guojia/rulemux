@@ -99,7 +99,7 @@
   - **兜底不设守护**：因三家均在会话开始读规则，即便某 agent 未装 hook，只要 `rulemux sync` 在开会话前跑过（一次性命令、不常驻），文件即在目录中被读到 → 满足「极致简单、不常驻」。
 - **依据**：`external/agent-rules-dirs.md` §三（Claude Code）；CodeBuddy《Hooks 使用指南》+《Rules》2026-08-26 / 2026-03-02；Trae `docs.trae.cn/ide_hook-configuration-reference` + 官方社区；Codex hooks 文档（SessionStart 事件）。
 - **架构前提（已定）**：rulemux 采用「核心引擎 + 每 agent 独立插件/适配器」（形如 HINDSIGHT 的每 agent 集成）；适配器自报 Tier-1（有原生规则目录、SessionStart 复制）或 Tier-2（走 hooks 注入）。接口归第 9 / 12 条。
-- **待定**：各 agent 具体 hook 安装路径归第 12 条；精确「钩子先于读规则」以第 13 条 canary 实测坐死。
+- **待定**：各 agent 具体 hook 安装路径归第 12 条；「钩子与读规则的时序」**已坐实（2026-10-08 首证、2026-10-09 对照实测复证）**：**读规则先于钩子写入** ⇒ 会话开始后才落盘的文件本会话读不到、需下一个会话；兜底是「变化提示」（见第 13 条与 [`external/agent-rules-dirs.md`](external/agent-rules-dirs.md) §四）。
 
 ### 9. 逐 agent 格式适配 ✅ 已定
 - **问题**：中央 `.md` → 各 agent 期望格式（单文件 vs 多文件、头尾标记）。
@@ -145,7 +145,8 @@
 ### 13. 验收自动化 ✅ 方案已定（实现待办）
 - **问题**：如何把「效果与 token 和直接写 AGENTS.md 一致」落成自带能力。
 - **结论（canary 文件法）**：`rulemux verify` / `doctor` 逐 agent 做：
-  1. **钩子先于读规则**：在某 agent 规则目录放一个带 `rulemux` 标记的 canary 文件，开新会话，问 agent「你看到了 canary 里的暗号吗」——能答出即证明 SessionStart 复制在当前会话生效（坐实第 8 条链路）。
+  1. **规则是否进了本会话上下文**：在某 agent 规则目录放一个带 `rulemux` 暗号的 canary 文件，**先放文件、再开一个全新会话**，问 agent「你看到了 canary 里的暗号吗」——能答出即证明该文件进了本会话上下文。
+     ⚠️ 时序**已坐实为「读规则先于钩子写入」**：canary 若是在会话开始之后才落盘的，**本会话必然读不到**（须再开一个会话才验证得到）⇒ 验证必须"先放文件、后开会话"，否则结论会被误读成失败。
   2. **点文件可读**：同样放 `__rulemux__canary.md`（点开头隐藏），验证该 agent 的「读全部 .md」**不跳过点文件**；若跳过 ⇒ 退化为非点前缀 `rulemux__`（见第 7 条待 canary ①）。
   3. **CodeBuddy 结构**：验证平铺 `__rulemux__*.md` 是否被加载（见第 7 条待 canary ②）。
   4. **token 一致性**：对比「rulemux 注入」与「直接手写 AGENTS.md」进上下文的 token 数，应在误差内一致（A1 验收）。

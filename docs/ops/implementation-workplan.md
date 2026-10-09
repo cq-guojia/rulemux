@@ -14,7 +14,7 @@
 | 2 | design 文档对齐新模型（去中央真源 / Tier 分层 / 前缀 / DeepSeek 移出） | ✅ 完成 |
 | 3 | **Go 源码实现（核心引擎 + 全部 agent 适配器 + 4 个子命令）** | ✅ 完成（本批） |
 | 4 | 编译出二进制 | ✅ 完成（Go 1.27.1，`go build` + `go vet` 全绿） |
-| 5 | canary 实测坐实（点文件 / 目录结构 / 钩子时序 / 注入） | 🚧 **部分完成**：CodeBuddy/WorkBuddy ✅ 坐实（2026-10-08，点文件读 + 平铺加载 + 钩子先于读）；Claude ❌ 本工作区未落地（open bug，见 T11）；trae/codex/opencode 待实测 |
+| 5 | canary 实测坐实（点文件 / 目录结构 / 钩子时序 / 注入） | 🚧 **部分完成**：CodeBuddy/WorkBuddy ✅ 坐实（2026-10-08：平铺**非隐藏** `.md` + `alwaysApply:true` 才加载、**点文件被跳过**；2026-10-09 对照实测复证**读规则先于钩子写入**）；Claude ❌ 本工作区未落地（open bug，见 T11）；trae/codex/opencode 待实测 |
 | 6 | 单测 + 冒烟 | ✅ 完成（`go test ./...` 通过；`scripts/smoke.sh` 10/10） |
 | 7 | CI 交叉编译 + Release 分发 | ⬜ 待做 |
 | 8 | T7：`package.json` 加 `files` 字段 | ⬜ 待做 |
@@ -136,7 +136,7 @@ rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号
 
 | agent | 校准状态 / 内容 |
 |---|---|
-| codebuddy | ✅ **已坐实（2026-10-08）**：`.codebuddy/rules/` 平铺 `.md`（含点文件）会被加载，钩子先于读（见 `external/agent-rules-dirs.md` §四） |
+| codebuddy | ✅ **已坐实（2026-10-08）**：`.codebuddy/rules/` 平铺**非隐藏** `.md`（须带 `alwaysApply:true`）会被加载、**点文件被跳过**，且**读规则先于钩子写入**（首会话差一拍）（见 `external/agent-rules-dirs.md` §四） |
 | workbuddy | ✅ 随 CodeBuddy 一并坐实（复用其机制） |
 | trae | ⬜ 钩子配置落点（`hooks.json` 工作区根 or `.trae/hooks.json`）；点文件是否读 |
 | codex | ⬜ 钩子落点 `~/.codex/config.toml` 与 schema（`[features] codex_hooks` + `[[hooks.SessionStart]]`） |
@@ -157,5 +157,5 @@ rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号
 - 测试源 `~/.rulemux/rules/canary-test.md` 内含暗号；`~/.rulemux/config.toml` 把它派给 claude / codebuddy / trae / codex。
 - 6 个 agent 的 SessionStart 钩子已安装（`rulemux init`），`rulemux doctor` 显示全部已安装。
 - **判定方法**：开一个**新会话**，问该 agent「你能在规则里看到这个暗号吗：`RULEMUX-CANARY-43371345`」。
-  - 念得出 ⇒ 链路通（钩子先于读规则 + 该 agent 会读点开头的隐藏文件）；
+  - 念得出 ⇒ 链路通（该 agent 会读该规则目录下的规则文件；注意**读规则先于钩子写入** ⇒ 会话开始后才落盘的文件本会话读不到，要下一个会话 —— 这正是「变化提示」要告知用户的）；
   - 念不出 ⇒ 按 [`../design/features/verification.md`](../design/features/verification.md) 排查；若确认是「跳过点文件」⇒ 把 `internal/engine/sync.go` 的 `Prefix` 改成非点的 `rulemux__`。
