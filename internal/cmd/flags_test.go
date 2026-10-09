@@ -4,7 +4,7 @@ import "testing"
 
 // TestParseAgentsRejectsUnverified 校验安装开关：未验证的 agent 被拒绝。
 func TestParseAgentsRejectsUnverified(t *testing.T) {
-	for _, arg := range []string{"codex", "claude", "trae", "opencode", "claude,codex"} {
+	for _, arg := range []string{"codex", "claude", "opencode", "claude,codex"} {
 		if _, err := parseAgents(arg); err == nil {
 			t.Fatalf("未验证的 agent %q 应被拒绝", arg)
 		}
@@ -45,6 +45,15 @@ func TestParseAgentsAcceptsVerified(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "workbuddy" {
 		t.Fatalf("workbuddy 应解析为独立 ID workbuddy: %+v", got)
+	}
+
+	// trae 经 2026-10-09 canary 坐实，现已可装（安装目录 + .trae/rules 规则目录均实测通过）。
+	got, err = parseAgents("trae")
+	if err != nil {
+		t.Fatalf("trae 应可装（2026-10-09 canary 已坐实）: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "trae" {
+		t.Fatalf("trae 应解析为独立 ID trae: %+v", got)
 	}
 }
 

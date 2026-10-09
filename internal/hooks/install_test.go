@@ -433,6 +433,69 @@ func TestInstallJSON_WorkbuddyPreservesOtherHooks(t *testing.T) {
 	}
 }
 
+// 回归（2026-10-09）：trae 风格的合并必须保留顶层 version 与 hindsight 等其它条目，
+// 只追加 rulemux 自己的 SessionStart 分组，绝不破坏既有配置。
+func TestInstallJSON_TraePreservesVersionAndOtherEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	seed := `{
+  "version": 1,
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "node \"/hindsight/sessionstart.js\"", "timeout": 30}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "node \"/hindsight/ups.js\"", "timeout": 30}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "node \"/hindsight/stop.js\"", "timeout": 60}]}
+    ]
+  }
+}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trae := agents.Agent{ID: "trae", Tier: agents.Tier1, Style: "trae", RulesDir: ".trae/rules"}
+	if err := installJSON(path, trae, ""); err != nil {
+		t.Fatalf("installJSON: %v", err)
+	}
+
+	var doc map[string]interface{}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	// 1. 顶层 version 保留（JSON 数字反序列化为 float64）。
+	if v, ok := doc["version"]; !ok || v != float64(1) {
+		t.Fatalf("顶层 version 应保留为 1, got %v", doc["version"])
+	}
+	// 2. hindsight 的 UserPromptSubmit / Stop 事件条目都在。
+	hooks, _ := doc["hooks"].(map[string]interface{})
+	for _, ev := range []string{"UserPromptSubmit", "Stop"} {
+		if _, ok := hooks[ev]; !ok {
+			t.Errorf("hindsight 的 %s 事件条目丢失", ev)
+		}
+	}
+	// 3. 只新增一条 rulemux 的 SessionStart 分组；hindsight 那条仍在。
+	list := loadSessionStart(t, path)
+	if len(list) != 2 {
+		t.Fatalf("want 2 SessionStart groups (hindsight + rulemux), got %d", len(list))
+	}
+	cmds := map[string]bool{}
+	for _, g := range list {
+		c, _ := hookCommand(t, g)
+		cmds[c] = true
+	}
+	if !cmds[`node "/hindsight/sessionstart.js"`] {
+		t.Error("hindsight 的 SessionStart 条目被改动")
+	}
+	if !cmds["rulemux sync --hook --agent trae"] {
+		t.Error("未写入 rulemux 的 trae 钩子")
+	}
+}
+
 func loadSessionStart(t *testing.T, path string) []interface{} {
 	t.Helper()
 	b, err := os.ReadFile(path)

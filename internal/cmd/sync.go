@@ -78,6 +78,13 @@ func Sync(args []string) int {
 		fmt.Fprintln(os.Stderr, "rulemux: cannot determine workspace:", err)
 		return 1
 	}
+	// hook 调用且未显式给 --workspace 时，优先用载荷里的 cwd / workspace_roots
+	// （Trae/Claude Code 的 hook 事件会透传，比 os.Getwd() 更可靠；缺失则回退）。
+	if wsFlag == "" && hook {
+		if w, ok := hookWorkspace(); ok {
+			ws, _ = workspace(w)
+		}
+	}
 
 	// 守卫（安全事故防线）：目标工作区必须被配置里某条 source 声明。
 	// 否则「空 want ⇒ 删残留」会清空一个我们无权管辖的目录。

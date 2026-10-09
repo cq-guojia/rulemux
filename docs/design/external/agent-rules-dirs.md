@@ -2,7 +2,7 @@
 
 > **类型**：外部事实（上游 agent 侧）
 > **适用版本**：见下表「适用版本」列；上游升级后据此复核
-> **状态**：🟡 **部分核实** —— Claude Code 经官方文档核实（2026-10-07，见 §三）；CodeBuddy / WorkBuddy 经 canary 实测坐实（2026-10-08，**同日复核并更正**，见 §四）；Trae / Codex / OpenCode 仍待补；**Claude 运行时 canary 未落地（open bug，见 §四）**。**除已核实项外不得作为实现依据**
+> **状态**：🟡 **部分核实** —— Claude Code 经官方文档核实（2026-10-07，见 §三）；CodeBuddy / WorkBuddy 经 canary 实测坐实（2026-10-08，**同日复核并更正**，见 §四）；**Trae 的安装目录（用户级 `~/.trae-cn/hooks.json` + Claude 系 hook 协议 + 顶层 `version`）经 hindsight 实装与本机核实（2026-10-09，见 §二·续），其规则目录 `.trae/rules` 经 2026-10-09 canary 坐实（见 §二·续）**；Codex / OpenCode 待补；**Claude 运行时 canary 未落地（open bug，见 §四）**。**除已核实项外不得作为实现依据**
 > **来源**：前期调研（原根 `DESIGN.md` §3）+ 本机 CodeBuddy 安装目录源码核查 + Claude Code 官方文档（`code.claude.com/docs/en/hooks`、`/memory`，2026-10-07）+ CodeBuddy 官方规则文档（`www.codebuddy.ai/docs/zh/ide/User-guide/Rules`，2026-10-08）
 > **配套**：[`../features/dir-sync.md`](../features/dir-sync.md)（我方怎么适配）· [`../../PROGRESS.md`](../../PROGRESS.md)（核实任务）
 
@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|---|---|
 | **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | ❌ **不会**：会话开始即固定规则快照，改动要下一个会话才生效（见 §四） | `hookSpecificOutput{hookEventName:"SessionStart", additionalContext}`（2026-10-09 实证，见下） | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules`；`SessionHint=true` |
 | Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | 部分：`/compact` 会重读项目 `CLAUDE.md`，但 `.claude/rules/` 子目录**不保证**自动回读 | 同上（`hookSpecificOutput.additionalContext`） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
-| Trae | `.trae/rules/` | `.mdc` | ✅ 递归读，最多 3 层 | 待补 | 待补 | 待补 | 需 frontmatter |
+| Trae | `.trae/rules/`（2026-10-09 canary 坐实，见 §二·续） | `.md`（带/不带 frontmatter 均可）；**`.mdc` 不加载** | ✅ 递归（子目录也读） | 🔴 待补（会话内重读未测） | Claude 系 `additionalContext` 协议；hook 载荷带 `cwd`/`workspace_roots`（2026-10-09 实测） | CN `~/.trae-cn`（2026-10-09 本机）；intl `~/.trae` | 安装目录 + 规则目录均已核实（见 §二·续）；`Verified=true` |
 | WorkBuddy | **`.codebuddy/rules/`**（与 CodeBuddy **共享**，2026-10-09 三位置对照探针坐实，见 §5.4） | `.md`（带 alwaysApply:true） | ✅ 读平铺非隐藏 `.md` | ❌ 不会（会话开始固定快照） | 同上 | 5.7.6（本机实测） | **用户级**配置/钩子独立：`~/.workbuddy/settings.json`；**工作区级**规则目录与 CodeBuddy 相同 ⇒ 两者共享目录，需走并集同步 |
 | Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
 | OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
@@ -75,6 +75,25 @@
 
 ---
 
+## 二·续、Trae 已核实事实（2026-10-09，取自 hindsight 实装 + 本机安装）
+
+> **来源**：hindsight 仓库 `hindsight-integrations/coding-agents/src/installer.ts:2017-2192`（TraeCode 安装器，已坐实）+ 本机 `~/.trae-cn/hooks.json` 实测（该文件当前已由 hindsight 写入并生效）。
+> **适用版本**：Trae CN（本机，目录 `~/.trae-cn`）；国际版 `~/.trae`（按存在探测，本期未单独校准）
+> **状态**：✅ 安装目录 + 规则目录均经 2026-10-09 canary 坐实（`Verified=true`）
+
+| 项 | 结论 | 出处 |
+|---|---|---|
+| 全局 hook 配置落点 | **用户级 `~/.trae-cn/hooks.json`**（CN）；国际版 `~/.trae/hooks.json` | installer.ts:2092-2127；本机实测 |
+| hook 协议 | **Claude Code 的 hook 协议**：事件挂在顶层 `hooks` 键下（`hooks.SessionStart` / `hooks.UserPromptSubmit` / `hooks.Stop`），并要求顶层 `version` 字段（缺失时 installer 补 1） | installer.ts:2096-2099 |
+| 全局 hook 能否触发 | ✅ 能：本机已有 hindsight 的 SessionStart / UserPromptSubmit / Stop 三条在运行；2026-10-09 另装 rulemux 探针条目亦正常触发、且未破坏既有条目 | 本机 `~/.trae-cn/hooks.json` 实测 |
+| 配置目录有无环境变量覆盖 | ❌ 无（不像 CodeBuddy 的 `CODEBUDDY_CONFIG_DIR`）；目录按存在探测，`~/.trae-cn` 优先、否则 `~/.trae` | skill-dirs.ts:62-73 / installer.ts:2019-2023 |
+| 用户级 MCP 的坑（参考，非 hook） | Trae 以 **Electron 进程的 cwd（= HOME）** 启动用户级 MCP server ⇒ 用户级 MCP 的 cwd 是 HOME 而非仓库，故 MCP 必须走每仓库 `.trae/mcp.json`、不能用用户级。但 **hook 事件本身会回传 `cwd`/`workspace_roots`**（见下），与 MCP 的 cwd 行为不同 | installer.ts:2106-2112 |
+| **规则目录（canary 2026-10-09）** | **`.trae/rules/` 会被读取**，且**递归**（子目录文件也会加载）；扩展名只认 **`.md`**（带/不带 frontmatter 都能加载），**`.mdc` 不被当作规则加载**（直接读文件才看得到，不在会话上下文） | 在 `/workspace/Temp/.trae/rules/` 放 4 份对照探针（平铺无 fm / 平铺带 fm / `.mdc` / 子目录），开新会话问暗号：前 3 类中 01/02/子目录被加载，`03-rule.mdc` 的暗号未出现在上下文 |
+| **hook 载荷回传工作区（canary 2026-10-09）** | ✅ SessionStart 载荷（stdin）含 `"cwd":"/workspace/Temp"` 与 `"workspace_roots":["/workspace/Temp"]`，`PWD` 亦为该工作区。⇒ `rulemux sync --hook` 可直接用载荷定位工作区，不必依赖 `os.Getwd()`（已落地 `cmd/flags.go::hookWorkspace`） | `/tmp/trae-hook-probe.log` 实测 |
+| 对 rulemux 的影响 | 钩子文件 = 用户级 `~/.trae-cn/hooks.json`（`HookFile` 已改为此、`HookAbs=true`、无 `HookDirEnv`）；`writeHookJSON` 对 `trae` 风格在缺 `version` 时补 `1`；规则目录 `.trae/rules` 经 canary 坐实 ⇒ `Verified=true`；`sync --hook` 优先读载荷 `cwd`/`workspace_roots` | registry.go / install.go / cmd/flags.go |
+
+---
+
 ## 三、Claude Code 已核实事实（官方文档 2026-10-07）
 
 > **来源**：Claude Code 官方文档 `https://code.claude.com/docs/en/hooks` 与 `https://code.claude.com/docs/en/memory`（抓取于 2026-10-07）
@@ -128,7 +147,7 @@
 
 ### 仍待实测
 
-- **Trae**：`.trae/rules` 是否被读、钩子配置（`hooks.json`）落点是否正确。
+- **Trae**：✅ 已全部坐实（2026-10-09 见 §二·续）——安装目录、规则目录读取、hook 载荷回传 cwd 均实测通过，`Verified=true`。仅「会话内是否重读规则」一项未专门测（标注 🔴 待补，不影响适配）。
 - **Claude Code**：目录已核实，但本工作区那次会话里 `.claude/` 只有 `settings.json`、没有 `rules/` 目录，需开一次 Claude Code 会话确认同步真的发生。
 - **Codex / OpenCode**：Tier-2 注入落点与 schema（`~/.codex/config.toml` 的 `[features] codex_hooks` + `[[hooks.SessionStart]]`）。
 

@@ -147,14 +147,27 @@ var registry = []Agent{
 		Note:             "Independent app (macOS Electron, /Applications/WorkBuddy.app/). Local inspection 2026-10-09 proved it has its OWN user-level config dir ~/.workbuddy and hook file ~/.workbuddy/settings.json — it does NOT read CodeBuddy's ~/.codebuddy/settings.json, so it is a separate registry entry (previously wrongly folded into codebuddy as an alias, design §三 plan A). BUT its WORKSPACE-level rules dir is .codebuddy/rules, the same as CodeBuddy (2026-10-09 three-position canary: only the probe in .codebuddy/rules reached the session context; .workbuddy/rules was never read) — so the two agents SHARE a rules dir and need union-on-sync / prune-on-uninstall (see SharingRulesDir). WORKBUDDY_CONFIG_DIR is only in a safe-delete log whitelist, not adopted (external/agent-rules-dirs.md §五).",
 	},
 	{
+		// TraeCode（Trae CN）的全局 hook 落点是**用户级** `~/.trae-cn/hooks.json`（不是工作区相对）。
+		// 已核实（2026-10-09，取自 hindsight 实装 installer.ts:2092-2127 + 本机 ~/.trae-cn/hooks.json 实测）：
+		//   - 用 Claude Code 的 hook 协议，事件挂在顶层 `hooks` 键下，并要求顶层 `version` 字段；
+		//   - 全局 hook 能触发（本机已有一条 hindsight 的 SessionStart/UserPromptSubmit/Stop 在运行）；
+		//   - 国际版目录为 `~/.trae`（按存在探测、无环境变量覆盖）；本条目先校准 CN 版，国际版的
+		//     「二选一探测」留作后续（registry 现不支持候选目录探测，故先写死 CN）。
+		// 规则目录 `.trae/rules` 经 2026-10-09 canary 坐实：递归读取；`.md`（带/不带 frontmatter 均可）
+		// 会被加载；`.mdc` **不**被当作规则加载（直接读文件才看得到，不在会话上下文）。hook 事件载荷
+		// 里带 `cwd` 与 `workspace_roots`，故 `sync --hook` 可直接用载荷定位工作区（见 cmd.flags.hookWorkspace）。
 		ID:       "trae",
 		Aliases:  []string{"trae-cn", "trae-intl"},
 		Tier:     Tier1,
-		RulesDir: ".trae/rules",
-		HookFile: "hooks.json",
-		Style:    "trae",
-		Verified: false,
-		Note:     "The CN and international builds differ only in model/account/network/compliance; the IDE's rules directory and hook mechanism are identical, so both share one adapter.",
+		RulesDir: ".trae/rules", // canary 坐实（2026-10-09）：递归读取；`.md` 加载（frontmatter 可选）；`.mdc` 不加载
+		HookFile: "~/.trae-cn/hooks.json",
+		HookAbs:  true,
+		// Trae 无配置目录环境变量（与 CodeBuddy 的 CODEBUDDY_CONFIG_DIR 不同），按 ~ 展开即可。
+		HookDirEnv:   "",
+		HookFileBase: "",
+		Style:        "trae",
+		Verified:     true, // 安装目录 + 规则目录均经 2026-10-09 实测坐实
+		Note:         "CN build uses user-level ~/.trae-cn/hooks.json (verified 2026-10-09 from hindsight's live installer + this machine); international build uses ~/.trae (probe needed, not wired yet). Hook protocol is Claude Code's: top-level `hooks` key + required top-level `version` field. Global hooks DO fire (a hindsight SessionStart hook is already live there). Rules dir `.trae/rules` verified by canary 2026-10-09: recursive; `.md` loaded (frontmatter optional); `.mdc` is NOT loaded as a rule. Hook payload carries `cwd`/`workspace_roots`, so `sync --hook` resolves the workspace from the payload (cmd/flags.go hookWorkspace).",
 	},
 	{
 		ID:       "codex",

@@ -39,13 +39,14 @@ const exampleConfig = `# rulemux configuration file
 #             Current verified values (installable):
 #               workbuddy   Tier-1 (own dir .workbuddy/rules; own hook ~/.workbuddy/settings.json) — use this for WorkBuddy
 #               codebuddy   Tier-1 (.codebuddy/rules; ~/.codebuddy/settings.json)
-#             These are TWO SEPARATE agents, each with its own config dir and hook file;
-#             install whichever you actually use (or both). rulemux remembers the name
+#               trae        Tier-1 (.trae/rules; CN ~/.trae-cn/hooks.json, intl ~/.trae) — verified 2026-10-09
+#             These are SEPARATE agents, each with its own config dir and hook file;
+#             install whichever you actually use (or all). rulemux remembers the name
 #             you chose and keeps it on every later refresh.
-#             Other agents (claude / trae / codex / opencode) have not passed canary
+#             Other agents (claude / codex / opencode) have not passed canary
 #             verification yet, so they cannot be installed or targeted for now;
 #             once their adapters are proven they open up automatically — no edit needed here.
-#             Example: agents = ["workbuddy"]
+#             Example: agents = ["workbuddy", "trae"]
 #
 #   workspace Which workspaces these rules apply to. Forms:
 #               workspace = "/abs/path/to/proj"          # single workspace (exact match)
@@ -286,18 +287,22 @@ SUPPORTED AGENTS (value of --agent; only VERIFIED agents can be installed):
                ~/.workbuddy/settings.json)
   codebuddy  CodeBuddy   Tier-1  .codebuddy/rules/   [verified]
               rulemux init --agent codebuddy
+  trae       Trae (CN)   Tier-1  .trae/rules/        [verified 2026-10-09]
+              CN hook ~/.trae-cn/hooks.json; intl ~/.trae/hooks.json
+              rulemux init --agent trae
 
 The following are registered but NOT YET verified, so init refuses to install them
 until their adapter is canary-tested and flipped to verified:
-  claude, trae, codex, opencode
+  claude, codex, opencode
 
 Install (only verified agents), comma-separated:
   rulemux init --agent workbuddy
+  rulemux init --agent trae
 
 The SessionStart hook is installed once into the user-level host config
 (~/.workbuddy/settings.json for WorkBuddy, ~/.codebuddy/settings.json for
-CodeBuddy), so it fires for every workspace you open — you do NOT need to run
-init once per workspace. Run it once per machine.
+CodeBuddy, ~/.trae-cn/hooks.json for Trae CN), so it fires for every workspace
+you open — you do NOT need to run init once per workspace. Run it once per machine.
 Syncing still keys off the current workspace (cwd) to decide which rules apply.
 
 REFRESH (the upgrade path — refreshes, never installs):

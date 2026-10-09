@@ -134,6 +134,59 @@ func TestSyncHookRequiresAgent(t *testing.T) {
 	}
 }
 
+// TestSyncHookResolvesWorkspaceFromPayload 校验：hook 调用且未给 --workspace 时，
+// sync --hook 应从 stdin 载荷读 cwd / workspace_roots 定位工作区（而非依赖 os.Getwd()）。
+// 这是 2026-10-09 Trae canary 的直接受益：Trae/Claude Code 的 hook 事件会透传 cwd。
+func TestSyncHookResolvesWorkspaceFromPayload(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("RULEMUX_STATE_DIR", stateDir)
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 不写 workspace ⇒ 适用于所有工作区；关键是不传 --workspace，全靠载荷 cwd 定位。
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\nagents = [\"trae\"]\n")
+
+	// 把 hook 载荷写进 pipe，接到 os.Stdin（模拟 Trae/Claude Code 的 hook 事件输入）。
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"cwd": "` + ws + `", "workspace_roots": ["` + ws + `"], "hook_event_name":"SessionStart"}`
+	if _, err := w.WriteString(payload); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+
+	_ = captureStdout(t, func() {
+		if code := Sync([]string{"--config", cfgPath, "--hook", "--agent", "trae"}); code != 0 {
+			t.Fatalf("sync --hook 应成功，实得退出码 %d", code)
+		}
+	})
+
+	// 引擎会把源文件按规则同步进工作区规则目录（文件名带 __rulemux__ 前缀）；
+	// 关键是确认它确实落进了「载荷 cwd 指向的」ws/.trae/rules，而非别处。
+	dir := filepath.Join(ws, ".trae", "rules")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("应从载荷 cwd 把规则同步进 %s: %v", dir, err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("载荷 cwd 定位的工作区规则目录 %s 不应为空", dir)
+	}
+}
+
 // TestSyncStdoutContract 校验输出的硬契约：
 //   - hook 路径 + 确有变化 ⇒ stdout 输出**恰好一条**协议 JSON；
 //   - hook 路径 + 无变化   ⇒ stdout **一个字节都没有**（hook 绝不注入未经用户同意的内容）。

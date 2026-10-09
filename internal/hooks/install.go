@@ -188,6 +188,13 @@ func writeHookJSON(path string, a agents.Agent, create bool, display string) (ch
 		doc = map[string]interface{}{}
 	}
 
+	// Trae 要求顶层 version 字段（hindsight installer 在缺失时补 1）；保留已有 version 与其它键。
+	if a.Style == "trae" {
+		if _, ok := doc["version"]; !ok {
+			doc["version"] = 1
+		}
+	}
+
 	hooksMap, _ := doc["hooks"].(map[string]interface{})
 	if hooksMap == nil {
 		hooksMap = map[string]interface{}{}

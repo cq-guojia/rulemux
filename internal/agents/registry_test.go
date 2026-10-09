@@ -22,10 +22,14 @@ func TestSupportedOnlyVerified(t *testing.T) {
 		t.Fatal("workbuddy 应独立可装（独立条目，不再复用 codebuddy）")
 	}
 	// 以下均未验证，不允许安装
-	for _, id := range []string{"claude", "trae", "codex", "opencode"} {
+	for _, id := range []string{"claude", "codex", "opencode"} {
 		if IsSupported(id) {
 			t.Fatalf("agent %s 尚未验证，不应可装", id)
 		}
+	}
+	// trae 经 2026-10-09 canary 坐实（安装目录 + 规则目录均实测通过），现已可装
+	if !IsSupported("trae") {
+		t.Fatal("trae 应可装（2026-10-09 canary 已坐实：安装目录与 .trae/rules 规则目录）")
 	}
 	if IsSupported("nope") {
 		t.Fatal("未知 agent 不应可装")

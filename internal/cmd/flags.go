@@ -2,7 +2,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +63,42 @@ func workspace(v string) (string, error) {
 		return filepath.Abs(v)
 	}
 	return os.Getwd()
+}
+
+// hookWorkspace 在 hook 调用时从 stdin 载荷解析工作区。
+//
+// Trae / Claude Code 的 hook 事件会把 `cwd` 与 `workspace_roots` 透传进 JSON 载荷
+// （2026-10-09 Trae SessionStart 实测：
+//  {"cwd":"/workspace/Temp","workspace_roots":["/workspace/Temp"],"hook_event_name":"SessionStart",...}），
+// 由此定位工作区比依赖 os.Getwd() 更可靠——钩子可能从任意 cwd 拉起 rulemux。
+// 解析失败（无管道 / 交互式终端 / 非 JSON / 缺字段）返回 ("", false)，调用方回退到 os.Getwd()。
+func hookWorkspace() (string, bool) {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return "", false
+	}
+	// 交互式终端（无管道输入）不读，避免 io.ReadAll 阻塞等 EOF。
+	if fi.Mode()&os.ModeCharDevice != 0 {
+		return "", false
+	}
+	b, err := io.ReadAll(os.Stdin)
+	if err != nil || len(b) == 0 {
+		return "", false
+	}
+	var p struct {
+		CWD            string   `json:"cwd"`
+		WorkspaceRoots []string `json:"workspace_roots"`
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		return "", false
+	}
+	if p.CWD != "" {
+		return p.CWD, true
+	}
+	if len(p.WorkspaceRoots) > 0 {
+		return p.WorkspaceRoots[0], true
+	}
+	return "", false
 }
 
 // agentReq 把解析出的 agent 与「用户 --agent 里写的原始标识」绑定，供安装路径把该标识
