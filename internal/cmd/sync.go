@@ -124,8 +124,12 @@ func Sync(args []string) int {
 			continue
 		}
 		dir := a.RulesDirAbs(ws)
-		// 每个 agent 独立处理：一个规则目录只会由一个 agent 在管（workbuddy 已并作
-		// codebuddy 的别名），因此不再需要「同目录合并」这类特殊处理。
+		// 每个 agent 独立处理：各自管自己的规则目录（2026-10-09 起 workbuddy 是独立条目，
+		// RulesDir 为 .workbuddy/rules，不再与 codebuddy 共用），因此不需要「同目录合并」。
+		// ⚠ 前提是两个 agent 的 RulesDir 不同：engine 的删残留是「整目录下带 __rulemux__ 前缀
+		// 但不在本次计划内的文件一律删」（engine/sync.go:164-183），一旦将来 canary 证明
+		// WorkBuddy 实际读 .codebuddy/rules 而把两者 RulesDir 改成同一个，它们会互相把对方的
+		// 文件当残留删掉 ⇒ 文件来回消失。届时须走「文件名带 agent 前缀」的方案 B。
 		srcs := cfg.SourcesFor(a.ID, ws)
 		create := hook && requestedID != "" && a.ID == requestedID
 		res, err := engine.Sync(dir, srcs, a.NeedsFrontmatter, create)

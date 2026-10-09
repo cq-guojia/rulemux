@@ -5,9 +5,11 @@
 #   Uses $REPO_ROOT/rulemux if present, otherwise builds it.
 #
 # Scope note: only *verified* agents can be installed, which today means
-# codebuddy (and workbuddy, which shares the same rules directory). Agents such
-# as claude / trae / codex / opencode are registered but NOT verified yet, so they
-# are deliberately excluded here - their coverage arrives with their adapter.
+# codebuddy (hook ~/.codebuddy/settings.json, rules .codebuddy/rules) and
+# workbuddy (separate agent since 2026-10-09: hook ~/.workbuddy/settings.json,
+# rules .workbuddy/rules). Agents such as claude / trae / codex / opencode are
+# registered but NOT verified yet, so they are deliberately excluded here -
+# their coverage arrives with their adapter.
 #
 # Isolation note: HOME is redirected to a temp dir, so the user-level hook config
 # written by init never touches the real ~/.codebuddy/settings.json.
@@ -33,7 +35,7 @@ CFG="$TMP/config.toml"
 mkdir -p "$WS" "$TMP/src"
 
 AGENT=codebuddy
-RULES_REL=".codebuddy/rules"          # codebuddy & workbuddy share this directory
+RULES_REL=".codebuddy/rules"          # codebuddy only; workbuddy uses .workbuddy/rules (separate agent)
 HOOK_CFG="$HOME/.codebuddy/settings.json"  # hooks live in the user-level host config
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
