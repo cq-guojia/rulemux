@@ -196,7 +196,7 @@ CONFIRMATION:
   cancels safely.
   Pass --yes to skip the prompt (for scripts / CI).
 
-Supported (verified) ids: codebuddy (aliases: workbuddy, codebuddy-cn).
+Supported (verified) ids: codebuddy (alias: codebuddy-cn), workbuddy (separate agent, own ~/.workbuddy/settings.json).
 Other registered agents (claude / trae / codex / opencode) are NOT yet verified and
 cannot be installed or removed until their adapter is canary-tested.
 

@@ -34,10 +34,11 @@ const exampleConfig = `# rulemux configuration file
 #
 #   agents    Which agents receive this batch; omitted = every *supported* agent.
 #             Current verified values (installable):
-#               workbuddy   Tier-1 (copied into .codebuddy/rules) — use this for WorkBuddy
-#               codebuddy   Tier-1 (shares the .codebuddy/rules directory; same agent as workbuddy)
-#             Both names target the exact same rules directory and hook; pick the name
-#             you installed with (rulemux keeps the one you chose).
+#               workbuddy   Tier-1 (own dir .workbuddy/rules; own hook ~/.workbuddy/settings.json) — use this for WorkBuddy
+#               codebuddy   Tier-1 (.codebuddy/rules; ~/.codebuddy/settings.json)
+#             These are TWO SEPARATE agents, each with its own config dir and hook file;
+#             install whichever you actually use (or both). rulemux remembers the name
+#             you chose and keeps it on every later refresh.
 #             Other agents (claude / trae / codex / opencode) have not passed canary
 #             verification yet, so they cannot be installed or targeted for now;
 #             once their adapters are proven they open up automatically — no edit needed here.
@@ -272,13 +273,13 @@ you must name the agent(s) you want. This is deliberate: auto-detecting which
 agents exist locally is unreliable, so the choice is always yours.
 
 SUPPORTED AGENTS (value of --agent; only VERIFIED agents can be installed):
-  workbuddy  WorkBuddy   Tier-1  .codebuddy/rules/   [verified — install this one]
+  workbuddy  WorkBuddy   Tier-1  .workbuddy/rules/   [verified — install this one]
               use this if you are setting up WorkBuddy:
                 rulemux init --agent workbuddy
-              codebuddy / codebuddy-cn are the SAME agent under a different name
-              (same rules directory and hook) — pick whichever name you prefer.
-              rulemux remembers the name you chose and keeps it that way on every
-              later refresh, so it never switches your install to "codebuddy".
+              (separate from codebuddy: own rules dir and own hook file
+               ~/.workbuddy/settings.json)
+  codebuddy  CodeBuddy   Tier-1  .codebuddy/rules/   [verified]
+              rulemux init --agent codebuddy
 
 The following are registered but NOT YET verified, so init refuses to install them
 until their adapter is canary-tested and flipped to verified:
@@ -288,8 +289,9 @@ Install (only verified agents), comma-separated:
   rulemux init --agent workbuddy
 
 The SessionStart hook is installed once into the user-level host config
-(~/.codebuddy/settings.json), so it fires for every workspace you open —
-you do NOT need to run init once per workspace. Run it once per machine.
+(~/.workbuddy/settings.json for WorkBuddy, ~/.codebuddy/settings.json for
+CodeBuddy), so it fires for every workspace you open — you do NOT need to run
+init once per workspace. Run it once per machine.
 Syncing still keys off the current workspace (cwd) to decide which rules apply.
 
 REFRESH (the upgrade path — refreshes, never installs):

@@ -63,8 +63,8 @@ func workspace(v string) (string, error) {
 	return os.Getwd()
 }
 
-// agentReq 把解析出的 agent 与「用户 --agent 里写的原始标识」绑定，供安装路径把别名
-// 透传到钩子命令与回显（品牌分离：workbuddy 与 codebuddy 是同一 agent，但用户面写的是 workbuddy）。
+// agentReq 把解析出的 agent 与「用户 --agent 里写的原始标识」绑定，供安装路径把该标识
+// 透传到钩子命令与回显（品牌分离：用户写 workbuddy 就写 --agent workbuddy，而非 codebuddy）。
 type agentReq struct {
 	Agent   agents.Agent
 	Display string // 用户 --agent 里写的原始标识（可能是别名，如 workbuddy）
@@ -102,8 +102,8 @@ func parseAgentsDisplay(s string) ([]agentReq, error) {
 		if !a.Verified {
 			return nil, fmt.Errorf("agent %q is not installable yet: only verified agents are supported: %s (the other adapters are still in progress and cannot be installed until ready)", a.ID, agents.SupportedSummary())
 		}
-		// 别名去重：codebuddy,workbuddy 指的是同一个 agent（设计 §三 方案 A）。
-		// 并用首次出现的请求标识（如 workbuddy）作为 Display。
+		// 去重：同一 agent 的多个写法（如别名 codebuddy-cn 与 codebuddy）只保留首次出现的
+		// 请求标识作为 Display；不同 agent（codebuddy、workbuddy）各自独立保留。
 		if seen[a.ID] {
 			continue
 		}

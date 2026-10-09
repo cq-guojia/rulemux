@@ -33,7 +33,8 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 
 | Agent | 层级 | 规则目录 | 状态 |
 |---|---|---|---|
-| **codebuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/` | ✅ **已验证，可安装**（`workbuddy` / `codebuddy-cn` 是它的别名：同一 agent、同一目录、同一钩子） |
+| **codebuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/` | ✅ **已验证，可安装**（`codebuddy-cn` 是它的别名） |
+| **workbuddy** | Tier-1（真实拷贝） | `.workbuddy/rules/` | ✅ **已验证，可安装**（独立应用：自有 `~/.workbuddy/settings.json` 钩子，不再是 codebuddy 的别名） |
 | claude（Claude Code） | Tier-1 | `.claude/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
 | trae（Trae） | Tier-1 | `.trae/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
 | codex | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |

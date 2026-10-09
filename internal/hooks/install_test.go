@@ -10,12 +10,22 @@ import (
 	"github.com/cq-guojia/rulemux/internal/agents"
 )
 
-// codebuddy 带别名 workbuddy（方案 A：两者是同一个 agent）。
+// codebuddy 带别名 codebuddy-cn（workbuddy 已拆为独立条目，见 registry.go）。
 var codebuddy = agents.Agent{
 	ID:       "codebuddy",
 	Tier:     agents.Tier1,
-	Aliases:  []string{"workbuddy", "codebuddy-cn"},
+	Aliases:  []string{"codebuddy-cn"},
 	RulesDir: ".codebuddy/rules",
+	Style:    "claude",
+}
+
+// workbuddy 是独立 agent，钩子落到自己的 ~/.workbuddy/settings.json。
+var workbuddy = agents.Agent{
+	ID:       "workbuddy",
+	Tier:     agents.Tier1,
+	RulesDir: ".workbuddy/rules",
+	HookFile: "~/.workbuddy/settings.json",
+	HookAbs:  true,
 	Style:    "claude",
 }
 
@@ -68,12 +78,13 @@ func TestInstallJSON_MigratesOldArgsHookAndKeepsOthers(t *testing.T) {
 	}
 }
 
-// 迁移（方案 A）：旧安装里 `--agent workbuddy` 那条钩子必须被一并清掉 ——
-// 否则它与新写的 codebuddy 条目并存，同一 SessionStart 会双触发。
-func TestInstallJSON_CleansUpAliasHooks(t *testing.T) {
+// 同一 agent 不应在 SessionStart 里留下两条自己的钩子（否则同一会话双触发）。
+// 旧安装若残留两条 `--agent codebuddy`，重装应合并为一条。
+func TestInstallJSON_CleansUpDuplicateOwnHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	seed := `{"hooks":{"SessionStart":[` +
-		`{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent workbuddy"}]}` +
+		`{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent codebuddy"}]},` +
+		`{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --hook --agent codebuddy"}]}` +
 		`]}}`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
@@ -83,7 +94,7 @@ func TestInstallJSON_CleansUpAliasHooks(t *testing.T) {
 	}
 	list := loadSessionStart(t, path)
 	if len(list) != 1 {
-		t.Fatalf("别名旧钩子应被清理，want 1 group, got %d", len(list))
+		t.Fatalf("重复的自家钩子应被合并，want 1 group, got %d", len(list))
 	}
 	if cmd, _ := hookCommand(t, list[0]); cmd != "rulemux sync --hook --agent codebuddy" {
 		t.Errorf("command = %q", cmd)
@@ -103,10 +114,12 @@ func TestUninstallJSON_RemovesHook(t *testing.T) {
 	}
 }
 
-// 卸载同样要认别名：只剩 `--agent workbuddy` 的旧配置也必须被清干净。
-func TestUninstallJSON_RemovesAliasHook(t *testing.T) {
+// 卸载只清自己的钩子：别家（node）与「另一个 agent 的 workbuddy 钩子」都原样保留 ——
+// 验证拆分后两个 agent 互不干扰。
+func TestUninstallJSON_RemovesOwnHookLeavesOthers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	seed := `{"hooks":{"SessionStart":[` +
+		`{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent codebuddy"}]},` +
 		`{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent workbuddy"}]},` +
 		`{"hooks":[{"type":"command","command":"node \"/other/h.js\""}]}` +
 		`]}}`
@@ -117,11 +130,19 @@ func TestUninstallJSON_RemovesAliasHook(t *testing.T) {
 		t.Fatalf("uninstallJSON: %v", err)
 	}
 	list := loadSessionStart(t, path)
-	if len(list) != 1 {
-		t.Fatalf("只该剩别家的 1 条，got %d", len(list))
+	if len(list) != 2 {
+		t.Fatalf("应剩 2 条（workbuddy + 别家），got %d", len(list))
 	}
-	if cmd, _ := hookCommand(t, list[0]); cmd != `node "/other/h.js"` {
-		t.Errorf("other tool's hook not preserved: %q", cmd)
+	cmds := map[string]bool{}
+	for _, g := range list {
+		c, _ := hookCommand(t, g)
+		cmds[c] = true
+	}
+	if !cmds[`node "/other/h.js"`] {
+		t.Error("别家的钩子应保留")
+	}
+	if !cmds["rulemux sync --agent workbuddy"] {
+		t.Error("workbuddy 的钩子不应被 codebuddy 卸载波及")
 	}
 }
 
@@ -222,27 +243,25 @@ func TestRefresh_NeverCreatesFileOrDir(t *testing.T) {
 	}
 }
 
-// 别名条目（旧安装的 `--agent workbuddy`）要能被识别并合并为单条，且保留用户选的别名
-// （不被强行改回 codebuddy）—— 否则它与新写的条目并存，同一 SessionStart 会双触发，
-// 也违背 WorkBuddy / CodeBuddy 用户面分离。
-func TestRefresh_MergesAliasEntryIntoCanonical(t *testing.T) {
+// workbuddy 是独立 agent（不再是 codebuddy 的别名）：旧格式 `--agent workbuddy` 钩子应被
+// 识别、归一为最新命令（补 --hook），且身份保持 workbuddy，不应被误判为 codebuddy。
+func TestRefresh_MergesWorkbuddyIntoCanonical(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	seed := `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent workbuddy"}]}]}}`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Refresh(path, codebuddy)
+	changed, err := Refresh(path, workbuddy)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 	if !changed {
-		t.Fatal("别名旧钩子应被合并刷新，changed 却为 false")
+		t.Fatal("旧格式 workbuddy 钩子应被刷新，changed 却为 false")
 	}
 	list := loadSessionStart(t, path)
 	if len(list) != 1 {
-		t.Fatalf("别名条目应合并为 1 条, got %d", len(list))
+		t.Fatalf("应合并为 1 条, got %d", len(list))
 	}
-	// 结构归一（补 --hook）且保留 workbuddy 别名，而非改回 codebuddy。
 	if cmd, _ := hookCommand(t, list[0]); cmd != "rulemux sync --hook --agent workbuddy" {
 		t.Errorf("command = %q", cmd)
 	}
@@ -279,24 +298,23 @@ func TestInspect_ReportsState(t *testing.T) {
 	}
 }
 
-// 刷新必须保留用户当初选的别名（workbuddy），不能悄悄改回规范 ID codebuddy ——
-// 这是 WorkBuddy / CodeBuddy 用户面分离的关键。旧格式（缺 --hook）照样补上、但别名不变。
-func TestRefresh_PreservesExistingAlias(t *testing.T) {
+// 刷新必须保留 workbuddy 的身份（不被误判/改回 codebuddy）：旧格式（缺 --hook）照样补上、但身份不变。
+func TestRefresh_PreservesWorkbuddyIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	seed := `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent workbuddy"}]}]}}`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := Refresh(path, codebuddy); err != nil { // 用规范 ID 刷新，模拟 init --refresh 不带 --agent
+	if _, err := Refresh(path, workbuddy); err != nil { // 用 workbuddy 刷新
 		t.Fatal(err)
 	}
-	installed, cmd, err := Inspect(path, codebuddy)
+	installed, cmd, err := Inspect(path, workbuddy)
 	if err != nil || !installed {
 		t.Fatalf("刷新后应仍装有钩子, got (%v,%v)", installed, err)
 	}
 	if want := "rulemux sync --hook --agent workbuddy"; cmd != want {
-		t.Errorf("别名应被保留: got %q, want %q", cmd, want)
+		t.Errorf("workbuddy 身份应被保留: got %q, want %q", cmd, want)
 	}
 }
 
@@ -354,6 +372,64 @@ func TestInstallJSON_IdempotentSecondRun(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Errorf("第二次安装不该再写盘:\n之前: %s\n之后: %s", before, after)
+	}
+}
+
+// workbuddy 的钩子必须落到自己的用户级配置 ~/.workbuddy/settings.json，
+// 且该路径解析正确（不混入 codebuddy 那份文件）。
+func TestInstall_WorkbuddyTargetsOwnConfigPath(t *testing.T) {
+	ws := t.TempDir()
+	path, err := Install(workbuddy, ws, "workbuddy")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".workbuddy", "settings.json")
+	if path != want {
+		t.Fatalf("workbuddy 钩子路径 = %q, want %q", path, want)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("钩子文件应被创建: %v", err)
+	}
+	list := loadSessionStart(t, path)
+	if len(list) != 1 {
+		t.Fatalf("want 1 group, got %d", len(list))
+	}
+	if cmd, _ := hookCommand(t, list[0]); cmd != "rulemux sync --hook --agent workbuddy" {
+		t.Errorf("command = %q", cmd)
+	}
+}
+
+// workbuddy 独立条目在已有别家钩子（如 hindsight 的两条）时只动自己那条、其余原样保留。
+func TestInstallJSON_WorkbuddyPreservesOtherHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	seed := `{"hooks":{"SessionStart":[` +
+		`{"hooks":[{"type":"command","command":"node \"/hindsight/a.js\""}]},` +
+		`{"hooks":[{"type":"command","command":"node \"/hindsight/b.js\""}]}` +
+		`]}}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := installJSON(path, workbuddy, ""); err != nil {
+		t.Fatalf("installJSON: %v", err)
+	}
+	list := loadSessionStart(t, path)
+	if len(list) != 3 {
+		t.Fatalf("want 3 groups (2 hindsight + 1 rulemux), got %d", len(list))
+	}
+	cmds := map[string]bool{}
+	for _, g := range list {
+		c, _ := hookCommand(t, g)
+		cmds[c] = true
+	}
+	if !cmds["rulemux sync --hook --agent workbuddy"] {
+		t.Error("未写入 rulemux 钩子")
+	}
+	if !cmds[`node "/hindsight/a.js"`] || !cmds[`node "/hindsight/b.js"`] {
+		t.Errorf("hindsight 钩子被改动: %v", cmds)
 	}
 }
 

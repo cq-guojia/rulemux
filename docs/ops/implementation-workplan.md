@@ -137,7 +137,7 @@ rulemux verify    # 4. canary 验收：开新会话问 agent 能否念出暗号
 | agent | 校准状态 / 内容 |
 |---|---|
 | codebuddy | ✅ **已坐实（2026-10-08）**：`.codebuddy/rules/` 平铺**非隐藏** `.md`（须带 `alwaysApply:true`）会被加载、**点文件被跳过**，且**读规则先于钩子写入**（首会话差一拍）（见 `external/agent-rules-dirs.md` §四） |
-| workbuddy | ✅ 随 CodeBuddy 一并坐实（复用其机制） |
+| workbuddy | ✅ **已坐实（2026-10-09 本机实测）**：独立应用，自有用户级配置目录 `~/.workbuddy` 与钩子文件 `~/.workbuddy/settings.json`（**不读** CodeBuddy 那份），已拆为 registry 独立条目，不再是 codebuddy 别名；工作区级 rules 目录 `.workbuddy/rules` 🔴 待 canary 校准（见 `external/agent-rules-dirs.md` §5.4） |
 | trae | ⬜ 钩子配置落点（`hooks.json` 工作区根 or `.trae/hooks.json`）；点文件是否读 |
 | codex | ⬜ 钩子落点 `~/.codex/config.toml` 与 schema（`[features] codex_hooks` + `[[hooks.SessionStart]]`） |
 | opencode | ⬜ 钩子落点与注入方式 |

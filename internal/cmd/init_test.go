@@ -182,8 +182,8 @@ func TestInitRefresh_HonorsConfigDirEnv(t *testing.T) {
 	}
 }
 
-// 安装用 --agent workbuddy 时，写入的钩子命令与回显都应是 workbuddy（而非规范 ID codebuddy）：
-// 这是 WorkBuddy / CodeBuddy 用户面分离（方案 A 下两者是同一 agent，但用户只认 WorkBuddy）。
+// 安装用 --agent workbuddy 时，钩子命令、回显与落盘位置都应是 workbuddy 自己的
+// ~/.workbuddy/settings.json（而非 codebuddy 那份，也不回退到 codebuddy 规范 ID）。
 func TestInit_InstallEchoesRequestedAlias(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -198,7 +198,7 @@ func TestInit_InstallEchoesRequestedAlias(t *testing.T) {
 		t.Errorf("回显应出现 workbuddy:\n%s", out)
 	}
 
-	settings := filepath.Join(home, ".codebuddy", "settings.json")
+	settings := filepath.Join(home, ".workbuddy", "settings.json")
 	if _, err := os.Stat(settings); err != nil {
 		t.Fatalf("钩子文件应已生成: %v", err)
 	}
@@ -207,12 +207,12 @@ func TestInit_InstallEchoesRequestedAlias(t *testing.T) {
 		t.Fatalf("want 1 条钩子, got %v", cmds)
 	}
 	if want := "rulemux sync --hook --agent workbuddy"; cmds[0] != want {
-		t.Errorf("钩子命令应透传别名: got %q, want %q", cmds[0], want)
+		t.Errorf("钩子命令应透传 workbuddy: got %q, want %q", cmds[0], want)
 	}
 }
 
 // 用 workbuddy 装好后，再跑 init --refresh（不带 --agent，走 Supported 规范 ID），
-// 钩子里的 workbuddy 必须保留、不得被改回 codebuddy。
+// 钩子里的 workbuddy 必须保留、不得被改回 codebuddy，且仍在 ~/.workbuddy/settings.json。
 func TestInit_RefreshPreservesRequestedAlias(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -221,7 +221,7 @@ func TestInit_RefreshPreservesRequestedAlias(t *testing.T) {
 	if code := Init([]string{"--agent", "workbuddy"}); code != 0 {
 		t.Fatalf("首次安装应成功，实得 %d", code)
 	}
-	settings := filepath.Join(home, ".codebuddy", "settings.json")
+	settings := filepath.Join(home, ".workbuddy", "settings.json")
 
 	var rcode int
 	out := captureStdout(t, func() { rcode = Init([]string{"--refresh"}) })

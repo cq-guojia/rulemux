@@ -79,7 +79,7 @@
 - **问题**：各家是否读**整个文件夹**的全部 `.md`（决定 Tier-1 丢文件 vs Tier-2 注入）、目录路径、扩展名、是否读隐藏/点文件。
 - **关联**：T1 / T3 / T4 / T6 / 第 9·12 条。
 - **进度（2026-10-07 官方/社区核实）**：
-  - **Tier-1（读整个文件夹 ⇒ 丢前缀文件）**：Claude Code `.claude/rules/*.md` ✅；CodeBuddy `.codebuddy/rules/` ✅（社区确认平铺 .md 自动加载；官方文档暗示「每条规则一个子文件夹」，精确结构以 canary 确认）；Trae `.trae/rules/*.md` ✅；WorkBuddy（与 CodeBuddy 同源，`.codebuddy/rules/`）✅ 待 canary。
+  - **Tier-1（读整个文件夹 ⇒ 丢前缀文件）**：Claude Code `.claude/rules/*.md` ✅；CodeBuddy `.codebuddy/rules/` ✅（社区确认平铺 .md 自动加载；官方文档暗示「每条规则一个子文件夹」，精确结构以 canary 确认）；Trae `.trae/rules/*.md` ✅；WorkBuddy（**独立**应用，`.workbuddy/rules/` 🔴 待 canary 校准；钩子 `~/.workbuddy/settings.json`，2026-10-09 实测已核实）。
   - **Tier-2（只认单文件 `AGENTS.md` ⇒ 走 hooks 注入，不碰用户文件）**：Codex `AGENTS.md`（根目录）❌ 无文件夹模式；OpenCode `AGENTS.md` ❌（文档仅提单文件，待确认有无文件夹）。
   - **DeepSeek harness**：用户 2026-10-07 决定**移出当前范围**（最开放、支持插件，后续以插件市场解决）。
 - **待 canary 验收（第 13 条）**：① 各家「读全部 .md」是否**跳过点文件**（影响 `__rulemux__` 隐藏前缀是否生效）；② CodeBuddy 规则目录精确结构（平铺 vs 每规则子文件夹）；③ 钩子确实在读规则之前触发（第 8 条链路）。

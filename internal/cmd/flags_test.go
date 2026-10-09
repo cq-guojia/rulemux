@@ -21,22 +21,30 @@ func TestParseAgentsAcceptsVerified(t *testing.T) {
 		t.Fatalf("解析结果错误: %+v", got)
 	}
 
-	// workbuddy 是 codebuddy 的别名（同一 agent、同一目录、同一钩子）⇒ 去重成 1 个。
+	// codebuddy 与 workbuddy 已是两条独立 agent（各有自己的目录与钩子文件），
+	// 并列时解析为两个不同条目，不再去重合并。
 	got, err = parseAgents("codebuddy,workbuddy")
 	if err != nil {
 		t.Fatalf("codebuddy,workbuddy 应可装: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "codebuddy" {
-		t.Fatalf("别名应去重为同一个 codebuddy: %+v", got)
+	if len(got) != 2 {
+		t.Fatalf("两个独立 agent 不应被合并: %+v", got)
+	}
+	ids := map[string]bool{}
+	for _, a := range got {
+		ids[a.ID] = true
+	}
+	if !ids["codebuddy"] || !ids["workbuddy"] {
+		t.Fatalf("codebuddy 与 workbuddy 都应出现: %+v", got)
 	}
 
-	// 单独写别名同样解析为规范 ID。
+	// 单独写 workbuddy 解析为独立的 workbuddy 条目（不再是 codebuddy 别名）。
 	got, err = parseAgents("workbuddy")
 	if err != nil {
-		t.Fatalf("别名 workbuddy 应可装: %v", err)
+		t.Fatalf("workbuddy 应可装: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "codebuddy" {
-		t.Fatalf("别名应解析为规范 ID codebuddy: %+v", got)
+	if len(got) != 1 || got[0].ID != "workbuddy" {
+		t.Fatalf("workbuddy 应解析为独立 ID workbuddy: %+v", got)
 	}
 }
 

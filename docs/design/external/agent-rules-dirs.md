@@ -16,7 +16,7 @@
 | **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | ❌ **不会**：会话开始即固定规则快照，改动要下一个会话才生效（见 §四） | `hookSpecificOutput{hookEventName:"SessionStart", additionalContext}`（2026-10-09 实证，见下） | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules`；`SessionHint=true` |
 | Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | 部分：`/compact` 会重读项目 `CLAUDE.md`，但 `.claude/rules/` 子目录**不保证**自动回读 | 同上（`hookSpecificOutput.additionalContext`） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
 | Trae | `.trae/rules/` | `.mdc` | ✅ 递归读，最多 3 层 | 待补 | 待补 | 待补 | 需 frontmatter |
-| WorkBuddy | `.codebuddy/rules/`（**与 CodeBuddy 完全相同**） | 同上 | 同上 | 同上 | 同上 | 4.12.1（本机，复用） | **2026-10-09 起并作 CodeBuddy 的别名 `workbuddy`**，不再单列 adapter |
+| WorkBuddy | `.workbuddy/rules/` 🔴（待 canary 实测校准，可能实际为 `.codebuddy/rules`，见 §五） | `.md`（带 alwaysApply:true） | ⚠️ 同 CodeBuddy 读平铺非隐藏 `.md` | ❌ 不会（会话开始固定快照） | 同上 | 5.7.6（本机实测） | **2026-10-09 起拆为独立 adapter**，钩子落到 `~/.workbuddy/settings.json`（不再复用 CodeBuddy 那份） |
 | Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
 | OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
 | DeepSeek Harness | — | — | — | — | — | 移出范围 | 用户 2026-10-07 决定移出当前范围（最开放、支持插件，后续以插件市场解决） |
@@ -55,7 +55,7 @@
 |---|---|---|
 | hook 命令取哪个字段 | **只执行 `command` 字段（整串命令行），完全丢弃 `args` 字段** | 本机日志 `~/.local/share/CodeBuddyExtension/Logs/CodeBuddyIDE/2026-10-08/rulemux__*.log:93968`：`[HookExecutor] Executing hook command: rulemux`（配置为 `command:"rulemux"` + `args:["sync","--agent","codebuddy"]`，实际只跑了裸 `rulemux`） |
 | 对照（正常样例） | Hindsight 的钩子把参数写进 command 整串（`node "<abs>.js"`），被执行原样 | 同目录 Hindsight 日志行 / `hindsight.md` §2.2 |
-| 适用版本 | CodeBuddy 4.12.1（本机）；WorkBuddy 复用同一机制 | — |
+| 适用版本 | CodeBuddy 4.12.1、WorkBuddy 5.7.6（均本机；两者的钩子均只执行 `command` 整串、丢弃 `args`，执行语义一致，但**配置目录各自独立**——见 §五） | — |
 
 > **硬约定**：钩子的 `command` 必须写成**完整命令行字符串**（参数全部写在里面），**不得依赖 `args` 字段** —— 否则会被执行成裸程序名（无参数、只打印帮助），同步从不发生。我们的适配器（`internal/hooks/install.go`）据此把 `rulemux <subcmd> --agent <id>` 写进 `command` 整串。
 
@@ -122,7 +122,7 @@
 4. ~~**钩子先于读规则**~~ ❌ **已推翻（2026-10-08 首证，2026-10-09 对照实测复证）** —— 实际是**读规则先于钩子写入**：宿主在会话开始瞬间固定规则快照，SessionStart 的写入发生在其后 ⇒ **本次会话读不到刚投递 / 刚变更的规则，要下一个会话才生效**。
    实证（本机 CodeBuddy 4.12.1，工作区 `/code/open-lab/rulemux`）：先删掉 `.codebuddy/rules/__rulemux__*.md`，再**开一个全新会话**，在该会话内问两个问题（明确禁止调用工具、只凭上下文回答）→ 结果 **「上下文里有没有该规则内容」= 无；「有没有收到『规则有变化，请开新会话』提示」= 有**。钩子确实跑过并把文件重新投递（否则不会检测到「新增」而输出提示），但该会话读不到 ⇒ **差一拍成立**，且「变化提示」（`SessionHint`）是此机制下唯一正确的兜底。
    预期：**再下一个会话**应为「能抄出规则标题 + 无提示」（无变更即不提示）。
-5. **WorkBuddy** ✅ —— 复用 CodeBuddy 同一目录与同一机制，随本次一并坐实。
+5. **WorkBuddy** ✅ —— 见 §五：本机 2026-10-09 实测其用户级配置为**独立**目录 `~/.workbuddy`（非 `~/.codebuddy`），故 2026-10-09 起已拆为独立 registry adapter；其工作区级 rules 目录（`.workbuddy/rules` vs `.codebuddy/rules`）仍待 canary 校准（🔴）。**此结论推翻了此前「WorkBuddy 复用 CodeBuddy 同一目录与机制」的推断。**
 
 > **更正说明**：本节此前的旧结论（"点文件会被读 ⇒ 保留 `.rulemux__`"，据称 2026-10-08 canary 念出 `RULEMUX-CANARY-43371345`）属**假阳性**——当时只验证了「文件被 copy 进目录」，**未用对照探针区分「隐藏 vs 非隐藏」**，把 copy 成功误当成加载成功。2026-10-08 用三探针对照后更正。**教训：canary 必须用对照探针，且以「内容是否进入本会话上下文」为判据，而非「文件是否落盘」。**
 
@@ -149,7 +149,7 @@
 
 > **来源**：本机 CodeBuddy **4.12.1** 安装产物直接取证（2026-10-09）。
 > 取证文件：`/root/.codebuddy-server-cn/bin/stable-757a5b2fd56bc7e1fcabb38b58d2ac1694f78f6d/extensions/genie/out/extension/index.js`（打包为压缩单行 JS，下面只做格式化摘录）。
-> **适用版本**：4.12.1（本机）；WorkBuddy 与它同源，共用同一份解析逻辑与同一钩子文件。
+> **适用版本**：CodeBuddy 4.12.1（本机）；WorkBuddy 5.7.6（本机，独立适配，见 §5.4）。
 
 ### 5.1 已坐实：用户级配置目录可由环境变量覆盖
 
@@ -190,3 +190,27 @@ canary 或官方文档坐实（记在 `PROGRESS.md` 待办里）。
   用户能一眼看出钩子写到了哪。若该变量出现过、但用户并不真的使用它，可按它给出的路径去核对。
 - **只填「已核实」的变量**：未核实的 agent（claude / trae / codex / opencode）该字段留空，
   一律按 `~` 或工作区字面量走 —— 这一层**绝不猜**。
+
+### 5.4 WorkBuddy 是**独立**配置目录（2026-10-09 本机实测，已核实）
+
+> **来源**：本机实测（`~/.workbuddy/settings.json` 实测为 WorkBuddy 的用户级钩子配置；
+> WorkBuddy 为独立 macOS Electron 应用 `/Applications/WorkBuddy.app/`，不与 CodeBuddy 共享
+> `~/.codebuddy`）。
+> **适用版本**：WorkBuddy 5.7.6（本机）；**状态**：✅ 已核实（本机 settings.json 实测）。
+> **配套**：[`../../PROGRESS.md`](../../PROGRESS.md)。
+
+| 项 | 结论 |
+|---|---|
+| 用户级配置目录 | `~/.workbuddy`（**不是** `~/.codebuddy`） |
+| 钩子配置文件 | `~/.workbuddy/settings.json`（与 CodeBuddy 那份**互相独立**，WorkBuddy 不读 CodeBuddy 的） |
+| `WORKBUDDY_CONFIG_DIR` | 见 §5.2：仅在 safe-delete 日志白名单出现，未坐实为配置目录 ⇒ **不采用**；registry 中 `HookDirEnv` 留空，按 `~/.workbuddy` 字面量 |
+| 工作区级 rules 目录 | `.workbuddy/rules` 🔴 **待 canary 实测校准**（可能实为 `.codebuddy/rules`，待后续验证） |
+
+**对 rulemux 的影响**：
+
+- `internal/agents/registry.go` 的 `workbuddy` 是**独立条目**（`HookFile: "~/.workbuddy/settings.json"`、`HookAbs: true`），
+  不再作为 `codebuddy` 的别名收纳。此前的「方案 A」（别名合并）被本实测推翻：别名方案会把钩子写进
+  `~/.codebuddy/settings.json`（CodeBuddy 那份），WorkBuddy 根本不读 ⇒ 钩子永不触发。
+- `doctor` / `init --refresh` 对 `workbuddy` 比对的是 `~/.workbuddy/settings.json`，与 `codebuddy` 互不干扰。
+- 历史遗留：若曾在「别名时代」用 `init --agent workbuddy` 安装，钩子被写进了 `~/.codebuddy/settings.json`
+  （CodeBuddy 那份、WorkBuddy 不读），属孤儿，无需迁移；重装（拆后）会写进正确的 `~/.workbuddy/settings.json`。

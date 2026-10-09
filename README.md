@@ -39,7 +39,8 @@ directory and hook location have been confirmed by a real canary test. Today:
 
 | Agent | Tier | Rules directory | Status |
 |---|---|---|---|
-| **codebuddy** | Tier-1 (real copy) | `.codebuddy/rules/` | ✅ **Verified — installable** (`workbuddy` / `codebuddy-cn` are aliases of it: same agent, same dir, same hook) |
+| **codebuddy** | Tier-1 (real copy) | `.codebuddy/rules/` | ✅ **Verified — installable** (`codebuddy-cn` is an alias) |
+| **workbuddy** | Tier-1 (real copy) | `.workbuddy/rules/` | ✅ **Verified — installable** (separate app: own `~/.workbuddy/settings.json` hook, no longer an alias of codebuddy) |
 | claude (Claude Code) | Tier-1 | `.claude/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
 | trae (Trae) | Tier-1 | `.trae/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
 | codex | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |

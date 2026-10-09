@@ -65,7 +65,7 @@
 > **状态**：✅ 已拍板（2026-10-08）
 > **配套**：[`external/hindsight.md`](external/hindsight.md)（Hindsight 实测机制，作为对照）
 
-**结论**：Tier-1 agent（codebuddy / workbuddy）的 SessionStart 钩子**装进 user 级 host 配置 `~/.codebuddy/settings.json`**，**不再写每个工作区的 `.codebuddy/settings.json`** —— 与 Hindsight 的做法一致。
+**结论**：Tier-1 agent 的 SessionStart 钩子**装进各自的 user 级 host 配置**：codebuddy → `~/.codebuddy/settings.json`、workbuddy → **独立的** `~/.workbuddy/settings.json`（2026-10-09 本机实测：WorkBuddy 不读 CodeBuddy 那份，见 `external/agent-rules-dirs.md` §5.4），**不再写每个工作区的 `.codebuddy/settings.json`** —— 与 Hindsight 的做法一致。
 
 **依据（用户拍板，2026-10-08）**：「把 host 的设置方式改成和 hindsight 一样」——不要 workspace 级那份（`/code/open-lab/rulemux/.codebuddy/settings.json`），因为散落在各工作区、容易被误改。
 

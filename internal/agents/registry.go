@@ -93,10 +93,11 @@ var registry = []Agent{
 	},
 	{
 		ID: "codebuddy",
-		// workbuddy 复用完全相同的机制（同一 .codebuddy/rules 目录、同一 user 级钩子文件），
-		// 按「完全相同的 agent 就是同一个 agent」并为一个条目、以别名收纳 ——
-		// 而不是在同步逻辑里做「同目录合并」的特殊处理（见设计 §三 方案 A）。
-		Aliases:  []string{"codebuddy-cn", "workbuddy"},
+		// WorkBuddy 曾被视为与 CodeBuddy 完全相同的 agent，以别名 "workbuddy" 收纳于本条目
+		// （design §三 方案 A）。2026-10-09 本机实测推翻该结论：WorkBuddy 有自己独立的用户级
+		// 配置目录 ~/.workbuddy 与独立钩子文件 ~/.workbuddy/settings.json，并不读 CodeBuddy 那份，
+		// 故已拆为 registry 中的独立条目（见下方 workbuddy）。本条目不再收纳 workbuddy 别名。
+		Aliases:  []string{"codebuddy-cn"},
 		Tier:     Tier1,
 		RulesDir: ".codebuddy/rules",
 		// 2026-10-08 起钩子落点为 user 级 host 配置（不再是每工作区的 .codebuddy/settings.json），
@@ -117,7 +118,29 @@ var registry = []Agent{
 		// 会话开始即固定规则快照 ⇒ 改动/新增要下一次会话才生效 ⇒ 有变化时给模型一句话。
 		SessionHint:  true,
 		HintProtocol: ProtocolSessionStartAdditionalContext,
-		Note:         "Canary re-confirmed 2026-10-08: CodeBuddy auto-loads FLAT, NON-hidden .md files under .codebuddy/rules that carry an alwaysApply:true frontmatter; dot-prefixed (hidden) files are SKIPPED, and the RULE.mdc subdir layout is NOT relied on (its load behaviour was inconsistent across runs). rulemux therefore writes __rulemux__<name>.md with a frontmatter header. Hook lives in the user-level ~/.codebuddy/settings.json; see external/agent-rules-dirs.md. WorkBuddy reuses this exact mechanism and is therefore carried as the alias \"workbuddy\" on this single entry (design §三 plan A), instead of a separate registry row plus a shared-directory merge.",
+		Note:         "Canary re-confirmed 2026-10-08: CodeBuddy auto-loads FLAT, NON-hidden .md files under .codebuddy/rules that carry an alwaysApply:true frontmatter; dot-prefixed (hidden) files are SKIPPED, and the RULE.mdc subdir layout is NOT relied on (its load behaviour was inconsistent across runs). rulemux therefore writes __rulemux__<name>.md with a frontmatter header. Hook lives in the user-level ~/.codebuddy/settings.json; see external/agent-rules-dirs.md. NOTE (2026-10-09): WorkBuddy previously folded in here as the alias \"workbuddy\" (design §三 plan A), but a local inspection proved WorkBuddy uses its OWN ~/.workbuddy/settings.json and never reads this file, so it is now a separate registry entry below — this entry and WorkBuddy share nothing.",
+	},
+	{
+		// WorkBuddy 是独立应用（macOS Electron，/Applications/WorkBuddy.app/），有自己独立的
+		// 用户级配置目录 ~/.workbuddy 与钩子文件 ~/.workbuddy/settings.json（2026-10-09 本机实测）。
+		// 它不读 CodeBuddy 的 ~/.codebuddy/settings.json，故拆为独立条目；此前当成别名收纳
+		// （方案 A）会把钩子写错目录、永不触发。工作区级 rules 目录（.workbuddy/rules vs
+		// .codebuddy/rules）待 canary 实测校准，先标 🔴。
+		ID:       "workbuddy",
+		Tier:     Tier1,
+		RulesDir: ".workbuddy/rules", // 🔴 待 canary 实测校准（.workbuddy/rules vs .codebuddy/rules）
+		HookFile: "~/.workbuddy/settings.json",
+		HookAbs:  true,
+		// WORKBUDDY_CONFIG_DIR 仅出现在 safe-delete 日志白名单（见 external/agent-rules-dirs.md §五），
+		// 未坐实是配置目录 ⇒ 不采用；本机 env 实测该变量为空，按 ~/.workbuddy 是稳的。
+		HookDirEnv:       "",
+		HookFileBase:     "",
+		Style:            "claude",
+		Verified:         true,
+		NeedsFrontmatter: true,
+		SessionHint:      true,
+		HintProtocol:     ProtocolSessionStartAdditionalContext,
+		Note:             "Independent app (macOS Electron, /Applications/WorkBuddy.app/). Local inspection 2026-10-09 proved it has its OWN user-level config dir ~/.workbuddy and hook file ~/.workbuddy/settings.json — it does NOT read CodeBuddy's ~/.codebuddy/settings.json, so it is a separate registry entry (previously wrongly folded into codebuddy as an alias, design §三 plan A). RulesDir is .workbuddy/rules 🔴 pending canary confirmation (vs .codebuddy/rules). WORKBUDDY_CONFIG_DIR is only in a safe-delete log whitelist, not adopted (external/agent-rules-dirs.md §五).",
 	},
 	{
 		ID:       "trae",
@@ -244,9 +267,9 @@ func (a Agent) configDirOverride() string {
 
 // MatchIDs 返回「能唯一指名本 agent 的所有标识」：规范 ID + 全部别名。
 //
-// 用于钩子条目的识别与清理：方案 A 把 workbuddy 并为 codebuddy 的别名后，
-// 旧安装里那条 `--agent workbuddy` 的钩子若只按规范 ID 匹配就会成为孤儿
-// （同一 SessionStart 仍可能并发跑两次）。见设计 §9.1 迁移清单。
+// 用于钩子条目的识别与清理：安装/刷新/卸载都按它精确匹配「属于自己的那条钩子」，
+// 别人的条目一律原样保留（design/features/agent-onboarding.md）。各 agent 现在是
+// 独立条目，互不重叠，故某 agent 的钩子不会被误判为另一 agent 的孤儿。
 func (a Agent) MatchIDs() []string {
 	out := make([]string, 0, 1+len(a.Aliases))
 	out = append(out, a.ID)

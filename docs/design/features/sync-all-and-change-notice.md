@@ -80,14 +80,15 @@
 
 **用户要求**：copy / 卸载 / 提示，**一切按 agent 单独处理**；两个**完全相同**的 agent 本质就是**同一个 agent**。
 
-**现状**：codebuddy 与 workbuddy 是两条独立记录但 `RulesDir` 相同（`registry.go:77,90`），靠 `ByRulesDir`+`unionSources`（`cmd/sync.go:72-76`）合并 —— **本稿撤销**。
+**现状（2026-10-09 前）**：codebuddy 与 workbuddy 曾并作一条记录（workbuddy 作为 codebuddy 的 `Aliases`），靠 `ByRulesDir`+`unionSources`（`cmd/sync.go:72-76`）合并 —— **该合并逻辑已撤销**。
 
 ⚠️ **不能只删调用**：若保留两条记录却不再合并，A 同步会把 B 的文件当残留删掉，B 再反删 ⇒ **每次会话文件来回消失**。
 
-**已定：方案 A** —— 删除独立 workbuddy 项，并入 codebuddy 的 `Aliases`（建议 `["codebuddy-cn","workbuddy"]`）；删 `ByRulesDir`；`cmd/sync.go` 去掉分组与 `unionSources`；`uninstall` 避免对同目录重复清理；改 `main.go`/`init.go` 文案。
+**2026-10-09 实测推翻「方案 A」**：本机实测表明 WorkBuddy 有**独立**的用户级配置目录 `~/.workbuddy` 与独立钩子文件 `~/.workbuddy/settings.json`，**不读** CodeBuddy 的 `~/.codebuddy/settings.json`。因此：
 
-- **先只调通 CodeBuddy**；测 WorkBuddy 时若发现 A 走不通，再议 **方案 B**（目标名带 agent：`__rulemux__<agentID>__<basename>.md`，各 agent 只管自己的文件，不需要合并）。
-- 用户面分离：安装时把用户写的 `--agent workbuddy` 原样透传到钩子命令与回显（`hooks.TargetCommandFor` + `Install` 的 display 参数）；`Refresh`/`doctor` 比对改用 `ExpectedCommand`，沿用文件里已有的 `--agent` 标识，因此后续 `sync` 自愈或 `init --refresh` 都不会把 workbuddy 悄悄改回 codebuddy（旧的「会写出 --agent codebuddy」副作用已消除）。
+- **已撤销方案 A 的别名合并**，改为 WorkBuddy 作为 `registry.go` 里**独立条目**（`RulesDir: ".workbuddy/rules"`、`HookFile: "~/.workbuddy/settings.json"`）；`ByRulesDir` 合并逻辑不再需要（两者 `RulesDir` 本就不同）。
+- 用户面分离仍保留：安装时把用户写的 `--agent workbuddy` 原样透传到钩子命令与回显（`hooks.TargetCommandFor` + `Install` 的 display 参数）；`Refresh`/`doctor` 比对改用 `ExpectedCommand`，沿用文件里已有的 `--agent` 标识，自愈或 `init --refresh` 都不会把 workbuddy 悄悄改回 codebuddy。
+- 见 `external/agent-rules-dirs.md` §5.4（WorkBuddy 独立配置目录，已核实，适用版本 5.7.6）。
 
 ## 四、改动二：账本升级为「工作区 × Agent」
 
@@ -189,7 +190,7 @@
 |---|---|---|
 | 账本 v1（只有 `workspaces`） | `Load` 见 `agents` 缺失 | 按 v1 迁移，旧条目 agents = 哨兵 `["*"]`（**不删条目**） |
 | 旧 hook 命令串（无 `--hook`） | `install.go` 的 `isRulemuxHookFor` 读到的 command 不含 `--hook` | **重写**为新命令串；`doctor` 提示"hook 格式过旧，请重跑 `rulemux init --agent X`" |
-| 旧 `--agent workbuddy` hook 条目 | 方案 A 后 `Get("workbuddy")` → ID=codebuddy，按单 ID 匹配会漏 | `dropRulemuxHooks`/`isRulemuxHookFor` **接受别名集合**；`init`/`uninstall` 一并清理旧条目，避免与 codebuddy 双触发 |
+| 旧 `--agent workbuddy` hook 条目（别名时代写在 `~/.codebuddy/settings.json`） | 方案 A 撤销后 `Get("workbuddy")` → ID=workbuddy（独立条目），它按 `~/.workbuddy/settings.json` 匹配，够不到 codebuddy 文件里那条 | **孤儿，不迁移**：WorkBuddy 本就不读 `~/.codebuddy/settings.json`，该条目永不触发；重装（拆后）会写进正确的 `~/.workbuddy/settings.json`。如需清理，手动删或 `uninstall --agent codebuddy` 会带上它（`dropRulemuxHooks`/`isRulemuxHookFor` 仍接受标识集合） |
 | 旧前缀 `.rulemux__*`（点前缀，v0.1.3 及更早） | 文件名以 `.rulemux__` 开头 | **不自动清理**（用户 2026-10-09 明确）；仅 `doctor` 提示存在旧残留 |
 | 历史：工作区级 `.codebuddy/settings.json` 钩子 | 已随 v0.1.1 迁到 user 级 | 不处理（历史坑，已在 `external` 文档留痕） |
 
@@ -203,7 +204,7 @@
 
 1. **【阻塞 §六 协议常量】** CodeBuddy/WorkBuddy 是否真消费 `hookSpecificOutput.additionalContext`。
 2. 用**对照探针**复核"读规则先于 hook 写入"。
-3. WorkBuddy 是否读 `.codebuddy/rules` 下与 CodeBuddy 同一批文件（方案 A 的前提）。
+3. ~~WorkBuddy 是否读 `.codebuddy/rules` 下与 CodeBuddy 同一批文件（方案 A 的前提）~~ → **2026-10-09 已答：否**。WorkBuddy 有独立配置目录 `~/.workbuddy`（§5.4），方案 A 前提不成立；**仍待测**：其工作区级 rules 目录究竟是 `.workbuddy/rules` 还是 `.codebuddy/rules`（🔴，本次先以 `.workbuddy/rules` 占位）。
 4. "无变化 ⇒ stdout 为空"时 host 不把空 stdout 当上下文注入。
 5. hook 非零退出时 host 是否丢弃 stdout。
 
