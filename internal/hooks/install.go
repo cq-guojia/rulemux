@@ -35,6 +35,10 @@ func Install(a agents.Agent, workspace, display string) (string, error) {
 		return path, installJSON(path, a, display)
 	case "codex":
 		return path, installCodex(path, a.ID)
+	case "dsh":
+		// dsh 装的不是钩子，而是一个原生 Cordis 插件（见 dsh.go）。display 对它无意义。
+		_, err := installDshPlugin(a, workspace)
+		return path, err
 	default:
 		return path, fmt.Errorf("unknown hook config style %q", a.Style)
 	}
@@ -48,6 +52,10 @@ var ErrRefreshUnsupported = errors.New("hook config style not verified for refre
 // 参数必须写进 command 整串，不能用单独的 args 字段：宿主（如 CodeBuddy）只执行 command
 // 字段本身、会丢弃 args（实测见 docs/design/external/agent-rules-dirs.md §二）。
 func TargetCommand(a agents.Agent) string {
+	// dsh 的「安装项」不是命令行，而是 patch 里的插件 file:// URL（见 dsh.go）。
+	if a.Style == "dsh" {
+		return dshPluginURL(a)
+	}
 	return TargetCommandFor(a, "")
 }
 
@@ -83,6 +91,9 @@ func AgentTokenOf(line string) string {
 // cur 取不到标识时回退到规范 ID。用于 doctor 与 refresh 的比对：既不会把 workbuddy 误判为
 // 过期，也不会让自愈把 workbuddy 悄悄改回 codebuddy。
 func ExpectedCommand(a agents.Agent, cur string) string {
+	if a.Style == "dsh" {
+		return dshPluginURL(a)
+	}
 	if tok := AgentTokenOf(cur); tok != "" {
 		return TargetCommandFor(a, tok)
 	}
@@ -122,6 +133,9 @@ func Inspect(path string, a agents.Agent) (installed bool, command string, err e
 	if err := checkRefreshable(a); err != nil {
 		return false, "", err
 	}
+	if a.Style == "dsh" {
+		return inspectDsh(path)
+	}
 	doc, err := loadHookJSON(path)
 	if err != nil || doc == nil {
 		return false, "", err
@@ -140,6 +154,9 @@ func Inspect(path string, a agents.Agent) (installed bool, command string, err e
 func Refresh(path string, a agents.Agent) (changed bool, err error) {
 	if err := checkRefreshable(a); err != nil {
 		return false, err
+	}
+	if a.Style == "dsh" {
+		return refreshDsh(path, a)
 	}
 	doc, err := loadHookJSON(path)
 	if err != nil || doc == nil {
@@ -161,6 +178,9 @@ func Refresh(path string, a agents.Agent) (changed bool, err error) {
 func checkRefreshable(a agents.Agent) error {
 	switch a.Style {
 	case "claude", "trae", "json":
+		return nil
+	case "dsh":
+		// dsh 的 patch 是纯文本标记块（dsh.go），可安全解析与刷新。
 		return nil
 	case "codex":
 		// codex 的钩子 schema 尚未核实（见 registry 的 Note）。不能拿未核实的 TOML 解析
@@ -406,6 +426,8 @@ func Uninstall(a agents.Agent, workspace string) error {
 		return uninstallJSON(path, a)
 	case "codex":
 		return uninstallCodex(path, a.ID)
+	case "dsh":
+		return uninstallDsh(path, a)
 	default:
 		return fmt.Errorf("unknown hook style %q", a.Style)
 	}

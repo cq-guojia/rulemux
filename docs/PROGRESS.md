@@ -22,7 +22,7 @@
 
 | # | 问题 | 现状与影响 | 将来怎么解（方向，未定） |
 |---|---|---|---|
-| T3 | **DeepSeek Harness 的规则目录未确认** | 目录 / 扩展名 / 是否读目录全部均未知，阻塞该 agent 接入 | 查证后补进 `external/agent-rules-dirs.md` |
+| T3 | **DeepSeek Harness 适配器已实现，🔴 待 canary** | 方案 A 已落地：`dsh` registry 条目（Tier1、`.dsh/rules`、Style=dsh）+ `internal/hooks/dsh.go`（幂等写 `$DSH_HOME/cordis.patch.yml`）+ 嵌入式 Cordis 插件（首轮注入一次）；`Verified=false` 故 `init` 暂不开放 | 装 DSH 跑 `rulemux verify` 坐实注入后置 `Verified=true`，回写 `external/agent-rules-dirs.md` §四 |
 | T4 | **各 agent 核实未完成（剩余家）** | Claude Code 已于 2026-10-07 经官方文档核实；CodeBuddy、WorkBuddy 已坐实；**Trae 已于 2026-10-09 随 `v0.3.0` 坐实（见 T10）**；**Codex / OpenCode / DeepSeek 🔴 待补** ⇒ 除已核实项外不得作实现依据 | 其余各家按 `features/verification.md` 跑实测闭环，并补齐适用版本与出处 |
 | T6 | **Codex hooks 配置落点待查证**（Trae 已坐实） | Trae `hooks.json` 落点与 schema 已随 `v0.3.0` 坐实；**Codex（`~/.codex/config.toml`）仍待补** | Codex 接入时再查。结论回写 `external/` |
 | T10 | **canary 实测坐实外部事实（剩余家）** | CodeBuddy ✅（2026-10-08）、WorkBuddy ✅（2026-10-09, `v0.2.7`）、Trae ✅（2026-10-09, `v0.3.0`）均已坐实；**Codex / OpenCode / Claude / DeepSeek 🔴 待补** | codex / opencode 按 `features/verification.md` 跑 `rulemux verify`；结论回写 `external/agent-rules-dirs.md` §四 |
@@ -38,5 +38,6 @@
 
 - **给仓库配 `NPM_TOKEN` secret**（Settings → Secrets → Actions，Automation 类型 token）：否则 CI 的 npm 步骤按设计跳过，每次发版只能手动 `npm publish`（0.2.7 就是手动发的）。
 - `WORKBUDDY_CONFIG_DIR` 是否决定用户级配置目录：仍未坐实（产物里只在 safe-delete 日志白名单出现）；坐实后再考虑加入注册表 `HookDirEnv`。
+- **DSH（DeepSeek Harness）适配器**：①–③ 已完成（registry 条目 / `internal/hooks/dsh.go` / 嵌入式 Cordis 插件 `assets/rulemux-dsh.js`）；④ **待办**：本机装 DSH 跑 `rulemux verify` + 新会话核验注入，坐实后置 `Verified:true`。过程见 `docs/worklog/dsh-adapter.md`。
 
 > 各 agent 接入 / 核实 / canary 的剩余工作见 §二 未决项（T3 / T4 / T6 / T10 / T11）。

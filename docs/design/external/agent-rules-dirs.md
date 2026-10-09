@@ -19,7 +19,7 @@
 | WorkBuddy | **`.codebuddy/rules/`**（与 CodeBuddy **共享**，2026-10-09 三位置对照探针坐实，见 §5.4） | `.md`（带 alwaysApply:true） | ✅ 读平铺非隐藏 `.md` | ❌ 不会（会话开始固定快照） | 同上 | 5.7.6（本机实测） | **用户级**配置/钩子独立：`~/.workbuddy/settings.json`；**工作区级**规则目录与 CodeBuddy 相同 ⇒ 两者共享目录，需走并集同步 |
 | Codex | ❌ 无目录 | 单文件 `AGENTS.md`（沿目录树向上合并，每目录最多一个） | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
 | OpenCode | ⚠️ 非目录扫描 | `AGENTS.md` + `opencode.json` 显式列 instruction 文件 | ❌ | — | Tier-2：stdout 注入**规则正文** | 待补 | — |
-| DeepSeek Harness | — | — | — | — | — | 移出范围 | 用户 2026-10-07 决定移出当前范围（最开放、支持插件，后续以插件市场解决） |
+| **DeepSeek Harness (dsh)** | `.dsh/rules`（**非原生扫描**：由 rulemux 的 Cordis 插件在 `agent/pre-step` 读取注入；另 `$DSH_HOME/rules` 为全局） | `.md` | ⚠️ 目录**不**被 dsh 自动扫描，须插件主动读 | 🔴 待补 | **无 hook binary**（plugin-first）；Claude/Codex hook bridge 为可选翻译层 | 🔴 待 canary 核实 | plugin-first 宿主：经 `$DSH_HOME/cordis.patch.yml` 加载原生 Cordis 插件，生命周期事件 `agent/session-start` / `agent/pre-step` / `agent/turn-stopping`。rulemux 适配 = 真实拷贝进 `.dsh/rules` + 一个小 Cordis 插件在 pre-step 注入为 recall 消息（照 hindsight `src/dsh.ts`）。来源：`/code/fork/hindsight/.../src/dsh.ts`、`src/installer.ts:1742-1788`、`awesome-dsh-plugin/README.zh.md:1650`（dsh-loulan-rules）。🔴 待本机装 DSH 跑 canary 坐实 |
 
 > ⚠️ **扩展名 / 结构各家不同** ⇒ 同步器必须**按 agent 分别落格式**，不能一个 `.md` 通吃。
 >

@@ -97,17 +97,22 @@ func Doctor(args []string) int {
 			srcNote = fmt.Sprintf(" [dir from $%s]", envUsed)
 		}
 		installed, cmd, err := hooks.Inspect(hookPath, a)
+		// dsh 的「安装项」是一个 Cordis 插件（patch 里的 file:// URL），措辞用 Plugin 更准。
+		label := "Hook"
+		if a.Style == "dsh" {
+			label = "Plugin"
+		}
 		switch {
 		case errors.Is(err, hooks.ErrRefreshUnsupported):
-			fmt.Printf("      Hook: ? unchecked → %s%s (hook config format not verified yet)\n", hookPath, srcNote)
+			fmt.Printf("      %s: ? unchecked → %s%s (hook config format not verified yet)\n", label, hookPath, srcNote)
 		case err != nil:
-			fmt.Printf("      Hook: ⚠ unreadable → %s%s: %v\n", hookPath, srcNote, err)
+			fmt.Printf("      %s: ⚠ unreadable → %s%s: %v\n", label, hookPath, srcNote, err)
 		case !installed:
-			fmt.Printf("      Hook: ✗ not installed → %s%s (run rulemux init --agent %s)\n", hookPath, srcNote, a.ID)
+			fmt.Printf("      %s: ✗ not installed → %s%s (run rulemux init --agent %s)\n", label, hookPath, srcNote, a.ID)
 		case cmd == hooks.ExpectedCommand(a, cmd):
-			fmt.Printf("      Hook: ✓ installed, up to date → %s%s\n", hookPath, srcNote)
+			fmt.Printf("      %s: ✓ installed, up to date → %s%s\n", label, hookPath, srcNote)
 		default:
-			fmt.Printf("      Hook: ⚠ installed but OUTDATED → %s%s\n", hookPath, srcNote)
+			fmt.Printf("      %s: ⚠ installed but OUTDATED → %s%s\n", label, hookPath, srcNote)
 			fmt.Printf("            found:    %s\n", cmd)
 			fmt.Printf("            expected: %s\n", hooks.ExpectedCommand(a, cmd))
 			fmt.Printf("            fix: rulemux init --refresh\n")

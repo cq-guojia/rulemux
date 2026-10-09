@@ -50,6 +50,26 @@ sources，就会把对方落下的文件当成残留删掉 ⇒ **两个钩子轮
 ⚠ **代价**：目录共享时，最终落盘的是**并集** —— 若某条 source 只写了 `agents = ["workbuddy"]`，
 它的文件同样会出现在 `.codebuddy/rules` 里被 CodeBuddy 读到。这是共享目录的固有语义，无法两全。
 
+## DSH（DeepSeek Harness）：真实拷贝 + 宿主侧 Cordis 插件读取
+
+dsh 是 **plugin-first** 宿主：它**不原生扫描规则目录**，扩展面是 Cordis 生命周期事件（`agent/session-start`、
+`agent/pre-step`…），且**没有 hook binary**。因此 rulemux 对 dsh 的交付是「**Tier-1 真实拷贝** + 一个随二进制分发的
+**最小 Cordis 插件**」（实现：`internal/hooks/dsh.go` + `internal/hooks/assets/rulemux-dsh.js`）：
+
+- **同步**：与其它 Tier-1 完全一致 —— 真实拷贝进 `<workspace>/.dsh/rules`，`__rulemux__` 前缀、删残留、不累积。
+- **读取与安装**：插件注册进 `$DSH_HOME/cordis.patch.yml`（dsh 顶层当作 YAML 数组读，故我方用标记块 `# RULEMUX_DSH_START/END`
+  幂等增删、保留他人 patch 行、删空后写回 `[]`；patch 行 `name` 必须是 `file://` URL）。插件行为：
+  - `agent/session-start`：触发一次 `rulemux sync`（存 promise）；
+  - `agent/pre-step`：首个带用户输入的回合 await 该 promise 后读 `.dsh/rules/__rulemux__*.md`，**只注入一次**为
+    `plugin:rulemux` recall 消息；被 compaction 遮蔽后补回（且**只在宿主能证明确实丢了**时才补，避免每轮重注）。
+- **不进 per-turn 热路径**：per-turn 只做本地读，绝不做 sync/比对。
+- **注入只读 `__rulemux__*`**：`.dsh/rules` 可能与第三方插件（如 `dsh-loulan-rules`）共享，只读我方前缀，互不干扰。
+- **token 成本**：与 Trae/CodeBuddy 原生载入文件完全相同（进上下文的是同一段规则文本，字节一致）。
+
+> ⚠ rulemux 自身**不注入**（Tier-1 只真实拷贝）；注入由**宿主侧插件**完成 —— 与 Tier-2「rulemux 往 stdout 注入正文」是两回事。
+> 🔴 DSH 适配器的规则目录 / 注入链路**尚未 canary 坐实**（本机未装 dsh）⇒ registry 里 `Verified=false`、`init` 暂不开放。
+> 事实与真源见 [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §一 DSH 行；过程见 [`../../worklog/dsh-adapter.md`](../../worklog/dsh-adapter.md)。
+
 ## 边界（不做什么）
 
 - 不做内容改写 / 模板渲染 —— 源写什么就落什么。

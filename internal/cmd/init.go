@@ -178,7 +178,7 @@ func Init(args []string) int {
 		fmt.Println("· config exists, skipped:", cfgPath)
 	}
 
-	// 2. install the SessionStart hook for the requested agents only
+	// 2. install the SessionStart hook (or, for plugin hosts, the plugin) for the requested agents only
 	fmt.Println("\nInstalling SessionStart hooks:")
 	for _, ar := range targets {
 		p, err := hooks.Install(ar.Agent, ws, ar.Display)
@@ -189,6 +189,11 @@ func Init(args []string) int {
 		mark := "✓"
 		if !ar.Agent.Verified {
 			mark = "⚠"
+		}
+		if ar.Agent.Style == "dsh" {
+			// dsh 装的是原生 Cordis 插件（patch 行），不是钩子命令行。
+			fmt.Printf("  %s %-10s plugin registered → %s\n", mark, ar.Display, p)
+			continue
 		}
 		// 回显用用户写的标识（如 workbuddy），让用户面与安装命令一致。
 		fmt.Printf("  %s %-10s %s → rulemux %s --agent %s\n", mark, ar.Display, p, hooks.SubcommandFor(ar.Agent), ar.Display)

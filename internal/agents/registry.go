@@ -188,6 +188,34 @@ var registry = []Agent{
 		Verified: false,
 		Note:     "Only reads a single-file AGENTS.md, so it goes through SessionStart injection and never touches your own AGENTS.md.",
 	},
+	{
+		// DeepSeek Harness (dsh) is plugin-first: it has NO hook config file and does NOT scan a
+		// rules directory natively. Its canonical extension surface is a set of Cordis lifecycle
+		// events, loaded via $DSH_HOME/cordis.patch.yml. rulemux therefore does BOTH:
+		//   - sync real copies into <workspace>/.dsh/rules (Tier-1: real dir, real files);
+		//   - install a tiny native Cordis plugin (Style="dsh") that, at agent/pre-step, reads
+		//     those copies back and injects them once — the plugin is dsh's stand-in for a host
+		//     that natively reads a rules dir.
+		// Reusing the existing "user-level config dir override" mechanism for DSH_HOME is exact:
+		// dsh resolves its home as $DSH_HOME else ~/.dsh (hindsight installer.ts:1742-1745).
+		// 🔴 NOT yet canary-verified (no dsh runtime on this machine) ⇒ Verified=false gates
+		// install/sync until a real dsh session confirms the injection (docs/worklog/dsh-adapter.md).
+		ID:       "dsh",
+		Aliases:  []string{"deepseek", "deepseek-harness"},
+		Tier:     Tier1,
+		RulesDir: ".dsh/rules",
+		HookFile: "~/.dsh/cordis.patch.yml",
+		HookAbs:  true,
+		// dsh home = $DSH_HOME else ~/.dsh；插件 patch 落在此目录下。
+		HookDirEnv:   "DSH_HOME",
+		HookFileBase: "cordis.patch.yml",
+		Style:        "dsh",
+		Verified:     false,
+		// 插件每会话首轮现读 .dsh/rules ⇒ 无 CodeBuddy 式「差一拍」，不需要变化提示。
+		SessionHint:  false,
+		HintProtocol: "",
+		Note:         "Plugin-first host: loads a native Cordis plugin from $DSH_HOME/cordis.patch.yml and has NO hook binary (hindsight src/dsh.ts:1-24, installer.ts:1716-1788). rulemux syncs real copies into .dsh/rules and installs a minimal Cordis plugin that injects them once at agent/pre-step. 🔴 canary pending: confirm the injection on a real dsh install, then set Verified=true (docs/worklog/dsh-adapter.md).",
+	},
 }
 
 // All 返回全部已注册的 agent。
