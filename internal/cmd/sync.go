@@ -293,10 +293,28 @@ func agentsFromLedger(ids []string) []agents.Agent {
 	return out
 }
 
-// changeNotice 是注入给模型的**一句话**（不含规则正文）：它应转告用户重开会话。
+// changeNotice 是注入给模型的**一段指令**（不含规则正文）：要求它立刻以警告样式告知用户重开会话。
+//
+// 2026-10-09 用户拍板的三条要求：
+//  1. 提示方式 —— 警告样式，让用户明显看到，而不是夹在回答里的一句普通话；
+//  2. 提示时机 —— 放在这一步的**所有输出之前**（先警告、后办事，最稳）；
+//  3. 执行顺序 —— 先把这条提示输出完，再去做用户原本要求的事。
+//
+// 语言：由模型自行判断「它此刻与用户沟通所用的语言」，用那种语言重新表述；判断错了也无碍，
+// 因此不做中英双语、不加配置项、不读环境变量。
+//
+// 背景（2026-10-09 实测）：宿主确实会把这段内容注入模型上下文，但若只写"请转告用户"，
+// 模型在忙于回答用户问题时经常不转述 ⇒ 用户看不到任何提示。故改为「先输出警告」的硬指令。
 const changeNotice = "rulemux: the rule files synced into this workspace just changed " +
-	"(added / updated / removed). The rules already loaded in THIS session are the previous " +
-	"version, so tell the user to start a NEW session for the change to take effect."
+	"(added / updated / removed). The rules already loaded in THIS session are the previous version.\n" +
+	"\n" +
+	"BEFORE you do anything else — before any other text, tool call, or answer — start your reply with a " +
+	"clearly marked WARNING that tells the user, in the language you are currently using with them, " +
+	"something equivalent to:\n" +
+	"  \"⚠️ Rules changed: this session still holds the previous version. Start a NEW session for the " +
+	"change to take effect.\"\n" +
+	"Express it in the user's language — do NOT copy this English wording verbatim. " +
+	"Then continue with the user's request."
 
 // hookOutput / hookPayload 是宿主认的注入协议外壳。
 type hookOutput struct {
