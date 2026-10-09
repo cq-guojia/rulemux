@@ -13,7 +13,6 @@ scripts/
 main.go
 go.mod
 AGENTS.md
-RULES.md
 .gitignore
 .codebuddy/
 .claude/
