@@ -26,7 +26,7 @@ var codebuddy = agents.Agent{
 // 决定能否创建规则目录、能否输出变化提示。
 func TestInstallJSON_WritesFullCommandString(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := installJSON(path, codebuddy); err != nil {
+	if err := installJSON(path, codebuddy, ""); err != nil {
 		t.Fatalf("installJSON: %v", err)
 	}
 	list := loadSessionStart(t, path)
@@ -52,7 +52,7 @@ func TestInstallJSON_MigratesOldArgsHookAndKeepsOthers(t *testing.T) {
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := installJSON(path, codebuddy); err != nil {
+	if err := installJSON(path, codebuddy, ""); err != nil {
 		t.Fatalf("installJSON: %v", err)
 	}
 	list := loadSessionStart(t, path)
@@ -78,7 +78,7 @@ func TestInstallJSON_CleansUpAliasHooks(t *testing.T) {
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := installJSON(path, codebuddy); err != nil {
+	if err := installJSON(path, codebuddy, ""); err != nil {
 		t.Fatalf("installJSON: %v", err)
 	}
 	list := loadSessionStart(t, path)
@@ -92,7 +92,7 @@ func TestInstallJSON_CleansUpAliasHooks(t *testing.T) {
 
 func TestUninstallJSON_RemovesHook(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := installJSON(path, codebuddy); err != nil {
+	if err := installJSON(path, codebuddy, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := uninstallJSON(path, codebuddy); err != nil {
@@ -222,8 +222,9 @@ func TestRefresh_NeverCreatesFileOrDir(t *testing.T) {
 	}
 }
 
-// 别名条目（旧安装的 `--agent workbuddy`）要能被识别，并合并成规范 ID 的一条 ——
-// 否则它与新写的 codebuddy 条目并存，同一 SessionStart 会双触发。
+// 别名条目（旧安装的 `--agent workbuddy`）要能被识别并合并为单条，且保留用户选的别名
+// （不被强行改回 codebuddy）—— 否则它与新写的条目并存，同一 SessionStart 会双触发，
+// 也违背 WorkBuddy / CodeBuddy 用户面分离。
 func TestRefresh_MergesAliasEntryIntoCanonical(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	seed := `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent workbuddy"}]}]}}`
@@ -241,7 +242,8 @@ func TestRefresh_MergesAliasEntryIntoCanonical(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("别名条目应合并为 1 条, got %d", len(list))
 	}
-	if cmd, _ := hookCommand(t, list[0]); cmd != "rulemux sync --hook --agent codebuddy" {
+	// 结构归一（补 --hook）且保留 workbuddy 别名，而非改回 codebuddy。
+	if cmd, _ := hookCommand(t, list[0]); cmd != "rulemux sync --hook --agent workbuddy" {
 		t.Errorf("command = %q", cmd)
 	}
 }
@@ -277,6 +279,27 @@ func TestInspect_ReportsState(t *testing.T) {
 	}
 }
 
+// 刷新必须保留用户当初选的别名（workbuddy），不能悄悄改回规范 ID codebuddy ——
+// 这是 WorkBuddy / CodeBuddy 用户面分离的关键。旧格式（缺 --hook）照样补上、但别名不变。
+func TestRefresh_PreservesExistingAlias(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	seed := `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent workbuddy"}]}]}}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Refresh(path, codebuddy); err != nil { // 用规范 ID 刷新，模拟 init --refresh 不带 --agent
+		t.Fatal(err)
+	}
+	installed, cmd, err := Inspect(path, codebuddy)
+	if err != nil || !installed {
+		t.Fatalf("刷新后应仍装有钩子, got (%v,%v)", installed, err)
+	}
+	if want := "rulemux sync --hook --agent workbuddy"; cmd != want {
+		t.Errorf("别名应被保留: got %q, want %q", cmd, want)
+	}
+}
+
 // 未核实格式的 agent（codex 是 TOML，schema 未坐实）不参与解析/刷新，绝不改其文件。
 func TestRefresh_SkipsUnverifiedStyle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
@@ -304,7 +327,7 @@ func TestRefresh_SkipsUnverifiedStyle(t *testing.T) {
 // 与刷新路径的关键区别：显式安装允许创建配置目录与文件。
 func TestInstallJSON_CreatesDirAndFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", ".codebuddy", "settings.json")
-	if err := installJSON(path, codebuddy); err != nil {
+	if err := installJSON(path, codebuddy, ""); err != nil {
 		t.Fatalf("installJSON: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -315,14 +338,14 @@ func TestInstallJSON_CreatesDirAndFile(t *testing.T) {
 // 重复安装同一 agent 也必须幂等（第二次不写盘，避免无谓改动用户文件的 mtime）。
 func TestInstallJSON_IdempotentSecondRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := installJSON(path, codebuddy); err != nil {
+	if err := installJSON(path, codebuddy, ""); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := installJSON(path, codebuddy); err != nil {
+	if err := installJSON(path, codebuddy, ""); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(path)

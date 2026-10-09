@@ -34,12 +34,14 @@ const exampleConfig = `# rulemux configuration file
 #
 #   agents    Which agents receive this batch; omitted = every *supported* agent.
 #             Current verified values (installable):
-#               codebuddy   Tier-1 (really copied into .codebuddy/rules)
-#               workbuddy   Tier-1 (shares the .codebuddy/rules directory)
+#               workbuddy   Tier-1 (copied into .codebuddy/rules) — use this for WorkBuddy
+#               codebuddy   Tier-1 (shares the .codebuddy/rules directory; same agent as workbuddy)
+#             Both names target the exact same rules directory and hook; pick the name
+#             you installed with (rulemux keeps the one you chose).
 #             Other agents (claude / trae / codex / opencode) have not passed canary
 #             verification yet, so they cannot be installed or targeted for now;
 #             once their adapters are proven they open up automatically — no edit needed here.
-#             Example: agents = ["codebuddy"]
+#             Example: agents = ["workbuddy"]
 #
 #   workspace Which workspaces these rules apply to. Forms:
 #               workspace = "/abs/path/to/proj"          # single workspace (exact match)
@@ -139,7 +141,7 @@ func Init(args []string) int {
 		fmt.Fprintln(os.Stderr, "  run 'rulemux init --help' for details")
 		return 2
 	}
-	targets, err := parseAgents(agentArg)
+	targets, err := parseAgentsDisplay(agentArg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rulemux init:", err)
 		return 2
@@ -170,17 +172,18 @@ func Init(args []string) int {
 
 	// 2. install the SessionStart hook for the requested agents only
 	fmt.Println("\nInstalling SessionStart hooks:")
-	for _, a := range targets {
-		p, err := hooks.Install(a, ws)
+	for _, ar := range targets {
+		p, err := hooks.Install(ar.Agent, ws, ar.Display)
 		if err != nil {
-			fmt.Printf("  ✗ %-10s %v\n", a.ID, err)
+			fmt.Printf("  ✗ %-10s %v\n", ar.Agent.ID, err)
 			continue
 		}
 		mark := "✓"
-		if !a.Verified {
+		if !ar.Agent.Verified {
 			mark = "⚠"
 		}
-		fmt.Printf("  %s %-10s %s → rulemux %s --agent %s\n", mark, a.ID, p, hooks.SubcommandFor(a), a.ID)
+		// 回显用用户写的标识（如 workbuddy），让用户面与安装命令一致。
+		fmt.Printf("  %s %-10s %s → rulemux %s --agent %s\n", mark, ar.Display, p, hooks.SubcommandFor(ar.Agent), ar.Display)
 	}
 
 	fmt.Println("\nLegend:")
@@ -236,7 +239,7 @@ func refreshHooks(agentArg string, f *Flags) int {
 			continue
 		}
 
-		want := hooks.TargetCommand(a)
+		want := hooks.ExpectedCommand(a, cmd)
 		if cmd == want {
 			fmt.Printf("  ✓ %-10s already up to date%s\n", a.ID, src)
 			continue
@@ -269,15 +272,20 @@ you must name the agent(s) you want. This is deliberate: auto-detecting which
 agents exist locally is unreliable, so the choice is always yours.
 
 SUPPORTED AGENTS (value of --agent; only VERIFIED agents can be installed):
-  codebuddy   CodeBuddy   Tier-1  .codebuddy/rules/   [verified — installable]
-              aliases: workbuddy, codebuddy-cn (exactly the same agent, dir and hook)
+  workbuddy  WorkBuddy   Tier-1  .codebuddy/rules/   [verified — install this one]
+              use this if you are setting up WorkBuddy:
+                rulemux init --agent workbuddy
+              codebuddy / codebuddy-cn are the SAME agent under a different name
+              (same rules directory and hook) — pick whichever name you prefer.
+              rulemux remembers the name you chose and keeps it that way on every
+              later refresh, so it never switches your install to "codebuddy".
 
 The following are registered but NOT YET verified, so init refuses to install them
 until their adapter is canary-tested and flipped to verified:
   claude, trae, codex, opencode
 
 Install (only verified agents), comma-separated:
-  rulemux init --agent codebuddy
+  rulemux init --agent workbuddy
 
 The SessionStart hook is installed once into the user-level host config
 (~/.codebuddy/settings.json), so it fires for every workspace you open —

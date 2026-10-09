@@ -63,11 +63,32 @@ func workspace(v string) (string, error) {
 	return os.Getwd()
 }
 
+// agentReq 把解析出的 agent 与「用户 --agent 里写的原始标识」绑定，供安装路径把别名
+// 透传到钩子命令与回显（品牌分离：workbuddy 与 codebuddy 是同一 agent，但用户面写的是 workbuddy）。
+type agentReq struct {
+	Agent   agents.Agent
+	Display string // 用户 --agent 里写的原始标识（可能是别名，如 workbuddy）
+}
+
 // parseAgents 把 --agent 的值（如 "codebuddy,workbuddy"）拆成 Agent 列表，
 // 逐个在注册表里校验；含未知 id 或「尚未做好」（Verified==false）的 agent 即报错。
 // 绝不扫描机器上的 agent。
 func parseAgents(s string) ([]agents.Agent, error) {
-	var out []agents.Agent
+	out, err := parseAgentsDisplay(s)
+	if err != nil {
+		return nil, err
+	}
+	agentsList := make([]agents.Agent, len(out))
+	for i, ar := range out {
+		agentsList[i] = ar.Agent
+	}
+	return agentsList, nil
+}
+
+// parseAgentsDisplay 同 parseAgents，但为每个去重后的 agent 保留「首个匹配到的请求标识」
+// 作为 Display，供安装时写入钩子命令与回显使用。
+func parseAgentsDisplay(s string) ([]agentReq, error) {
+	var out []agentReq
 	seen := map[string]bool{}
 	for _, p := range strings.Split(s, ",") {
 		p = strings.TrimSpace(p)
@@ -82,11 +103,12 @@ func parseAgents(s string) ([]agents.Agent, error) {
 			return nil, fmt.Errorf("agent %q is not installable yet: only verified agents are supported: %s (the other adapters are still in progress and cannot be installed until ready)", a.ID, agents.SupportedSummary())
 		}
 		// 别名去重：codebuddy,workbuddy 指的是同一个 agent（设计 §三 方案 A）。
+		// 并用首次出现的请求标识（如 workbuddy）作为 Display。
 		if seen[a.ID] {
 			continue
 		}
 		seen[a.ID] = true
-		out = append(out, a)
+		out = append(out, agentReq{Agent: a, Display: p})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no agent specified")

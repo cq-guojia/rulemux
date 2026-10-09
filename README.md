@@ -98,7 +98,7 @@ moved this agent's config directory with `CODEBUDDY_CONFIG_DIR`, rulemux follows
 
 ```bash
 # 1. Install the session hook for an agent (--agent is REQUIRED)
-rulemux init --agent codebuddy
+rulemux init --agent workbuddy
 #    First run also writes a sample config to ~/.rulemux/config.toml
 
 # 2. Edit ~/.rulemux/config.toml and point `path` at your real rule files

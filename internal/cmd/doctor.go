@@ -104,12 +104,12 @@ func Doctor(args []string) int {
 			fmt.Printf("      Hook: ⚠ unreadable → %s%s: %v\n", hookPath, srcNote, err)
 		case !installed:
 			fmt.Printf("      Hook: ✗ not installed → %s%s (run rulemux init --agent %s)\n", hookPath, srcNote, a.ID)
-		case cmd == hooks.TargetCommand(a):
+		case cmd == hooks.ExpectedCommand(a, cmd):
 			fmt.Printf("      Hook: ✓ installed, up to date → %s%s\n", hookPath, srcNote)
 		default:
 			fmt.Printf("      Hook: ⚠ installed but OUTDATED → %s%s\n", hookPath, srcNote)
 			fmt.Printf("            found:    %s\n", cmd)
-			fmt.Printf("            expected: %s\n", hooks.TargetCommand(a))
+			fmt.Printf("            expected: %s\n", hooks.ExpectedCommand(a, cmd))
 			fmt.Printf("            fix: rulemux init --refresh\n")
 		}
 		if a.Note != "" {

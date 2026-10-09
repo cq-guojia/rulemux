@@ -87,7 +87,7 @@
 **已定：方案 A** —— 删除独立 workbuddy 项，并入 codebuddy 的 `Aliases`（建议 `["codebuddy-cn","workbuddy"]`）；删 `ByRulesDir`；`cmd/sync.go` 去掉分组与 `unionSources`；`uninstall` 避免对同目录重复清理；改 `main.go`/`init.go` 文案。
 
 - **先只调通 CodeBuddy**；测 WorkBuddy 时若发现 A 走不通，再议 **方案 B**（目标名带 agent：`__rulemux__<agentID>__<basename>.md`，各 agent 只管自己的文件，不需要合并）。
-- 已知副作用（用户已接受）：`init --agent workbuddy` 会写出 `--agent codebuddy`。
+- 用户面分离：安装时把用户写的 `--agent workbuddy` 原样透传到钩子命令与回显（`hooks.TargetCommandFor` + `Install` 的 display 参数）；`Refresh`/`doctor` 比对改用 `ExpectedCommand`，沿用文件里已有的 `--agent` 标识，因此后续 `sync` 自愈或 `init --refresh` 都不会把 workbuddy 悄悄改回 codebuddy（旧的「会写出 --agent codebuddy」副作用已消除）。
 
 ## 四、改动二：账本升级为「工作区 × Agent」
 

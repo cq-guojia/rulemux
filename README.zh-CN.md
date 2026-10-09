@@ -86,7 +86,7 @@ rulemux init --refresh   # 只刷新「我们自己装过的」钩子：不新�
 
 ```bash
 # 1. 为指定 agent 安装会话钩子（--agent 必填）
-rulemux init --agent codebuddy
+rulemux init --agent workbuddy
 #    首次运行还会生成示例配置 ~/.rulemux/config.toml
 
 # 2. 编辑 ~/.rulemux/config.toml，把 path 改成你真实的规则文件

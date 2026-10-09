@@ -26,11 +26,13 @@ func SubcommandFor(a agents.Agent) string {
 }
 
 // Install 为指定 agent 安装 SessionStart 钩子，返回写入的配置文件路径（幂等）。
-func Install(a agents.Agent, workspace string) (string, error) {
+// display 是写入钩子命令的 --agent 标识：传用户 --agent 里写的原始值（可能是别名 workbuddy），
+// 传空串则回退规范 ID。它控制钩子里写的是 --agent workbuddy 还是 --agent codebuddy。
+func Install(a agents.Agent, workspace, display string) (string, error) {
 	path := a.HookFileAbs(workspace)
 	switch a.Style {
 	case "claude", "trae", "json":
-		return path, installJSON(path, a)
+		return path, installJSON(path, a, display)
 	case "codex":
 		return path, installCodex(path, a.ID)
 	default:
@@ -41,22 +43,60 @@ func Install(a agents.Agent, workspace string) (string, error) {
 // ErrRefreshUnsupported 表示该 agent 的钩子配置格式尚未核实，因此刷新会跳过、绝不改文件。
 var ErrRefreshUnsupported = errors.New("hook config style not verified for refresh")
 
-// TargetCommand 是当前代码期望写进该 agent 钩子的完整命令行。
+// TargetCommand 是当前代码期望写进该 agent 钩子的完整命令行（规范 ID 版）。
 //
 // 参数必须写进 command 整串，不能用单独的 args 字段：宿主（如 CodeBuddy）只执行 command
 // 字段本身、会丢弃 args（实测见 docs/design/external/agent-rules-dirs.md §二）。
 func TargetCommand(a agents.Agent) string {
-	return fmt.Sprintf("rulemux %s --agent %s", SubcommandFor(a), a.ID)
+	return TargetCommandFor(a, "")
 }
 
-// hookEntry 构造该 agent 的一条 SessionStart 钩子分组。
-func hookEntry(a agents.Agent) map[string]interface{} {
+// TargetCommandFor 与 TargetCommand 相同，但允许用 display 覆盖 --agent 后面写的标识：
+// 安装时用户可能写的是别名（如 --agent workbuddy），钩子与回显就该透传 workbuddy，
+// 而不是回退到规范 ID codebuddy —— 这是「WorkBuddy / CodeBuddy 用户面分离」的一部分。
+// display 为空时使用规范 ID（保持旧行为）。
+func TargetCommandFor(a agents.Agent, display string) string {
+	id := a.ID
+	if display != "" {
+		id = display
+	}
+	return fmt.Sprintf("rulemux %s --agent %s", SubcommandFor(a), id)
+}
+
+// AgentTokenOf 从一条钩子命令行中取出 --agent 后面的标识（支持 "--agent x" 与 "--agent=x"），
+// 取不到返回空串。旧格式钩子（缺 --hook）或别名写法（--agent workbuddy）都能正确取出。
+func AgentTokenOf(line string) string {
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		if f == "--agent" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+		if strings.HasPrefix(f, "--agent=") {
+			return strings.TrimPrefix(f, "--agent=")
+		}
+	}
+	return ""
+}
+
+// ExpectedCommand 返回「相对某条已存在命令 cur，我们应当写出的目标命令」：沿用 cur 里
+// 已有的 --agent 标识（保留用户当初选的品牌别名），仅在命令结构（如补 --hook）上做归一。
+// cur 取不到标识时回退到规范 ID。用于 doctor 与 refresh 的比对：既不会把 workbuddy 误判为
+// 过期，也不会让自愈把 workbuddy 悄悄改回 codebuddy。
+func ExpectedCommand(a agents.Agent, cur string) string {
+	if tok := AgentTokenOf(cur); tok != "" {
+		return TargetCommandFor(a, tok)
+	}
+	return TargetCommand(a)
+}
+
+// hookEntry 构造该 agent 的一条 SessionStart 钩子分组，display 为写入命令的 --agent 标识。
+func hookEntry(a agents.Agent, display string) map[string]interface{} {
 	return map[string]interface{}{
 		"matcher": "",
 		"hooks": []interface{}{
 			map[string]interface{}{
 				"type":    "command",
-				"command": TargetCommand(a),
+				"command": TargetCommandFor(a, display),
 			},
 		},
 	}
@@ -64,16 +104,17 @@ func hookEntry(a agents.Agent) map[string]interface{} {
 
 // installJSON 显式安装：写入 SessionStart 钩子，保留配置文件里已有的其它内容。
 // 只有显式安装才允许创建配置目录；刷新路径绝不创建（见 Refresh）。
-func installJSON(path string, a agents.Agent) error {
-	_, err := writeHookJSON(path, a, true)
+// display 为写入钩子命令的 --agent 标识（传用户 --agent 写的原始值，可能为别名 workbuddy）。
+func installJSON(path string, a agents.Agent, display string) error {
+	_, err := writeHookJSON(path, a, true, display)
 	return err
 }
 
 // Inspect 报告该 agent 在宿主配置里的钩子现状（只读，不写盘）。
 //
 // installed=true 表示文件里已存在我们针对该 agent 的钩子（含旧格式、含 workbuddy 这类
-// 别名写法）；command 是那条钩子的完整命令行 —— 调用方与 TargetCommand 比较即可判断
-// 是否「已装但格式过期」。
+// 别名写法）；command 是那条钩子的完整命令行 —— 调用方与 ExpectedCommand 比较即可判断
+// 是否「已装但格式过期」（比对沿用 command 里已有的 --agent 标识，保留用户选的别名）。
 //
 // 文件不存在 / 为空 ⇒ (false, "", nil)；JSON 解析失败 ⇒ 返回错误（是否致命由调用方决定）；
 // 钩子格式尚未核实的 agent（codex）⇒ ErrRefreshUnsupported。
@@ -94,7 +135,8 @@ func Inspect(path string, a agents.Agent) (installed bool, command string, err e
 //   - 文件不存在 ⇒ 不创建文件、不创建目录，返回 changed=false；
 //   - 已是最新 ⇒ 一个字节都不写（幂等，保持 mtime，让 postinstall 能做到无变化零输出）；
 //   - 别人的钩子条目、以及文件里其它键 ⇒ 原样保留；
-//   - 旧格式（缺 --hook）与别名条目（--agent workbuddy）⇒ 就地升级为当前命令。
+//   - 旧格式（缺 --hook）⇒ 补 --hook；别名条目（--agent workbuddy）⇒ 沿用已有的别名，
+//     绝不强行改回规范 ID codebuddy（这是 WorkBuddy / CodeBuddy 用户面分离的关键）。
 func Refresh(path string, a agents.Agent) (changed bool, err error) {
 	if err := checkRefreshable(a); err != nil {
 		return false, err
@@ -103,10 +145,16 @@ func Refresh(path string, a agents.Agent) (changed bool, err error) {
 	if err != nil || doc == nil {
 		return false, err
 	}
-	if installed, cur := inspectSessionStart(sessionStartList(doc), a); installed && cur == TargetCommand(a) {
-		return false, nil
+	list := sessionStartList(doc)
+	if installed, cur := inspectSessionStart(list, a); installed {
+		// 沿用文件里已有的 --agent 标识（workbuddy 仍是 workbuddy），只在命令结构上归一。
+		display := AgentTokenOf(cur)
+		if cur == TargetCommandFor(a, display) {
+			return false, nil
+		}
+		return writeHookJSON(path, a, false, display)
 	}
-	return writeHookJSON(path, a, false)
+	return false, nil
 }
 
 // checkRefreshable 报告该 agent 是否支持「解析 + 刷新」自家钩子条目。
@@ -127,7 +175,8 @@ func checkRefreshable(a agents.Agent) error {
 //
 // create=true 允许创建配置目录与文件（显式安装）；create=false 时文件不存在就直接跳过
 // —— 这是硬约束：刷新只写已存在的配置。（changed 表示是否真的改了文件。）
-func writeHookJSON(path string, a agents.Agent, create bool) (changed bool, err error) {
+// display 为写入钩子命令的 --agent 标识（安装时透传别名；刷新时沿用文件里已有的标识）。
+func writeHookJSON(path string, a agents.Agent, create bool, display string) (changed bool, err error) {
 	doc, err := loadHookJSON(path)
 	if err != nil {
 		return false, err
@@ -146,7 +195,7 @@ func writeHookJSON(path string, a agents.Agent, create bool) (changed bool, err 
 	list, _ := hooksMap["SessionStart"].([]interface{})
 
 	// 已是最新 ⇒ 不写盘：幂等，且让调用方（sync 自愈 / init --refresh）只在真有变化时才说话。
-	if installed, cur := inspectSessionStart(list, a); installed && cur == TargetCommand(a) {
+	if installed, cur := inspectSessionStart(list, a); installed && cur == TargetCommandFor(a, display) {
 		return false, nil
 	}
 
@@ -154,7 +203,7 @@ func writeHookJSON(path string, a agents.Agent, create bool) (changed bool, err 
 	// `--agent workbuddy` 也是同一 agent 的钩子，必须一并清掉，否则会与新写的条目
 	// 并存、同一 SessionStart 双触发。别人的条目一律原样保留。
 	list = dropRulemuxHooks(list, a.MatchIDs())
-	list = append(list, hookEntry(a))
+	list = append(list, hookEntry(a, display))
 	hooksMap["SessionStart"] = list
 	doc["hooks"] = hooksMap
 
