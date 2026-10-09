@@ -84,14 +84,13 @@ func Uninstall(args []string) int {
 		// ⚠ 必须先于 hooks.Uninstall 计算：判据是「谁还装着钩子」，钩子一摘就判不出来了。
 		keep := remainingPeers(a, ws)
 
-		noun := "hook"
-		if a.Style == "dsh" {
-			noun = "plugin"
-		}
-		if err := hooks.Uninstall(a, ws); err != nil {
-			fmt.Fprintf(os.Stderr, "  ✗ %-10s %s: %v\n", a.ID, noun, err)
+		if a.Style == "external" {
+			// 宿主侧插件由宿主自己的命令移除；rulemux 只负责收敛下面的规则目录。
+			fmt.Printf("  · %-10s plugin is installed by the host — remove it with the host's own command (dsh: `dsh plugin ... remove`)\n", a.ID)
+		} else if err := hooks.Uninstall(a, ws); err != nil {
+			fmt.Fprintf(os.Stderr, "  ✗ %-10s hook: %v\n", a.ID, err)
 		} else {
-			fmt.Printf("  ✓ %-10s %s removed (%s)\n", a.ID, noun, a.HookFileAbs(ws))
+			fmt.Printf("  ✓ %-10s hook removed (%s)\n", a.ID, a.HookFileAbs(ws))
 		}
 
 		if dir := a.RulesDirAbs(ws); dir != "" {
@@ -124,7 +123,7 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 	fmt.Printf("\nrulemux uninstall: about to remove rulemux from %d agent(s) in %s\n", len(targets), ws)
 	for _, a := range targets {
 		what := "hook"
-		if a.Style == "dsh" {
+		if a.Style == "external" {
 			what = "plugin"
 		}
 		kind := what + " only"

@@ -45,6 +45,7 @@ directory and hook location have been confirmed by a real canary test. Today:
 | trae (Trae) | Tier-1 | `.trae/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
 | codex | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |
 | opencode | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |
+| **dsh** (DeepSeek Harness) | Tier-1 (real copy) | `.dsh/rules/` | ✅ **Verified — installable**; the reading half is a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only syncs; it does not install the plugin) |
 
 - `rulemux init` **refuses** any agent that is not verified — it will not half-install an adapter
   whose behaviour has not been proven. `rulemux doctor` marks unverified agents with ⚠.
@@ -52,6 +53,10 @@ directory and hook location have been confirmed by a real canary test. Today:
   single `AGENTS.md`). It injects via the session hook and never touches your own `AGENTS.md`, but
   it cannot satisfy the "never fades out" bar. See
   [design/features/hook-injection.md](docs/design/features/hook-injection.md).
+- **dsh is a two-part story**: it has no hook file. rulemux writes `.dsh/rules/` (Tier-1); a
+  **separate plugin package** in this repo ([`dsh-plugin/`](dsh-plugin/)) reads it back, installed
+  the normal dsh way (`dsh plugin add rulemux-dsh`). So `rulemux init --agent dsh` installs nothing
+  — it just prints the plugin command.
 
 ---
 

@@ -1,53 +1,58 @@
 # DSH（DeepSeek Harness）适配器
 
-> 状态：🔧 进行中（2026-10-09 开块，方案 A 已拍板）
+> 状态：🔧 进行中（2026-10-09 开块；2026-10-10 定稿为「仓库子包」方案）
 > 类型：新 agent 适配器（plugin-first 宿主）
-> 关联：`docs/design/external/agent-rules-dirs.md` §一 DSH 行 · `docs/PROGRESS.md` T3
+> 关联：`docs/design/external/agent-rules-dirs.md` §一 DSH 行 · `docs/PROGRESS.md` T3 · 子包 [`dsh-plugin/`](../../dsh-plugin/)
 
-## 拍板的方案（A）
+## 定稿方案：写一半（Go 同步）+ 读一半（仓库子包插件）
 
-DSH 是 **plugin-first** 宿主（Cordis 生命周期事件），**没有 hook binary**，也不原生扫描规则目录。
-rulemux 适配 = **Go 二进制把规则真实拷贝进 `<cwd>/.dsh/rules`** + **一个小 Cordis 插件在 `agent/pre-step` 读取并注入为 recall 消息**。
+DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook binary**，也**不原生扫描规则目录**。所以 rulemux 拆成两半：
 
-- 守住三条不变量：真实文件（非软链）/ engine 删残留（不累积）/ 每回合 pre-step 重注（不淡出）。
-- **两阶段，都只跑一次，不每轮**：① `rulemux sync`（比+拷）只在 `agent/session-start` 或手动跑一次；② inject 只在首个带用户输入的 `agent/pre-step` 注入一次，规则留在历史；compaction 把它挤掉后才补回（照 dsh-loulan-rules）。per-turn 插件只做亚毫秒的本地读，绝不和中央源比。
-- **token 成本与 Trae/CodeBuddy 原生载入文件完全相同**：进上下文的是同一段规则文本，字节一致；「注入」只是 DSH 无原生规则目录扫描器时的通路，不额外增 token（仅 recall 标签几个 token，可忽略）。
+| 半边 | 谁做 | 落点 |
+|---|---|---|
+| **写**（把规则真实拷贝进工作区） | rulemux 的 Go 二进制 | `rulemux sync` → `<cwd>/.dsh/rules/__rulemux__*.md` |
+| **读**（读回来注入会话） | **仓库子包 `dsh-plugin/`**（npm 名 `rulemux-dsh`） | 插件在 `agent/pre-step` 读 `.dsh/rules/__rulemux__*.md` 注入一次 |
+
+- 插件**按 DSH 正常方式安装**：`dsh plugin --profile <p> add rulemux-dsh`（npm 包，或本地 `npm pack` 出的 `.tgz`）。
+  rulemux **不**替它装 ⇒ registry 里 `dsh` 的 `Style="external"`（init/doctor 只打印装插件提示，uninstall 只收敛规则目录）。
+- 守住三条不变量：真实文件（非软链）/ engine 删残留（不累积）/ 首轮 pre-step 注入一次（不淡出）。
+- **两阶段都只跑一次，不每轮**：`agent/session-start` 触发一次 `rulemux sync`；`agent/pre-step` 只在首个带用户输入的回合注入一次，compaction 挤掉后才补回。per-turn 只做亚毫秒本地读。
+- **token 成本与 Trae/CodeBuddy 原生载入文件完全相同**（同一段文本、字节一致）。
+
+> 历史：曾按「方案 A」把它做成 Go 二进制内嵌插件 + `rulemux init --agent dsh`（含 `internal/hooks/dsh.go`、`assets/rulemux-dsh.js`）。
+> 2026-10-10 用户否决 A（那不是 DSH 生态的正常装法，且与子包路径会重复注入），改为本节子包方案，**A 的代码已删除**。
 
 ## 真源（已查，非文档推测）
 
 | 事实 | 出处 |
 |---|---|
-| DSH plugin-first，canonical 扩展面是 Cordis 生命周期事件，无 hook binary | `/code/fork/hindsight/hindsight-integrations/coding-agents/src/dsh.ts:1-24` |
-| 通过 `$DSH_HOME/cordis.patch.yml`（顶层 YAML 数组）加载插件，`name` 须 `file://` URL，`dsh web` 热加载 | `/code/fork/hindsight/.../src/installer.ts:18,1742-1788` |
-| `.dsh/rules` + `$DSH_HOME/rules` 由插件在 pre-step 读取注入，compaction 遮蔽后自动补回 | `/code/fork/awesome-dsh-plugin/README.zh.md:1650`（dsh-loulan-rules） |
-| rulemux 三条不变量；hook 文本注入动态区列为非交付形态 | Hindsight 知识页 *Core concepts* |
-
-## 待办（实现顺序）
-
-1. **读 `internal/engine`**：确认 Tier 分类（DSH 是「真实落盘 `.dsh/rules` 但靠插件注入」的杂交形态）与 `RulesDir` 驱动逻辑——决定 registry 条目填 `Tier1` 还是 `Tier2`。🔴 未定。
-2. **写 `dsh` registry 条目**（`internal/agents/registry.go`）：`RulesDir: ".dsh/rules"`、`Verified: false`、注释标 🔴 canary 待补。
-3. **写最小 Cordis 插件**（`dist/dsh.js` 或打包产物）：`agent/session-start` 触发一次 `rulemux sync`；`agent/pre-step` 仅在首个带用户输入的回合注入一次 `.dsh/rules/*.md`（+ `$DSH_HOME/rules`）为 `plugin:rulemux` recall 消息（照 `dsh.ts` 的 `injectionMessage`），并检测 compaction 遮蔽后补回；**per-turn 不做 sync/比对**。比 hindsight runtime 轻：只读取注入，无记忆逻辑。
-4. **`init` 安装**：在 `$DSH_HOME/cordis.patch.yml` 写带标记块的 `insert` 行（`file://` 指向插件），uninstall 用标记块移除——照 `installer.ts:1716-1788` 幂等写法。
-5. **范围**：先每工作区 `.dsh/rules`；`$DSH_HOME/rules` 全局规则需 rulemux 目前没有的「用户级 sources」概念，留二期。
-6. **🔴 canary**：本机装 DSH，跑 `rulemux verify` 坐实注入后把 `Verified` 置真、回写 `agent-rules-dirs.md` §四。
-
-## 未决 / 风险
-
-- 本机**未装 DSH 运行时** → 所有 DSH 事实（`.dsh/rules` 为 canonical 目录、pre-step 注入生效）目前依据 hindsight 反向工程 + dsh-loulan-rules 约定，**非 DSH 官方文档/本机实测**。装一次才能坐实。
-- 是否 DSH 新版本已原生读 `.dsh/rules`（使插件不再必要）？canary 时复核。
-- 单 Go 二进制 + 一个 JS 插件的形态，是 hindsight 也做的同样让步；用户已接受。
+| DSH plugin-first，canonical 扩展面是 Cordis 生命周期事件，无 hook binary | `hindsight-integrations/coding-agents/src/dsh.ts:1-24` |
+| 一个包既是 CLI 又是 DSH 插件：`package.json` 的 `dsh.bundle.patch` + 根目录 `cordis.patch.yml` | `hindsight-integrations/coding-agents/{package.json,cordis.patch.yml}` |
+| DSH 插件是 monorepo 里的**子包**（`hindsight-integrations/*` 一大家），**不是**独立仓库 | `/code/fork/hindsight/hindsight-integrations/` |
+| 正规安装：`dsh plugin --profile web add <pkg>`；本地装 = 打包 **`.tgz`** 再 `dsh plugin add ./x.tgz` | 用户插件 `dsh-session-title-pattern/DEVELOPMENT.md`、市场条目 `dsh-local-installer` |
+| `.dsh/rules` + `$DSH_HOME/rules` 由插件在 pre-step 读取注入，compaction 遮蔽后自动补回 | `awesome-dsh-plugin/README.zh.md:1650`（dsh-loulan-rules） |
+| rulemux 三条不变量；「hook 文本注入动态区」列为非交付形态 | Hindsight 知识页 *Core concepts* |
+| DSH 当初被定为「以插件市场解决」 | `docs/design/requirements.md:42` |
 
 ## 实现进展（2026-10-10）
 
-代码已落地并 `go build` / `go test ./...` 通过（新增单测 `internal/hooks/dsh_test.go`）：
-
 | 步骤 | 状态 | 落点 |
 |---|---|---|
-| registry `dsh` 条目 | ✅ | `internal/agents/registry.go`（Tier1、`.dsh/rules`、Style=dsh、`DSH_HOME`、`Verified=false`） |
-| 嵌入式 Cordis 插件 | ✅ | `internal/hooks/assets/rulemux-dsh.js`（go:embed） |
-| 安装/刷新/检查/卸载 | ✅ | `internal/hooks/dsh.go`（幂等标记块、`[]` 归一、保留他人行）+ `install.go` 七处分派 |
-| CLI 输出分支 | ✅ | `init.go`（plugin registered）/ `doctor.go`（Plugin 三态）/ `uninstall.go`（plugin removed） |
-| 文档回写 | ✅ | 本节 + `design/features/dir-sync.md` DSH 一节 |
-| **canary 坐实** | 🔴 待办（已先行开放） | 2026-10-10 用户拍板把 `Verified` 置 `true` 先行开放（本机无 dsh 跑不了 canary）；真机待办不变：装 dsh → `rulemux verify --agent dsh` → 新会话核验注入 |
+| 子包（插件） | ✅ | `dsh-plugin/`（`package.json` 的 `dsh.bundle.patch`、`cordis.patch.yml`、`index.mjs`、`README.md`） |
+| registry `dsh` 条目 | ✅ | `internal/agents/registry.go`（Tier1、`.dsh/rules`、`Style="external"`、`Verified=true`） |
+| Go 侧「不装宿主配置」 | ✅ | `internal/hooks/install.go` 的 `ErrHookExternal`；init/doctor/uninstall 提示分支 |
+| 移除旧方案 A | ✅ | 删 `internal/hooks/dsh.go`、`assets/rulemux-dsh.js`、`dsh_test.go` |
+| 验证 | ✅ | `go build` / `go vet` / `go test ./...` 全绿；`npm pack --dry-run` 4 文件、`node --check` 通过 |
+| **canary 坐实** | 🔴 待办 | 本机无 dsh；需在装了 dsh 的机器装插件并核验注入 |
 
-设计细节沿用前面各节：`Tier1`（真实拷贝）+ 插件只读 `__rulemux__*`、首轮注入一次、compaction 补回（仅在宿主能证明确实丢了时才补，避免每轮重注）。
+## 待办 / 未决
+
+1. **🔴 canary**：装 dsh → `dsh plugin --profile web add rulemux-dsh`（或 `.tgz`）→ `rulemux sync --hook --agent dsh`（或由插件自动触发）→ 新会话核验规则被读到。坐实后回写 `agent-rules-dirs.md` §四 并复核 `Verified` 语义。
+2. **发 npm？**：用户口径「能发就发，发不了 git 装也行」——包已可 `npm pack`，是否 publish 待定。
+3. **二期**：`$DSH_HOME/rules` 全局规则需 rulemux 目前没有的「用户级 sources」概念，暂不做。
+
+## 风险
+
+- 本机无 dsh ⇒ 插件能否被 `dsh plugin add` 正常加载、事件名是否匹配、面板是否显示，**均未真机验证**；照用户已跑通的两个插件与 hindsight 子包布局照抄。
+- 插件声明了 `rulemux`（npm）依赖以触发 sync；在未发布 / 离线环境装插件时该依赖可能解析失败 —— 届时可去掉依赖，插件退回「只读 `.dsh/rules`」（仍能注入，只是不会自动 sync）。
+- **git 直装子包未核实**：`dsh plugin add github:cq-guojia/rulemux` 会解析到**仓库根**（Go CLI 包），不是 `dsh-plugin/`。子包期间只能走 **npm 发布** 或**本地 `.tgz`**；若日后要 git 直装，需另想办法（如把子包拆成独立仓库 / 打 tag 指向子目录）。

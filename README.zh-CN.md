@@ -39,12 +39,16 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 | trae（Trae） | Tier-1 | `.trae/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
 | codex | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |
 | opencode | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |
+| **dsh**（DeepSeek Harness） | Tier-1（真实拷贝） | `.dsh/rules/` | ✅ **已验证，可安装**；读取那半由**独立的 dsh 插件**做 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责同步，不替你装插件） |
 
 - `rulemux init` **会拒绝**未验证的 agent —— 不会给你装一个行为未经验证的半成品。
   `rulemux doctor` 会给未验证的 agent 标 ⚠。
 - **Tier-2 是刻意的降级**：面向没有规则目录、只认单个 `AGENTS.md` 的 agent，走会话钩子注入，
   且绝不碰你自己的 `AGENTS.md`；但它满足不了「永不淡出」。见
   [`docs/design/features/hook-injection.md`](docs/design/features/hook-injection.md)。
+- **dsh 是「两半」的故事**：它没有钩子配置文件。rulemux 负责写 `.dsh/rules/`（Tier-1）；读取那半由本仓库里
+  **独立的插件包** [`dsh-plugin/`](dsh-plugin/) 做，按 dsh 正常方式安装（`dsh plugin add rulemux-dsh`）。
+  所以 `rulemux init --agent dsh` 什么都不装 —— 只打印插件安装命令。
 
 ---
 

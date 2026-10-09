@@ -181,18 +181,18 @@ func Init(args []string) int {
 	// 2. install the SessionStart hook (or, for plugin hosts, the plugin) for the requested agents only
 	fmt.Println("\nInstalling SessionStart hooks:")
 	for _, ar := range targets {
-		p, err := hooks.Install(ar.Agent, ws, ar.Display)
-		if err != nil {
-			fmt.Printf("  ✗ %-10s %v\n", ar.Agent.ID, err)
-			continue
-		}
 		mark := "✓"
 		if !ar.Agent.Verified {
 			mark = "⚠"
 		}
-		if ar.Agent.Style == "dsh" {
-			// dsh 装的是原生 Cordis 插件（patch 行），不是钩子命令行。
-			fmt.Printf("  %s %-10s plugin registered → %s\n", mark, ar.Display, p)
+		if ar.Agent.Style == "external" {
+			// 宿主侧插件由宿主自己的命令安装，rulemux 只负责同步规则。
+			fmt.Printf("  %s %-10s no hook to install — add the plugin with the host's own command (dsh: `dsh plugin --profile <p> add rulemux-dsh`)\n", mark, ar.Display)
+			continue
+		}
+		p, err := hooks.Install(ar.Agent, ws, ar.Display)
+		if err != nil {
+			fmt.Printf("  ✗ %-10s %v\n", ar.Agent.ID, err)
 			continue
 		}
 		// 回显用用户写的标识（如 workbuddy），让用户面与安装命令一致。
@@ -241,6 +241,9 @@ func refreshHooks(agentArg string, f *Flags) int {
 
 		installed, cmd, err := hooks.Inspect(path, a)
 		switch {
+		case errors.Is(err, hooks.ErrHookExternal):
+			fmt.Printf("  · %-10s skipped: plugin is installed by the host, not by rulemux%s\n", a.ID, src)
+			continue
 		case errors.Is(err, hooks.ErrRefreshUnsupported):
 			fmt.Printf("  · %-10s skipped: hook config format not verified yet%s\n", a.ID, src)
 			continue

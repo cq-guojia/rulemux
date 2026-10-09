@@ -189,34 +189,25 @@ var registry = []Agent{
 		Note:     "Only reads a single-file AGENTS.md, so it goes through SessionStart injection and never touches your own AGENTS.md.",
 	},
 	{
-		// DeepSeek Harness (dsh) is plugin-first: it has NO hook config file and does NOT scan a
-		// rules directory natively. Its canonical extension surface is a set of Cordis lifecycle
-		// events, loaded via $DSH_HOME/cordis.patch.yml. rulemux therefore does BOTH:
-		//   - sync real copies into <workspace>/.dsh/rules (Tier-1: real dir, real files);
-		//   - install a tiny native Cordis plugin (Style="dsh") that, at agent/pre-step, reads
-		//     those copies back and injects them once — the plugin is dsh's stand-in for a host
-		//     that natively reads a rules dir.
-		// Reusing the existing "user-level config dir override" mechanism for DSH_HOME is exact:
-		// dsh resolves its home as $DSH_HOME else ~/.dsh (hindsight installer.ts:1742-1745).
-		// 2026-10-10 用户拍板「先行开放」（本机无 dsh 可跑 canary）⇒ Verified=true 让 init/verify 可用。
-		// ⚠ 语义漂移：本仓库 Verified 原义为「canary 坐实」，此处是「由用户决定先行开放」；
-		// 注入链路仍未在真机坐实，跑过一次真 dsh 后据此复核（docs/worklog/dsh-adapter.md）。
+		// DeepSeek Harness (dsh) is plugin-first: no hook config file, and it does NOT scan a rules
+		// directory on its own. rulemux's share is the WRITE half — sync real copies into
+		// <workspace>/.dsh/rules (Tier-1: a real dir, real files). The READ half is a separate dsh
+		// plugin package shipped as the repo sub-package `dsh-plugin/` (name `rulemux-dsh`), installed
+		// the normal dsh way: `dsh plugin --profile <p> add rulemux-dsh` (npm, a packed .tgz, or git).
+		// rulemux therefore does NOT install it ⇒ Style "external": init/doctor print the install
+		// hint, uninstall only prunes the rules dir and leaves the host config alone.
 		ID:       "dsh",
 		Aliases:  []string{"deepseek", "deepseek-harness"},
 		Tier:     Tier1,
 		RulesDir: ".dsh/rules",
-		HookFile: "~/.dsh/cordis.patch.yml",
-		HookAbs:  true,
-		// dsh home = $DSH_HOME else ~/.dsh；插件 patch 落在此目录下。
-		HookDirEnv:   "DSH_HOME",
-		HookFileBase: "cordis.patch.yml",
-		Style:        "dsh",
-		// 先行开放（见上）；canary 坐实后复核语义。
+		Style:    "external",
+		// 2026-10-10 用户拍板先行开放（本机无 dsh 可跑 canary）：sync/verify 可用。
+		// ⚠ 语义漂移：Verified 原义为「canary 坐实」，此处是「由用户决定先行开放」；真机跑过后复核。
 		Verified: true,
 		// 插件每会话首轮现读 .dsh/rules ⇒ 无 CodeBuddy 式「差一拍」，不需要变化提示。
 		SessionHint:  false,
 		HintProtocol: "",
-		Note:         "Plugin-first host: loads a native Cordis plugin from $DSH_HOME/cordis.patch.yml and has NO hook binary (hindsight src/dsh.ts:1-24, installer.ts:1716-1788). rulemux syncs real copies into .dsh/rules and installs a minimal Cordis plugin that injects them once at agent/pre-step. Enabled 2026-10-10 by user decision (no dsh runtime was available to run canary); the injection chain is still unverified on a real dsh — re-check after one real session (docs/worklog/dsh-adapter.md).",
+		Note:         "Plugin-first host (no hook binary). rulemux syncs real copies into .dsh/rules; the reading half is the repo sub-package `dsh-plugin/` (npm name `rulemux-dsh`), installed via `dsh plugin --profile <p> add rulemux-dsh` — rulemux does not install it (Style \"external\"). Enabled 2026-10-10 by user decision (no dsh runtime available for canary); the injection chain is still unverified on a real dsh — re-check after one real session (docs/worklog/dsh-adapter.md).",
 	},
 }
 
@@ -321,6 +312,11 @@ func (a Agent) HookFileAbs(workspace string) string {
 // HookFileAbsWithSource 与 HookFileAbs 相同，但额外返回「目录被哪个环境变量覆盖」
 // （未覆盖时为空串）。供 doctor 解释路径来源：用户设过环境变量时能一眼看出为什么是这个路径。
 func (a Agent) HookFileAbsWithSource(workspace string) (path string, envUsed string) {
+	// 无宿主配置文件的 agent（Style "external"：插件由宿主自己的命令安装）⇒ 空路径，
+	// 让 Inspect/doctor 一眼看出「没有可装的钩子」，而不是误拼成 workspace 本身。
+	if a.HookFile == "" {
+		return "", ""
+	}
 	if a.HookAbs {
 		if d := a.configDirOverride(); d != "" {
 			return filepath.Join(d, a.HookFileBase), a.HookDirEnv

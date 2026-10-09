@@ -1,25 +1,27 @@
 /**
- * rulemux-dsh.js — a minimal native Cordis plugin for DeepSeek Harness (dsh).
+ * rulemux-dsh — a native Cordis plugin for DeepSeek Harness (dsh).
  *
- * dsh is plugin-first: it loads this file from $DSH_HOME/cordis.patch.yml and exposes typed
- * lifecycle events. rulemux already copies the user's rule files into <cwd>/.dsh/rules/__rulemux__*.md
- * (real file copies, never symlinks); this plugin only READS them back and injects them into the
- * session's context, once, so the agent sees them exactly as a host that natively scans a rules dir
- * would. Token cost is identical to such a host: the same rule text ends up in context.
+ * dsh is plugin-first: it loads this file through the profile layer (package.json declares
+ * `dsh.bundle.patch` → cordis.patch.yml) and exposes typed lifecycle events. rulemux already
+ * copies the user's rule files into <cwd>/.dsh/rules/__rulemux__*.md (real file copies, never
+ * symlinks); this plugin only READS them back and injects them into the session's context, once,
+ * so the agent sees them exactly as a host that natively scans a rules dir would. Token cost is
+ * identical to such a host: the same rule text ends up in context.
  *
  * It imports nothing from dsh: every host shape is structurally typed here, so any dsh whose event
- * names still match can load it (same approach as hindsight's coding-agents src/dsh.ts).
+ * names still match can load it (same approach hindsight's coding-agents uses in its src/dsh.ts).
  *
  * Why inject ONCE, not every turn: the rules are static, so re-adding them per turn would duplicate
- * the same text in history and waste tokens. We inject on the first user-prompt step of a session and
- * leave the block in history. If compaction later drops it, we re-inject on the next user turn — but
- * only when we can POSITIVELY tell the host had been holding our block (see stillInContext).
+ * the same text in history and waste tokens. We inject on the first user-prompt step of a session
+ * and leave the block in history. If compaction later drops it, we re-inject on the next user turn —
+ * but only when we can POSITIVELY tell the host had been holding our block (see stillInContext).
  */
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 export const name = "rulemux";
 export const inject = ["agents"];
@@ -28,6 +30,23 @@ const RULES_SUBDIR = ".dsh/rules"; // where `rulemux sync` drops the copies (wor
 const FILE_PREFIX = "__rulemux__"; // rulemux's ownership prefix: other files are never read
 const MANAGED_HEADER = "<!-- rulemux:managed -->"; // marks our injected block (re-injection check)
 const SOURCE_KIND = "plugin:rulemux"; // producer-owned source kind dsh expects for injected messages
+
+const require_ = createRequire(import.meta.url);
+
+/**
+ * How to invoke the rulemux CLI. Prefer the copy installed alongside us as an npm dependency (so
+ * `dsh plugin add rulemux-dsh` is a one-command install); fall back to `rulemux` on PATH.
+ */
+function rulemuxCommand() {
+  try {
+    const pkg = require_.resolve("rulemux/package.json");
+    const shim = join(dirname(pkg), "bin", "rulemux.js");
+    if (existsSync(shim)) return { cmd: process.execPath, args: [shim] };
+  } catch {
+    /* not installed as a dependency */
+  }
+  return { cmd: "rulemux", args: [] };
+}
 
 /** The directory a session is working in (dsh records it on the session header). */
 function workspaceRoot(agent) {
@@ -55,8 +74,8 @@ function readRules(root) {
 /**
  * Run `rulemux sync` once so the on-disk copies are current before we read them.
  *
- * Fire-and-store: the returned promise is awaited by the first pre-step. Missing binary (not on
- * PATH) is not fatal — we simply read whatever is already on disk.
+ * Fire-and-store: the returned promise is awaited by the first pre-step. A missing binary (neither
+ * a dependency nor on PATH) is not fatal — we simply read whatever is already on disk.
  */
 function runSync(root) {
   return new Promise((resolve) => {
@@ -67,8 +86,9 @@ function runSync(root) {
         resolve();
       }
     };
+    const { cmd, args } = rulemuxCommand();
     try {
-      const child = spawn("rulemux", ["sync", "--hook", "--agent", "dsh"], {
+      const child = spawn(cmd, [...args, "sync", "--hook", "--agent", "dsh"], {
         cwd: root,
         stdio: "ignore",
       });
@@ -111,7 +131,7 @@ function stillInContext(session) {
   }
 }
 
-/** Per-session state, built once per session id (the plugin process serves many sessions). */
+/** Per-session state, built once per session id (one dsh process serves many sessions). */
 const sessions = new Map(); // sessionId -> { root, sync, injected, observed }
 
 function stateFor(agent) {

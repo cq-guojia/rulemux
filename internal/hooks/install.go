@@ -35,10 +35,9 @@ func Install(a agents.Agent, workspace, display string) (string, error) {
 		return path, installJSON(path, a, display)
 	case "codex":
 		return path, installCodex(path, a.ID)
-	case "dsh":
-		// dsh 装的不是钩子，而是一个原生 Cordis 插件（见 dsh.go）。display 对它无意义。
-		_, err := installDshPlugin(a, workspace)
-		return path, err
+	case "external":
+		// 宿主侧配置不由 rulemux 安装（如 dsh 的 Cordis 插件走宿主自己的 `dsh plugin add`）。
+		return path, fmt.Errorf("%w: %s", ErrHookExternal, a.ID)
 	default:
 		return path, fmt.Errorf("unknown hook config style %q", a.Style)
 	}
@@ -47,15 +46,16 @@ func Install(a agents.Agent, workspace, display string) (string, error) {
 // ErrRefreshUnsupported 表示该 agent 的钩子配置格式尚未核实，因此刷新会跳过、绝不改文件。
 var ErrRefreshUnsupported = errors.New("hook config style not verified for refresh")
 
+// ErrHookExternal 表示该 agent 的宿主侧配置不由 rulemux 安装：它的插件经宿主自己的插件命令安装
+// （如 dsh 的 `dsh plugin --profile <p> add rulemux-dsh`）。Inspect/Refresh 因此直接跳过、
+// 绝不误改；doctor 与 init 会打印对应提示；uninstall 只收敛规则目录、不碰宿主配置。
+var ErrHookExternal = errors.New("host config is installed externally, not by rulemux")
+
 // TargetCommand 是当前代码期望写进该 agent 钩子的完整命令行（规范 ID 版）。
 //
 // 参数必须写进 command 整串，不能用单独的 args 字段：宿主（如 CodeBuddy）只执行 command
 // 字段本身、会丢弃 args（实测见 docs/design/external/agent-rules-dirs.md §二）。
 func TargetCommand(a agents.Agent) string {
-	// dsh 的「安装项」不是命令行，而是 patch 里的插件 file:// URL（见 dsh.go）。
-	if a.Style == "dsh" {
-		return dshPluginURL(a)
-	}
 	return TargetCommandFor(a, "")
 }
 
@@ -91,9 +91,6 @@ func AgentTokenOf(line string) string {
 // cur 取不到标识时回退到规范 ID。用于 doctor 与 refresh 的比对：既不会把 workbuddy 误判为
 // 过期，也不会让自愈把 workbuddy 悄悄改回 codebuddy。
 func ExpectedCommand(a agents.Agent, cur string) string {
-	if a.Style == "dsh" {
-		return dshPluginURL(a)
-	}
 	if tok := AgentTokenOf(cur); tok != "" {
 		return TargetCommandFor(a, tok)
 	}
@@ -133,9 +130,6 @@ func Inspect(path string, a agents.Agent) (installed bool, command string, err e
 	if err := checkRefreshable(a); err != nil {
 		return false, "", err
 	}
-	if a.Style == "dsh" {
-		return inspectDsh(path)
-	}
 	doc, err := loadHookJSON(path)
 	if err != nil || doc == nil {
 		return false, "", err
@@ -154,9 +148,6 @@ func Inspect(path string, a agents.Agent) (installed bool, command string, err e
 func Refresh(path string, a agents.Agent) (changed bool, err error) {
 	if err := checkRefreshable(a); err != nil {
 		return false, err
-	}
-	if a.Style == "dsh" {
-		return refreshDsh(path, a)
 	}
 	doc, err := loadHookJSON(path)
 	if err != nil || doc == nil {
@@ -179,9 +170,9 @@ func checkRefreshable(a agents.Agent) error {
 	switch a.Style {
 	case "claude", "trae", "json":
 		return nil
-	case "dsh":
-		// dsh 的 patch 是纯文本标记块（dsh.go），可安全解析与刷新。
-		return nil
+	case "external":
+		// 宿主侧配置由宿主自己的插件命令安装，rulemux 不解析、不刷新、不误改。
+		return fmt.Errorf("%w (agent %s)", ErrHookExternal, a.ID)
 	case "codex":
 		// codex 的钩子 schema 尚未核实（见 registry 的 Note）。不能拿未核实的 TOML 解析
 		// 结果去改用户文件 ⇒ 刷新直接跳过。它的 adapter 目前也装不上（Verified=false）。
@@ -426,8 +417,9 @@ func Uninstall(a agents.Agent, workspace string) error {
 		return uninstallJSON(path, a)
 	case "codex":
 		return uninstallCodex(path, a.ID)
-	case "dsh":
-		return uninstallDsh(path, a)
+	case "external":
+		// 宿主侧配置由宿主自己的插件命令移除；rulemux 只负责收敛规则目录（由 caller 处理）。
+		return nil
 	default:
 		return fmt.Errorf("unknown hook style %q", a.Style)
 	}

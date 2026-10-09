@@ -1,0 +1,15 @@
+# rulemux: deliver the rules rulemux syncs into <workspace>/.dsh/rules to a dsh session.
+#
+# Installed through the normal dsh plugin route — `dsh plugin --profile <name> add rulemux-dsh`
+# (from npm, a local .tgz, or git). Because package.json declares `dsh.bundle.patch`, that command
+# appends this file to the profile's ordered bundle list; nothing else needs editing. The row below
+# mounts on the host plane, where agent/session-start and agent/pre-step reach every session.
+#
+# `name` is a bare package specifier, resolved from the profile's node_modules (see dsh's own
+# plugins). To disable it without uninstalling, patch this row in the profile's cordis.patch.yml:
+#
+#   - id: rulemux
+#     disabled: true
+- insert:
+    - id: rulemux
+      name: "rulemux-dsh"

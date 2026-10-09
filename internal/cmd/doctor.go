@@ -89,33 +89,33 @@ func Doctor(args []string) int {
 			fmt.Println("      Rules dir: none (Tier-2, injected via SessionStart)")
 		}
 
-		// 钩子三态：已装且最新 / 已装但格式过期（如升级后还缺 --hook）/ 未装。
+		// 宿主侧配置三态：已装且最新 / 已装但格式过期（如升级后还缺 --hook）/ 未装。
 		// 光看文件里有没有 "rulemux" 字样是不够的 —— 那样旧格式也会显示 ✓（见设计 §9.1）。
-		hookPath, envUsed := a.HookFileAbsWithSource(ws)
-		srcNote := ""
-		if envUsed != "" {
-			srcNote = fmt.Sprintf(" [dir from $%s]", envUsed)
-		}
-		installed, cmd, err := hooks.Inspect(hookPath, a)
-		// dsh 的「安装项」是一个 Cordis 插件（patch 里的 file:// URL），措辞用 Plugin 更准。
-		label := "Hook"
-		if a.Style == "dsh" {
-			label = "Plugin"
-		}
-		switch {
-		case errors.Is(err, hooks.ErrRefreshUnsupported):
-			fmt.Printf("      %s: ? unchecked → %s%s (hook config format not verified yet)\n", label, hookPath, srcNote)
-		case err != nil:
-			fmt.Printf("      %s: ⚠ unreadable → %s%s: %v\n", label, hookPath, srcNote, err)
-		case !installed:
-			fmt.Printf("      %s: ✗ not installed → %s%s (run rulemux init --agent %s)\n", label, hookPath, srcNote, a.ID)
-		case cmd == hooks.ExpectedCommand(a, cmd):
-			fmt.Printf("      %s: ✓ installed, up to date → %s%s\n", label, hookPath, srcNote)
-		default:
-			fmt.Printf("      %s: ⚠ installed but OUTDATED → %s%s\n", label, hookPath, srcNote)
-			fmt.Printf("            found:    %s\n", cmd)
-			fmt.Printf("            expected: %s\n", hooks.ExpectedCommand(a, cmd))
-			fmt.Printf("            fix: rulemux init --refresh\n")
+		// Style "external"（如 dsh）没有 rulemux 可装的宿主配置，单独说明。
+		if a.Style == "external" {
+			fmt.Println("      Plugin: external — installed by the host, not by rulemux (dsh: `dsh plugin --profile <p> add rulemux-dsh`)")
+		} else {
+			hookPath, envUsed := a.HookFileAbsWithSource(ws)
+			srcNote := ""
+			if envUsed != "" {
+				srcNote = fmt.Sprintf(" [dir from $%s]", envUsed)
+			}
+			installed, cmd, err := hooks.Inspect(hookPath, a)
+			switch {
+			case errors.Is(err, hooks.ErrRefreshUnsupported):
+				fmt.Printf("      Hook: ? unchecked → %s%s (hook config format not verified yet)\n", hookPath, srcNote)
+			case err != nil:
+				fmt.Printf("      Hook: ⚠ unreadable → %s%s: %v\n", hookPath, srcNote, err)
+			case !installed:
+				fmt.Printf("      Hook: ✗ not installed → %s%s (run rulemux init --agent %s)\n", hookPath, srcNote, a.ID)
+			case cmd == hooks.ExpectedCommand(a, cmd):
+				fmt.Printf("      Hook: ✓ installed, up to date → %s%s\n", hookPath, srcNote)
+			default:
+				fmt.Printf("      Hook: ⚠ installed but OUTDATED → %s%s\n", hookPath, srcNote)
+				fmt.Printf("            found:    %s\n", cmd)
+				fmt.Printf("            expected: %s\n", hooks.ExpectedCommand(a, cmd))
+				fmt.Printf("            fix: rulemux init --refresh\n")
+			}
 		}
 		if a.Note != "" {
 			fmt.Printf("      Note: %s\n", a.Note)
