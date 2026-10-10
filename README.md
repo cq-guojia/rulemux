@@ -34,17 +34,17 @@ One source of truth (your own .md files, declared in ~/.rulemux/config.toml)
 │   │
 │   ├─ Layer 2 · dev rules
 │   │   ├─ Layer 3 · mini-app rules
-│   │   │     └─ Layer 4 · … · Layer N   as deep as you like
+│   │   │   └─ …
 │   │   ├─ Layer 3 · backend rules
-│   │   │     └─ …
+│   │   │   └─ …
 │   │   └─ Layer 3 · client-side rules
-│   │         └─ …
+│   │       └─ …
 │   │
 │   └─ Layer 2 · non-dev rules
 │       └─ Layer 3 · workspace daily rules …
-│             └─ …
+│           └─ …
 │
-└─ Bottom layer (Layer N) · one workspace's own rules ──► only in that workspace
+└─ Layer 4 · one workspace's own rules ──► only in that workspace
 
               rulemux sync  ↓  real copies (never fades out / never accumulates / no symlinks)
 
@@ -52,15 +52,15 @@ One source of truth (your own .md files, declared in ~/.rulemux/config.toml)
     workspace B ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
 ```
 
-- **Rules are reused**: a layer inherits the one above it (layer 3 inherits layer 2, layer 2
-  inherits layer 1) — write what is shared once, and get more specific as you go down.
-- **As many layers as you like**: three is just the usual cut — `use` is expanded **recursively**,
-  so you can nest as deep as you want; the bottom layer is normally "this workspace's own rules".
-  The only thing not allowed is a **cycle** (A uses B and B uses A), which fails at config load.
+- **Rules are reused**: layer 3 inherits layer 2, layer 2 inherits layer 1 — write what is shared
+  once, and get more specific as you go down.
 - **Layers fan out**: each layer declares which agents and which workspaces it applies to; no
   file is duplicated per combination.
 - **Edit once, applies everywhere**: change a sentence up top and every workspace and agent that
   inherits it is aligned on the next sync.
+- **No depth limit**: the `…` under layer 3 is a padding layer — `use` is expanded **recursively**,
+  so you can nest as deep as you like. The only thing not allowed is a **cycle**
+  (A uses B and B uses A), which fails at config load.
 
 The tree is built with `use` on `[[file_group]]` (inherit the layer above) plus `workspace` on
 `[[source]]` (where it lands):
