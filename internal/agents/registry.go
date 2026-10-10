@@ -207,7 +207,7 @@ var registry = []Agent{
 		// 插件每会话首轮现读 .dsh/rules ⇒ 无 CodeBuddy 式「差一拍」，不需要变化提示。
 		SessionHint:  false,
 		HintProtocol: "",
-		Note:         "Plugin-first host (no hook binary). rulemux syncs real copies into .dsh/rules; the reading half is the repo sub-package `dsh-plugin/` (npm name `rulemux-dsh`), installed via `dsh plugin --profile <p> add rulemux-dsh` — rulemux does not install it (Style \"external\"). Enabled 2026-10-10 by user decision (no dsh runtime available for canary); the injection chain is still unverified on a real dsh — re-check after one real session (docs/worklog/dsh-adapter.md).",
+		Note:         "Plugin-first host (no hook binary). rulemux syncs real copies into .dsh/rules; the reading half is the repo sub-package `dsh-plugin/` (npm name `rulemux-dsh`), installed via the dsh plugin command (`dsh plugin --profile <p> add github:cq-guojia/rulemux#path:/dsh-plugin`, or npm) — rulemux does not install it (Style \"external\"). Enabled 2026-10-10 by user decision (no dsh runtime available for canary); the injection chain is still unverified on a real dsh — re-check after one real session (docs/worklog/dsh-adapter.md).",
 	},
 }
 

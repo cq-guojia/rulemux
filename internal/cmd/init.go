@@ -187,7 +187,7 @@ func Init(args []string) int {
 		}
 		if ar.Agent.Style == "external" {
 			// 宿主侧插件由宿主自己的命令安装，rulemux 只负责同步规则。
-			fmt.Printf("  %s %-10s no hook to install — add the plugin with the host's own command (dsh: `dsh plugin --profile <p> add rulemux-dsh`)\n", mark, ar.Display)
+			fmt.Printf("  %s %-10s no hook to install — add the plugin with the host's own command, e.g. `dsh plugin --profile <p> add \"github:cq-guojia/rulemux#path:/dsh-plugin\"`\n", mark, ar.Display)
 			continue
 		}
 		p, err := hooks.Install(ar.Agent, ws, ar.Display)

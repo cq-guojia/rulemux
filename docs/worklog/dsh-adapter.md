@@ -13,7 +13,7 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 | **写**（把规则真实拷贝进工作区） | rulemux 的 Go 二进制 | `rulemux sync` → `<cwd>/.dsh/rules/__rulemux__*.md` |
 | **读**（读回来注入会话） | **仓库子包 `dsh-plugin/`**（npm 名 `rulemux-dsh`） | 插件在 `agent/pre-step` 读 `.dsh/rules/__rulemux__*.md` 注入一次 |
 
-- 插件**按 DSH 正常方式安装**：`dsh plugin --profile <p> add rulemux-dsh`（npm 包，或本地 `npm pack` 出的 `.tgz`）。
+- 插件**按 DSH 正常方式安装**（npm 非必需）：`dsh plugin --profile <p> add "github:cq-guojia/rulemux#path:/dsh-plugin"`（git 源码，子包用 `#path:/` spec）／`... add rulemux-dsh`（npm 包）／`... add ./rulemux-dsh-<v>.tgz`（本地包）。
   rulemux **不**替它装 ⇒ registry 里 `dsh` 的 `Style="external"`（init/doctor 只打印装插件提示，uninstall 只收敛规则目录）。
 - 守住三条不变量：真实文件（非软链）/ engine 删残留（不累积）/ 首轮 pre-step 注入一次（不淡出）。
 - **两阶段都只跑一次，不每轮**：`agent/session-start` 触发一次 `rulemux sync`；`agent/pre-step` 只在首个带用户输入的回合注入一次，compaction 挤掉后才补回。per-turn 只做亚毫秒本地读。
@@ -29,7 +29,7 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 | DSH plugin-first，canonical 扩展面是 Cordis 生命周期事件，无 hook binary | `hindsight-integrations/coding-agents/src/dsh.ts:1-24` |
 | 一个包既是 CLI 又是 DSH 插件：`package.json` 的 `dsh.bundle.patch` + 根目录 `cordis.patch.yml` | `hindsight-integrations/coding-agents/{package.json,cordis.patch.yml}` |
 | DSH 插件是 monorepo 里的**子包**（`hindsight-integrations/*` 一大家），**不是**独立仓库 | `/code/fork/hindsight/hindsight-integrations/` |
-| 正规安装：`dsh plugin --profile web add <pkg>`；本地装 = 打包 **`.tgz`** 再 `dsh plugin add ./x.tgz` | 用户插件 `dsh-session-title-pattern/DEVELOPMENT.md`、市场条目 `dsh-local-installer` |
+| 三条安装通道：**git 源码**（`github:owner/repo`，子包加 `#path:/<subdir>`）／ npm 包 ／ Release `.tgz`；**npm 非必需、不影响收录** | `awesome-dsh-plugin/site/locales.mjs`（GH_C/NPM_C/TGZ_C）、`scripts/lib/capabilities.mjs:44-46`（`#path:/` spec）、`scripts/scan-decay.mjs:274`、`contributing.md` |
 | `.dsh/rules` + `$DSH_HOME/rules` 由插件在 pre-step 读取注入，compaction 遮蔽后自动补回 | `awesome-dsh-plugin/README.zh.md:1650`（dsh-loulan-rules） |
 | rulemux 三条不变量；「hook 文本注入动态区」列为非交付形态 | Hindsight 知识页 *Core concepts* |
 | DSH 当初被定为「以插件市场解决」 | `docs/design/requirements.md:42` |
@@ -55,4 +55,4 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 
 - 本机无 dsh ⇒ 插件能否被 `dsh plugin add` 正常加载、事件名是否匹配、面板是否显示，**均未真机验证**；照用户已跑通的两个插件与 hindsight 子包布局照抄。
 - 插件声明了 `rulemux`（npm）依赖以触发 sync；在未发布 / 离线环境装插件时该依赖可能解析失败 —— 届时可去掉依赖，插件退回「只读 `.dsh/rules`」（仍能注入，只是不会自动 sync）。
-- **git 直装子包未核实**：`dsh plugin add github:cq-guojia/rulemux` 会解析到**仓库根**（Go CLI 包），不是 `dsh-plugin/`。子包期间只能走 **npm 发布** 或**本地 `.tgz`**；若日后要 git 直装，需另想办法（如把子包拆成独立仓库 / 打 tag 指向子目录）。
+- ~~git 直装子包未核实~~ **已核实（2026-10-10）**：子包**可以** git 直装，spec 为 `github:cq-guojia/rulemux#path:/dsh-plugin`（`#path:/<subdir>` 是 DSH 装子包的标准写法，见 `awesome-dsh-plugin/scripts/lib/capabilities.mjs:44-46`、`scripts/scan-decay.mjs:274`）。**npm 发布非必需**——git 源码安装是基线通道，`.tgz` 是另一条免 npm 路。

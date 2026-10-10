@@ -93,7 +93,7 @@ func Doctor(args []string) int {
 		// 光看文件里有没有 "rulemux" 字样是不够的 —— 那样旧格式也会显示 ✓（见设计 §9.1）。
 		// Style "external"（如 dsh）没有 rulemux 可装的宿主配置，单独说明。
 		if a.Style == "external" {
-			fmt.Println("      Plugin: external — installed by the host, not by rulemux (dsh: `dsh plugin --profile <p> add rulemux-dsh`)")
+			fmt.Println("      Plugin: external — installed by the host, not by rulemux (dsh: `dsh plugin --profile <p> add \"github:cq-guojia/rulemux#path:/dsh-plugin\"`)")
 		} else {
 			hookPath, envUsed := a.HookFileAbsWithSource(ws)
 			srcNote := ""

@@ -17,17 +17,23 @@ dsh plugin --profile <name> add rulemux-dsh
 The plugin declares `rulemux` as a dependency, so the CLI comes along; dsh installs plugin
 dependencies the usual way. (No local build is needed — `index.mjs` is plain ESM.)
 
-Alternatives:
+No npm publish is required — any of these work:
 
 ```bash
-# from a packed tarball (no npm publish needed)
+# straight from git, pointing at this sub-package. The `#path:/<subdir>` spec is how dsh
+# installs a package that lives in a subdirectory of a repo (quote it: `#` starts a shell comment).
+dsh plugin --profile <name> add "github:cq-guojia/rulemux#path:/dsh-plugin"
+
+# or from a packed tarball
 npm pack                       # -> rulemux-dsh-<version>.tgz
 dsh plugin --profile <name> add ./rulemux-dsh-<version>.tgz
 ```
 
-> This package lives in a subdirectory of the rulemux repo, so a bare `github:cq-guojia/rulemux`
-> spec would resolve the **repo root** (the Go CLI package), not this one — publish `rulemux-dsh` to
-> npm, or install the packed `.tgz`, while it is a sub-package.
+> Publishing to npm is **optional**: it lets dsh install the prebuilt package (skipping the git
+> source-build `allowBuilds` step) and gives the plugin a download count in the market — but
+> listing and installation work exactly the same with the git spec above.
+
+There is no build step: `index.mjs` is plain ESM, so a git install needs no `allowBuilds` approval.
 
 ## What it does
 

@@ -38,6 +38,6 @@
 
 - **给仓库配 `NPM_TOKEN` secret**（Settings → Secrets → Actions，Automation 类型 token）：否则 CI 的 npm 步骤按设计跳过，每次发版只能手动 `npm publish`（0.2.7 就是手动发的）。
 - `WORKBUDDY_CONFIG_DIR` 是否决定用户级配置目录：仍未坐实（产物里只在 safe-delete 日志白名单出现）；坐实后再考虑加入注册表 `HookDirEnv`。
-- **DSH（DeepSeek Harness）适配器（子包方案）**：Go 侧（sync 落 `.dsh/rules`、`Style=external`）与子包 `dsh-plugin/` 均完成。**待办**：① 装了 dsh 的机器 `dsh plugin --profile web add rulemux-dsh`（或本地 `.tgz`）→ 新会话核验规则被读到（canary）；② 决定是否发 npm。过程见 `docs/worklog/dsh-adapter.md`。
+- **DSH（DeepSeek Harness）适配器（子包方案）**：Go 侧（sync 落 `.dsh/rules`、`Style=external`）与子包 `dsh-plugin/` 均完成。**待办**：① 装了 dsh 的机器 `dsh plugin --profile web add "github:cq-guojia/rulemux#path:/dsh-plugin"` → 新会话核验规则被读到（canary）；② 发不发 npm 属可选（不发也能 git 装）。过程见 `docs/worklog/dsh-adapter.md`。
 
 > 各 agent 接入 / 核实 / canary 的剩余工作见 §二 未决项（T3 / T4 / T6 / T10 / T11）。
