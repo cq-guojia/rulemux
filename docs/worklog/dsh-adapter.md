@@ -32,7 +32,7 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 |---|---|
 | 去掉 npm 依赖 | `dsh-plugin/package.json` 删掉 `dependencies.rulemux`（0.1.0 → 0.2.0 → 0.3.0）。硬依赖会让**整个 `dsh plugin add`** 因镜像/源滞后失败（用户第一次即遇 `ERR_PNPM_NO_MATCHING_VERSION`），而那是用户无法处理的安装期失败 |
 | 就绪=三步，全成或抛错 | ① CLI 可得**且版本合规**；② 插件已装载（插件在跑即已成立，无需也无法自检）；③ `~/.rulemux/config.toml` 存在。**已有即算成功、绝不覆盖** |
-| 版本合规（新增） | 常量 `REQUIRED_CLI = ">=0.3.0"`（首个含 dsh 适配器的版本，也决定升级目标）；`probeCliVersion()` 跑 `--version` 自解析（`rulemux X.Y.Z`），`satisfies()` 自实现 `>=` / 精确 pin 比较（**不写进 `dependencies`/`peerDependencies`**，否则又变安装期硬依赖）。不满足 ⇒ `pnpm add -g` → 退 `npm install -g` 升级/覆盖 ⇒ **复查仍不满足即抛错**（被旧副本遮蔽、等于是「没被覆盖」⇒ 失败，不假装成功） |
+| 版本合规（新增） | 常量 `REQUIRED_CLI = ">=0.3.1"`（**第一个真正含 dsh 适配器的发布版本**，也决定升级目标；最初误定为 `>=0.3.0`，见下「发布缺口」）；`probeCliVersion()` 跑 `--version` 自解析（`rulemux X.Y.Z`），`satisfies()` 自实现 `>=` / 精确 pin 比较（**不写进 `dependencies`/`peerDependencies`**，否则又变安装期硬依赖）。不满足 ⇒ `pnpm add -g` → 退 `npm install -g` 升级/覆盖 ⇒ **复查仍不满足即抛错**（被旧副本遮蔽、等于是「没被覆盖」⇒ 失败，不假装成功） |
 | 阻塞、不降级 | 首次就绪**阻塞**首个回合、**不设等待上限**（单条 spawn 120s 仅为防死锁，超时按失败算） |
 | 同步与就绪解耦 | `rulemux sync --hook --agent dsh` 每会话一次；**退出码非 0 只 `console.error` 记日志并继续**，用盘上已有规则注入。含「配置里没有任何 `[[source]]`」这一正常失败面 |
 | 删除全部提示通道 | `readyNotice()` / `noticeShown` / `NOTHING_TO_SYNC` 与 sync 层的 `unknown agent` 自愈重试全部删除；三步全过时只静默注入规则 |
@@ -108,9 +108,25 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 
 1. **🔴 canary**：装 dsh → 重启 → `dsh plugin --profile web add rulemux-dsh`（或 `.tgz` / git spec）→ 新会话核验「规则被读到、无重复注入、无任何提示」。
 2. **首次就绪的三个待核**：① 装完插件后 `pnpm/npm` 在那个宿主进程里是否真的可执行；② **抛错在真机上是否表现为会话可见的失败**（而不是被宿主吞掉后静默继续）——这是本轮设计的交付前提；③ 版本探测在真机 CLI 上的输出形态（当前按 `rulemux X.Y.Z` 解析）。
-3. **`REQUIRED_CLI` 发版前复核**：必须仍是「首个含 dsh 适配器的版本」，因为它同时决定升级目标（当前 `>=0.3.0`）。
+3. **🔴 先发 0.3.1（当前阻塞，见上「发布缺口」）**：`REQUIRED_CLI` 已改为 `>=0.3.1`，而 npm 上最新仍是 0.3.0 且其不含 dsh ⇒ 在 0.3.1 发布前任何机器都会卡在第①/③步。发版 = master 推 tag `v0.3.1`；发完 `npm view rulemux version` 核对（CI 的 npm 步骤可能因缺 `NPM_TOKEN` 被静默跳过）。
 4. **发 npm？**：用户口径「能发就发，发不了 git 装也行」——包已可 `npm pack`，是否 publish 待定。
 5. **二期**：`$DSH_HOME/rules` 全局规则需 rulemux 目前没有的「用户级 sources」概念，暂不做。
+
+## 发布缺口（2026-10-10 发现，当前阻塞）
+
+用户真机实测报「`~/.rulemux` 不存在、`rulemux -v` 还是 0.2.7」。查证后确认这是一条**发布缺口**，不是插件逻辑错：
+
+| 事实 | 证据 |
+|---|---|
+| npm 上 `latest` = **0.3.0**（2026-10-09T13:05Z 发布） | `https://registry.npmjs.org/rulemux`（只读查询） |
+| 但 **0.3.0 里没有 dsh 适配器** | `git show v0.3.0:internal/agents/registry.go` 无 dsh 条目；dsh 的提交全在 tag `v0.3.0` 之后（`60c405c`→`a9e913d`→`cf4483a`→`a2da91d`），master 比 v0.3.0 多 **11** 个提交 |
+| 用户机器上的 0.2.7 更没有 dsh | 其 `SUPPORTED AGENTS` 只列 codebuddy / workbuddy（用户贴出的实测输出） |
+
+因果链：就绪第①步把 0.2.7 升到 latest（0.3.0）后**版本检查反而通过**（0.3.0 ≥ 0.3.0），第③步 `rulemux init --agent dsh` 却在 0.3.0 上**报 unknown agent、退出非 0** ⇒ 抛错 ⇒ `~/.rulemux` 永不生成。
+
+修法：① `REQUIRED_CLI` 由 `>=0.3.0` 改为 **`>=0.3.1`**（第一个真正含 dsh 的发布版本）；② **必须先发 0.3.1**（master → tag `v0.3.1` → CI 出二进制 + npm publish；⚠ `release.yml` 的 npm 步骤只在配了 `NPM_TOKEN` 时执行，否则会**静默跳过**、需手动 `npm publish`），否则任何机器都过不了这一关。
+
+教训（留给下一个人）：**版本下限只有在「下限以下真的做不到」时才成立**。写下限时必须先核对目标版本里**是否真的含**这个能力，别拿「仓库当前版本号」当锚。
 
 ## 风险
 

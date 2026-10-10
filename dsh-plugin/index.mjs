@@ -67,11 +67,15 @@ const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() 
 
 // The CLI version this plugin needs. Kept here — NOT in package.json's dependencies (that would make
 // the plugin itself uninstallable when the mirror lags) and NOT in peerDependencies (pnpm may then
-// refuse to install it). `>=` means "this or newer"; an exact pin ("0.3.0" / "=0.3.0") means "exactly
+// refuse to install it). `>=` means "this or newer"; an exact pin ("0.3.1" / "=0.3.1") means "exactly
 // this". Either way an unsatisfied version is upgraded, then re-checked, and failing that we throw.
-// ⚠ Re-check before release: it must stay the first version whose registry entry ships the dsh
-// adapter, because it also decides what we upgrade *to* (see installTarget).
-const REQUIRED_CLI = ">=0.3.0";
+//
+// ⚠ It must be the FIRST RELEASED version whose registry entry ships the dsh adapter: a version floor
+// only means anything if everything below it genuinely cannot do the job. The dsh adapter landed
+// after v0.3.0, so npm's 0.3.0 (and anything older, e.g. 0.2.7) answers "unknown agent dsh" for
+// `--agent dsh` — hence 0.3.1. It also decides what we upgrade *to* (see installTarget), so it is
+// bumped in the same change that cuts the release, never afterwards.
+const REQUIRED_CLI = ">=0.3.1";
 
 const INSTALL_TIMEOUT_MS = 120_000; // global install / sync: generous, but never hang forever
 const PROBE_TIMEOUT_MS = 15_000; // resolving / probing the CLI

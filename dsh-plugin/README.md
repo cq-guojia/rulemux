@@ -54,7 +54,7 @@ i.e. when dsh starts**, and it does exactly three things. **Every one of them mu
 session fails with an error.**
 
 1. **The CLI is there and current.** `rulemux` is resolved (a dependency copy if one exists, else
-   `PATH`) and its version must satisfy `>=0.3.0`. "It is installed" is only half of it: an older CLI
+   `PATH`) and its version must satisfy `>=0.3.1`. "It is installed" is only half of it: an older CLI
    (or none) is upgraded with `pnpm add -g`, falling back to `npm install -g`, and the version is
    re-read afterwards. If the version still does not satisfy — e.g. an outdated copy elsewhere keeps
    shadowing the upgrade — that is a **failure**, not a success.
