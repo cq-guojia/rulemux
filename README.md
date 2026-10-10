@@ -58,6 +58,10 @@ directory and hook location have been confirmed by a real canary test. Today:
   the normal dsh way — straight from git, no npm publish needed:
   `dsh plugin --profile web add "github:cq-guojia/rulemux#path:/dsh-plugin"`. So
   `rulemux init --agent dsh` installs nothing — it just prints the plugin command.
+  That plugin then **sets itself up on first run** (restart dsh after installing): it has no npm
+  dependencies, installs the `rulemux` CLI globally if it is missing, and creates
+  `~/.rulemux/config.toml` for you — no second command to type. The CLI is a hard prerequisite, so
+  if it cannot be obtained the plugin **raises** instead of quietly running on stale rules.
 
 ---
 

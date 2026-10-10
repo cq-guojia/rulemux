@@ -50,6 +50,9 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
   **独立的插件包** [`dsh-plugin/`](dsh-plugin/) 做，按 dsh 正常方式安装 —— **直接 git 装，无需发 npm**：
   `dsh plugin --profile web add "github:cq-guojia/rulemux#path:/dsh-plugin"`。
   所以 `rulemux init --agent dsh` 什么都不装 —— 只打印插件安装命令。
+  装完后该插件会**在首次运行时自动就绪**（装完插件记得重启 dsh）：它不带任何 npm 依赖，缺 `rulemux`
+  就自动装到全局，配置 `~/.rulemux/config.toml` 也替你生成 —— **不需要你再敲第二条命令**。
+  CLI 是硬前提：拿不到它就**抛错**，绝不悄悄跑在陈旧规则上。
 
 ---
 

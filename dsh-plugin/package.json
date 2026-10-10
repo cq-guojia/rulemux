@@ -1,6 +1,6 @@
 {
   "name": "rulemux-dsh",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "rulemux rules inside DeepSeek Harness (dsh): reads the rule files rulemux syncs into <workspace>/.dsh/rules and injects them into the session.",
   "type": "module",
   "main": "index.mjs",
@@ -37,8 +37,5 @@
     "url": "git+https://github.com/cq-guojia/rulemux.git",
     "directory": "dsh-plugin"
   },
-  "homepage": "https://github.com/cq-guojia/rulemux",
-  "dependencies": {
-    "rulemux": ">=0.3.0"
-  }
+  "homepage": "https://github.com/cq-guojia/rulemux"
 }

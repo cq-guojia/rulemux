@@ -63,6 +63,14 @@ dsh 是 **plugin-first** 宿主：它**不原生扫描规则目录**，扩展面
   `.dsh/rules/__rulemux__*.md`，**只注入一次**为 `plugin:rulemux` recall 消息（compaction 遮蔽后才补回）；
   per-turn 只做本地读，绝不 sync/比对；只读 `__rulemux__*` 前缀，与第三方 `.dsh/rules` 读取器（如
   `dsh-loulan-rules`）互不干扰。
+- **首次运行自动就绪（自给自足）**：插件包**不声明任何依赖** —— 硬依赖会让 `dsh plugin add` 因镜像/源滞后而整体失败。
+  `rulemux` CLI 改由插件在**首次运行**时取得（全进程一次、幂等）：① 解析（依赖副本 → PATH）；
+  ② 缺失则全局安装（`pnpm add -g` → 退 `npm install -g`）；③ `~/.rulemux/config.toml` 不存在则跑
+  `rulemux init --agent dsh` 生成注释样板。装完插件需**重启 dsh**（DSH 装插件的常规要求）。
+- **CLI 是硬前提，失败即失败**：拿不到 CLI 就没有 sync，会话会在「看起来正常」的状态下跑着陈旧或空洞的规则。
+  故首次就绪**阻塞**首个回合（不设等待上限），任一必得步骤最终失败即**抛错**并附手动命令 ——
+  不做「只读已有文件继续」的降级。唯一例外是「配置里还没有任何 `[[source]]`」：那是**未配置**而非坏掉
+  （自动生成的样板本来就是空的），按「无事可同步」处理并在会话里提示一次，否则全新安装将永远不可用。
 - **token 成本**：与 Trae/CodeBuddy 原生载入文件完全相同（进上下文的是同一段规则文本，字节一致）。
 
 > ⚠ rulemux 自身**不注入**（Tier-1 只真实拷贝，也**不替 dsh 装插件** —— registry 里 dsh 是 `Style="external"`，
