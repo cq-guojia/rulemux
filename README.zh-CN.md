@@ -320,19 +320,15 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 
 ---
 
-## 8. 后续计划
+## 8. 支持范围（已定稿）
 
-在办事项见 [`docs/PROGRESS.md`](docs/PROGRESS.md)。概要：
+**支持的 agent 到此为止**，一共四家 —— 全是 Tier-1，全都经真实 canary 坐实：**codebuddy**、
+**workbuddy**、**trae**、**dsh**。`claude`、`codex`、`opencode` 仍在注册表里但未核实，因此
+`rulemux init` 会拒绝它们 —— **没有补齐它们的计划**。（接入新 agent 的清单留作参考：
+[`docs/design/features/agent-onboarding.md`](docs/design/features/agent-onboarding.md)。）
 
-- **接入更多 agent** —— 补齐已注册但尚未验证的适配器：
-  - **Trae**（`.trae/rules/`）、**Claude Code**（`.claude/rules/`）走 Tier-1；
-  - **Codex**、**OpenCode** 走 Tier-2 注入。
-  每个 agent 都要先经真实 canary 坐实「规则目录 + 钩子落点」才开放。
-  接入一个新 agent 的完整清单见
-  [`docs/design/features/agent-onboarding.md`](docs/design/features/agent-onboarding.md)。
-- **分发** —— GitHub Actions 交叉编译 + Release 产物（同时供 npm 包使用），并正式发布 npm 包。
-- **验证工具** —— 让 canary 验收对每个 agent 可重复执行。
-- 规则内容改写/模板渲染、以及自动自我更新，**明确不做**
+- **分发** —— 已完成：GitHub Actions 交叉编译二进制并挂到 GitHub Release；npm 包**手动发布**（见 §9）。
+- 规则内容改写 / 模板渲染、以及自动自我更新，**明确不做**
   （[`docs/design/requirements.md`](docs/design/requirements.md) §五）。
 
 ---
@@ -341,12 +337,20 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 
 ```bash
 npm version patch|minor|major   # 更新 package.json 并创建 git tag v0.x.y
-git push --follow-tags
+git push --follow-tags          # CI：交叉编译产物挂到 GitHub Release
+npm publish                     # npm：手动，在已登录的 shell 里跑
 ```
 
 推送 tag 会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：
-自动交叉编译全部平台二进制、挂到 GitHub Release、并按 tag 版本发布 npm 包。
-需在仓库 Secrets 里配置 `NPM_TOKEN` 才会发布 npm（未配置时跳过并告警）。
+自动交叉编译全部平台二进制并挂到 GitHub Release。
+
+**npm 这一步刻意不自动化**：不配 `NPM_TOKEN`（也不打算配），发布 npm 就保持在已登录的 shell 里手动
+`npm publish`（工作流会跳过该步骤并告警）。dsh 插件是独立的包，它有改动时也要单独发：
+
+```bash
+cd dsh-plugin && npm publish
+```
+
 普通的 CI（[`ci.yml`](.github/workflows/ci.yml)）在每次 push 时跑 build/vet/测试/冒烟。
 
 ---
@@ -357,7 +361,7 @@ MIT —— 见 [LICENSE](LICENSE)。
 
 ---
 
-## 10. 文档索引
+## 11. 文档索引
 
 | 想看什么 | 去哪 |
 |---|---|

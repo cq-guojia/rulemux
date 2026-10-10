@@ -352,19 +352,16 @@ Run `rulemux` with no arguments for the full help.
 
 ---
 
-## 8. Roadmap
+## 8. Scope
 
-Ongoing work and what comes next are tracked in [docs/PROGRESS.md](docs/PROGRESS.md). In short:
+**The agent set is frozen.** rulemux supports exactly four agents — all Tier-1, all confirmed by a
+real canary run: **codebuddy**, **workbuddy**, **trae**, and **dsh**. `claude`, `codex` and `opencode`
+stay registered but unverified, which is why `rulemux init` refuses them; there is no plan to finish
+them. (The checklist for adding an agent is kept for reference:
+[design/features/agent-onboarding.md](docs/design/features/agent-onboarding.md).)
 
-- **More agents** — finish the adapters that are already registered but unverified:
-  - **Trae** (`.trae/rules/`) and **Claude Code** (`.claude/rules/`) as Tier-1;
-  - **Codex** and **OpenCode** as Tier-2 injection.
-  Each one needs its rules directory and hook location confirmed by a real canary run before it is
-  switched on. The checklist for adding an agent lives in
-  [design/features/agent-onboarding.md](docs/design/features/agent-onboarding.md).
-- **Distribution** — GitHub Actions cross-compilation plus Release artifacts (this also feeds the
-  npm package), and publishing the npm package properly.
-- **Verification tooling** — make the canary check repeatable per agent.
+- **Distribution** — done: GitHub Actions cross-compiles the binaries and attaches them to a GitHub
+  Release; the npm package is published **by hand** (see §9).
 - Rule content transformation, templating, and automatic self-update are **explicitly out of scope**
   ([design/requirements.md](docs/design/requirements.md) §五).
 
@@ -374,14 +371,23 @@ Ongoing work and what comes next are tracked in [docs/PROGRESS.md](docs/PROGRESS
 
 ```bash
 npm version patch|minor|major   # bumps package.json and creates the git tag v0.x.y
-git push --follow-tags
+git push --follow-tags          # CI: cross-compiled binaries on a GitHub Release
+npm publish                     # npm: by hand, from a logged-in shell
 ```
 
 Pushing the tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
-cross-compile all platform binaries, attach them to a GitHub Release, and publish the
-npm package with the tag's version. Set the `NPM_TOKEN` repository secret to enable
-the npm step (it is skipped with a warning if absent). A plain CI run
-([`ci.yml`](.github/workflows/ci.yml)) runs build/vet/tests/smoke on every push.
+cross-compile all platform binaries and attach them to a GitHub Release.
+
+**The npm step is deliberately not automated.** No `NPM_TOKEN` repository secret is configured and
+none is planned: publishing to npm stays a manual `npm publish` from a logged-in shell (the workflow
+skips that step with a warning). The dsh plugin is a separate package — publish it too when it
+changed:
+
+```bash
+cd dsh-plugin && npm publish
+```
+
+A plain CI run ([`ci.yml`](.github/workflows/ci.yml)) runs build/vet/tests/smoke on every push.
 
 ---
 
@@ -391,7 +397,7 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-## 10. Documentation
+## 11. Documentation
 
 | Want to read | Where |
 |---|---|
