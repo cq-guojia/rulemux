@@ -1,6 +1,6 @@
 {
   "name": "rulemux-dsh",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "rulemux rules inside DeepSeek Harness (dsh): reads the rule files rulemux syncs into <workspace>/.dsh/rules and injects them into the session.",
   "type": "module",
   "main": "index.mjs",

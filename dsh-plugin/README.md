@@ -53,11 +53,13 @@ act on. dsh runs no install scripts either, so instead the plugin makes itself r
 i.e. when dsh starts**, and it does exactly three things. **Every one of them must hold; otherwise the
 session fails with an error.**
 
-1. **The CLI is there and current.** `rulemux` is resolved (a dependency copy if one exists, else
-   `PATH`) and its version must satisfy `>=0.3.1`. "It is installed" is only half of it: an older CLI
-   (or none) is upgraded with `pnpm add -g`, falling back to `npm install -g`, and the version is
-   re-read afterwards. If the version still does not satisfy — e.g. an outdated copy elsewhere keeps
-   shadowing the upgrade — that is a **failure**, not a success.
+1. **The CLI is there and can do the job.** `rulemux` is resolved (a dependency copy if one exists,
+   else `PATH`) and must either satisfy version `>=0.3.1` **or** demonstrably know the `dsh` agent
+   (`rulemux --help` lists it). Both halves matter: a version floor is meaningless if a capable CLI
+   looks old — a binary built with plain `go build` / `go install` reports main.go's hardcoded default
+   version whatever code it contains — and a version number alone proves nothing about capability. A
+   CLI that fails both checks is upgraded with `pnpm add -g`, falling back to `npm install -g`, and
+   re-checked afterwards. If it still fails, that is a **failure**, not a success.
 2. **This plugin is loaded.** Nothing to check: the fact that this code runs at all is the proof.
 3. **The config exists.** `~/.rulemux/config.toml`, created with `rulemux init --agent dsh` when it is
    missing. An existing config counts as success and is **never overwritten**.

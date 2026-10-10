@@ -128,6 +128,16 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 
 教训（留给下一个人）：**版本下限只有在「下限以下真的做不到」时才成立**。写下限时必须先核对目标版本里**是否真的含**这个能力，别拿「仓库当前版本号」当锚。
 
+### 追加（2026-10-10 真机 log 打脸）：版本号不能当唯一判据
+
+真机 canary 打出：插件 `apply() called`（装载模型成立 ✓），但就绪第①步失败，`in effect: PATH (rulemux)`，而那份 CLI **一边自报 `0.3.0`、一边在 `SUPPORTED AGENTS` 里列着 `dsh`** —— 它其实能干这活，只是版本号印错了。
+
+根因：`main.go` 里 `var version = "0.3.0"` 是**写死的默认值**，只有发布流水线用 `-X main.version=<tag>` 覆盖；所以任何用 `go build` / `go install`（乃至任何不带 ldflags 的方式）编出来的二进制，只要树里有 dsh，也会自报 0.3.0。`scripts/build-dist.sh` 与 CI 都正确注入了版本，**问题只出在"版本号被当成能力凭证"**。
+
+修法（插件 0.3.3）：判据改为 **`cliOk()` = 版本满足 `REQUIRED_CLI` 或 `knowsDsh()`**，后者跑 `rulemux --help`（输出走 stderr，故 `out+err` 一起看）匹配 `^\s*dsh\s`（id 列直接来自 registry）。同时 `installCli` 安装后把 `resolveCli()` 与 `cliInGlobalBin(pm)` **两个候选都按 `cliOk` 判**（原先 `a || b` 会短路，PATH 上的旧副本可能遮蔽刚装好的新版本）。
+
+实测（假 CLI）：自报 `0.3.0` 但 `--help` 里带 `dsh` ⇒ 被接受、配置生成（正是真机那种）；自报 `0.3.0` 且不认 `dsh`、又装不上 ⇒ 抛错并逐条记录原因。
+
 ## 风险
 
 - 本机无 dsh ⇒ 插件能否被 `dsh plugin add` 正常加载、事件名是否匹配、面板是否显示，**均未真机验证**；照用户已跑通的两个插件与 hindsight 子包布局照抄。

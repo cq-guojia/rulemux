@@ -173,6 +173,25 @@ async function probeCliVersion(cli) {
   return m ? { major: +m[1], minor: +m[2], patch: +m[3] } : null;
 }
 
+/**
+ * Does this CLI actually know the `dsh` adapter? A version floor alone is not enough: a binary built
+ * with plain `go build` / `go install` reports main.go's hardcoded default version no matter which
+ * code it contains, so a perfectly capable CLI can look too old. `--help` lists the supported agent
+ * ids straight from the registry, so that list is the honest answer. (Help text is human-facing, but
+ * the id column is machine-stable, and the version check stays the fast path.)
+ */
+async function knowsDsh(cli) {
+  const r = await run(cli.cmd, [...cli.args, "--help"], { timeoutMs: PROBE_TIMEOUT_MS });
+  return r.code === 0 && /^\s*dsh\s/m.test(`${r.out}${r.err}`);
+}
+
+/** Can this CLI do our job? Either its version is new enough, or it demonstrably knows `dsh`. */
+async function cliOk(cli) {
+  if (!cli) return false;
+  if (satisfies(await probeCliVersion(cli), REQUIRED_CLI)) return true;
+  return knowsDsh(cli);
+}
+
 /** Compare two version triples: negative / 0 / positive, like a comparator. */
 function compareVersions(a, b) {
   return a.major - b.major || a.minor - b.minor || a.patch - b.patch;
@@ -247,29 +266,29 @@ async function installCli(reasons, spec) {
       reasons.push(`${pm} ${args.join(" ")} → exit ${r.code}: ${tail(r.err || r.out) || "no output"}`);
       continue;
     }
-    const cli = (await resolveCli()) || (await cliInGlobalBin(pm));
-    if (cli) return { cli, installedBy: cli.how === "PATH" ? `${pm} -g` : cli.how };
-    reasons.push(`${pm}: reported success but rulemux is still not resolvable`);
+    // Look in both places: PATH may still hold an older copy that shadows what we just installed.
+    for (const cli of [await resolveCli(), await cliInGlobalBin(pm)]) {
+      if (await cliOk(cli)) return { cli, installedBy: cli.how === "PATH" ? `${pm} -g` : cli.how };
+    }
+    reasons.push(`${pm}: reported success but no usable rulemux is resolvable afterwards`);
   }
   return null;
 }
 
 /**
- * Readiness step ①: a CLI that exists AND satisfies REQUIRED_CLI.
- *
- * An existing but unsatisfying version is upgraded, never accepted. After the upgrade the CLI is
- * resolved again and the version re-read: if it STILL does not satisfy — typically because an older
- * copy (a legacy node_modules copy, or a pinned one elsewhere) is still the one in effect — we throw
- * rather than report success on a version we did not ask for.
+ * Readiness step ①: a CLI that can actually do the job — its version satisfies REQUIRED_CLI, or it
+ * demonstrably knows the `dsh` adapter (see cliOk). A CLI that can do neither is upgraded, never
+ * accepted; if the upgrade leaves an unusable one in effect we throw rather than report success.
  */
 async function ensureCli(reasons) {
   let cli = await resolveCli();
-  let found = cli ? await probeCliVersion(cli) : null;
-  if (cli && satisfies(found, REQUIRED_CLI)) return cli;
+  if (await cliOk(cli)) return cli;
 
+  const found = cli ? await probeCliVersion(cli) : null;
   if (cli) {
     reasons.push(
-      `found an existing rulemux ${versionText(found)} at ${cli.how}, which does not satisfy ${REQUIRED_CLI}`,
+      `found an existing rulemux ${versionText(found)} at ${cli.how}, which satisfies neither ` +
+        `${REQUIRED_CLI} nor a \`dsh\`-aware CLI`,
     );
   }
 
@@ -286,11 +305,10 @@ async function ensureCli(reasons) {
   }
 
   cli = installed.cli;
-  found = await probeCliVersion(cli);
-  if (!satisfies(found, REQUIRED_CLI)) {
+  if (!(await cliOk(cli))) {
     throw new Error(
-      `rulemux-dsh: rulemux ${versionText(found)} is still the version in effect after installing ` +
-        `${spec}, and it does not satisfy ${REQUIRED_CLI}.\n` +
+      `rulemux-dsh: rulemux ${versionText(await probeCliVersion(cli))} is still the CLI in effect ` +
+        `after installing ${spec}: it satisfies neither ${REQUIRED_CLI} nor a \`dsh\`-aware CLI.\n` +
         `  in effect: ${cli.how} (${[cli.cmd, ...cli.args].join(" ")})\n` +
         "  An outdated copy is shadowing the upgrade — remove or upgrade that copy, then start a " +
         "new dsh session.",
