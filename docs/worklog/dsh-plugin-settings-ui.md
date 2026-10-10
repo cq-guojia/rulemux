@@ -59,6 +59,9 @@
 - 标题 / 说明：新增 `dsh-plugin/locale/zh.json` 与 `locale/en.json`（`meta.title` / `meta.description`），
   `exports` 加 `./locale/*.json`、`files` 加 `locale`；写法照参考实现 `dsh-session-title-pattern`
   （干什么 + 半角括号包完整包名）。
+- **简介口径（同日用户纠正后）**：`meta.description` 改为浓缩核心痛点 —— 唯一真源、层级下放复用、
+  一处修改同步到所有 agent 与所有工作区；**不写**软链 / 注入时机这类实现细节。
+  完整定位口径见 [`project-readme-positioning.md`](project-readme-positioning.md) §三。
 - 版本 `0.3.3 → 0.3.4`。
 - 结论回写：[`design/external/dsh-plugin-manifest.md`](../design/external/dsh-plugin-manifest.md)。
 - 未做（属 ②）：插件详情页的**配置表单** —— 仍需先调研 settings schema 的声明方式与取值落点（见「待执行事项」1–3）。

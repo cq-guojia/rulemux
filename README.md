@@ -1,6 +1,7 @@
 # rulemux
 
-> One set of rules, delivered to every AI coding agent.
+> One set of rules, **one source of truth**: edit once, and it reaches **every agent in every
+> workspace**.
 > Same effect and same token cost as writing `AGENTS.md` by hand — **never fades out, never accumulates, no symlinks, free to add and remove files**.
 
 [中文版](README.zh-CN.md) | [Design docs](docs/design/architecture.md)
@@ -9,22 +10,91 @@
 
 ## 1. What is this
 
-You maintain a set of rule documents (coding conventions, project rules, …) and want every AI
-coding agent to read them in every workspace — with the exact same effect as if you had written
-`AGENTS.md` yourself.
+### 1.1 The pain
 
-`rulemux` takes the source files you list in a config and copies them into each agent's **native
-workspace rules directory**. You manage them in one place; they take effect everywhere.
+- **Every agent keeps rules somewhere else**: `.codebuddy/rules/`, `.claude/rules/`,
+  `.dsh/rules/`… one coding convention has to be rewritten once per agent.
+- **And every workspace keeps its own copy**: to make a rule apply in a workspace you write it
+  there again.
+- So the rules that are genuinely **shared** (team conventions, coding standards) can neither be
+  factored out nor maintained: one sentence means opening *agents × workspaces* files, with no
+  guarantee you did not miss one.
 
-- rulemux **does not own or maintain any rule content**. Your source files stay yours — rulemux
-  only copies them. Which agents / workspaces they apply to is declared in your config.
+### 1.2 What rulemux does
+
+You maintain **one source of truth**: a set of rule documents you wrote, declared in
+`~/.rulemux/config.toml` as the tree below. `rulemux sync` copies them — really copies — into
+each agent's **native rules directory**. Upper layers are inherited by the ones below them, so
+**one edit reaches every agent in every workspace on the next sync**.
+
+```
+One source of truth (your own .md files, declared in ~/.rulemux/config.toml)
+│
+├─ Layer 1 · org-wide rules ─────────────► every agent × every workspace
+│   │
+│   ├─ Layer 2 · dev rules
+│   │   ├─ Layer 3 · mini-app rules
+│   │   ├─ Layer 3 · backend rules
+│   │   └─ Layer 3 · client-side rules
+│   │
+│   └─ Layer 2 · non-dev rules
+│       └─ Layer 3 · workspace daily rules …
+│
+└─ Layer 4 · one workspace's own rules ──► only in that workspace
+
+              rulemux sync  ↓  real copies (never fades out / never accumulates / no symlinks)
+
+    workspace A ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
+    workspace B ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
+```
+
+- **Rules are reused**: layer 3 inherits layer 2, layer 2 inherits layer 1 — write what is shared
+  once, and get more specific as you go down.
+- **Layers fan out**: each layer declares which agents and which workspaces it applies to; no
+  file is duplicated per combination.
+- **Edit once, applies everywhere**: change a sentence up top and every workspace and agent that
+  inherits it is aligned on the next sync.
+
+The tree is built with `use` on `[[file_group]]` (inherit the layer above) plus `workspace` on
+`[[source]]` (where it lands):
+
+```toml
+[[file_group]]
+name = "base"                    # layer 1: org-wide
+path = ["/rules/00-base.md"]
+
+[[file_group]]
+name = "dev"                     # layer 2: dev rules
+use  = ["base"]                  # inherits layer 1
+path = ["/rules/10-dev.md"]
+
+[[file_group]]
+name = "miniapp"                 # layer 3: mini-app rules
+use  = ["dev"]                   # inherits layer 2 (and therefore layer 1)
+path = ["/rules/20-miniapp.md"]
+
+[[source]]
+groups    = ["miniapp"]          # lands as base + dev + miniapp
+workspace = ["/work/miniapp-a", "/work/miniapp-b"]
+
+[[source]]
+path      = ["/rules/proj-x-only.md"]   # layer 4: this workspace only
+workspace = ["/work/proj-x"]
+```
+
+See §5.2 for the full grouping and matching syntax.
+
+### 1.3 The invariants
+
+- **rulemux does not own or maintain any rule content**: your source files stay yours — rulemux
+  only delivers them. Which agents / workspaces they apply to is declared in your config.
 - **The session hook is (almost) only the courier.** Rule *content* is never injected: files are
   really copied into the directory the agent loads natively, so they enjoy static-prefix semantics
   (never fade out mid-conversation, never accumulate). The single, deliberate exception is one
   **transient notice line** the hook emits when it detects that the rules really changed — it asks
   you to start a new session. See §5.3.
-- Invariants: **no symlinks** (real copies only) and **free add/remove** (delete a source from the
-  config and its copy disappears on the next sync).
+- **No symlinks, free add/remove**: real copies only; delete a source from the config and its copy
+  disappears on the next sync.
 
 > Why not "just inject with a hook"? Hook injection lands in the dynamic part of the context: it
 > gets summarised away on compaction (fades out) or re-appended every turn (token blow-up).
