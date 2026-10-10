@@ -55,7 +55,7 @@
 要根据用户的语境支持中英文。」
 
 - 图标：`dsh-plugin/icon.svg`（128×128，`viewBox` 沿用原图 1024），`package.json` 顶层 `icon` 接线，
-  并加入 `files`；源文件 `docs/话术提示词-选中.svg` 原样保留。
+  并加入 `files`（图标取自用户给的 `话术提示词-选中.svg`，挪进来后原件已按用户要求删除）。
 - 标题 / 说明：新增 `dsh-plugin/locale/zh.json` 与 `locale/en.json`（`meta.title` / `meta.description`），
   `exports` 加 `./locale/*.json`、`files` 加 `locale`；写法照参考实现 `dsh-session-title-pattern`
   （干什么 + 半角括号包完整包名）。
