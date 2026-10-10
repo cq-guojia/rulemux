@@ -32,8 +32,9 @@
 | 结论 | 出处 |
 |---|---|
 | 该槽位是 **keyed** 槽位，key 必须是**完整 npm 包名**；`scope: 'root'`，只以 `view: 'page'` 渲染 | `@deepseek-ai/dsh-client-ui-plugin-manager/lib/types/client/slot-contract.d.ts:95-104` |
-| 要让它渲染，宿主必须登记本插件的**设置命名空间**；命名空间是 **profile entry id**（本包 `rulemux`），不是包名（`rulemux-dsh`） | `@deepseek-ai/dsh-settings/README.md:10-12`；`cordis.patch.yml:13-16` |
-| 命名空间由 host 侧导出的 `Config`（schemastery，字段 `.volatile()`）**自动派生** | 参考实现 `dsh-session-title-pattern/src/host/index.ts:141-170`、`:840-844` |
+| **是否渲染，只看这个槽位有没有以该包名为 key 的注册项** —— 与设置命名空间无关：配置账本 `bundles: keysOf("plugins.bundle.config")`，详情页 `configured: ledger.bundles.has(openPkg.name)` | `@deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js:62`、`:3545` |
+| 设置命名空间（= profile entry id，本包 `rulemux`，不是包名）由 host 侧导出的 `Config`（schemastery，字段 `.volatile()`）自动派生；**只有要读写设置值时才需要**，不是渲染前提 | `@deepseek-ai/dsh-settings/README.md:10-12`；参考实现 `dsh-session-title-pattern/src/host/index.ts:141-170`、`:840-844` |
+| ⚠ 踩坑：`configForms.whileServed([ns])` 把注册卡在「命名空间已登记」上 —— 没有 `Config` 就**永不注册**，面板静默不出现（本插件 0.3.4 就是这个症状，0.3.5 去掉它才出来） | 本仓库 `docs/worklog/dsh-plugin-settings-ui.md`；对照 `@deepseek-ai/dsh-client-ui-settings/lib/types/client/config-form.d.ts:143-156` |
 | 表单值落在 **dsh 自己的设置文档（当前 profile 的 Cordis patch）**，不在插件自己的文件里 | `@deepseek-ai/dsh-settings/README.md:10-12` |
 | host 端**没有**设置读写的拦截钩子（无 `onRead`/`onWrite`/provider），`SettingsForms` 只暴露 configure / writable / documentPath / prepareDocument / describe / update / replace / mutate | `@deepseek-ai/dsh-settings/lib/types/index.d.ts:61-117` |
 | 浏览器端**读不到磁盘文件**：详情页无 sessionId，`remote.commands.execute(sessionId…)` 强制要 sessionId；`remote.workspaceFiles.read` 首参也是 SessionId 且只认工作区 scope；第三方没有注册自定义 remote 服务的公开口子 | `slot-contract.d.ts:95-104`；`@deepseek-ai/dsh-commands/lib/typert.remote-client.d.ts:7-23`；`dsh-api-remotes/lib/client.js:13117-13164`；`dsh-api-remotes/README.md:71-77` |

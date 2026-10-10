@@ -59,31 +59,6 @@ import { dirname, join } from "node:path";
 export const name = "rulemux";
 export const inject = ["agents"];
 
-/**
- * 插件详情页的说明面板（`plugins.bundle.config` 槽位）要显示，宿主必须登记本插件的
- * 设置命名空间 —— 命名空间是 profile entry id（`rulemux`，见 cordis.patch.yml），
- * 不是包名（`rulemux-dsh`）。
- *
- * ⚠ 这里**只有一个占位字段**，界面既不渲染它、也不往里写任何东西：
- * 规则配置的真源始终是 `~/.rulemux/config.toml`（用户自己改），
- * dsh 的设置文档不是它的第二份拷贝。
- */
-
-/**
- * schemastery 只服务于说明面板：拿不到就退化成「没有面板」，核心注入绝不受影响
- * （本包刻意没有硬依赖 —— 依赖装不上不该让整个插件挂掉）。
- */
-let Schema = null;
-try {
-  Schema = (await import("@deepseek-ai/schemastery")).default;
-} catch {
-  Schema = null;
-}
-
-export const Config = Schema
-  ? Schema.object({ notice: Schema.string().default("").volatile() })
-  : undefined;
-
 const RULES_SUBDIR = ".dsh/rules"; // where `rulemux sync` drops the copies (workspace-relative)
 const FILE_PREFIX = "__rulemux__"; // rulemux's ownership prefix: other files are never read
 const MANAGED_HEADER = "<!-- rulemux:managed -->"; // marks our injected block (re-injection check)

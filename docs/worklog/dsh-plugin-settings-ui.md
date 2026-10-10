@@ -96,3 +96,25 @@
 - 「打开」按钮做不到（浏览器打不开宿主本地文件）⇒ 按用户「不行就只显示」的口径给**复制路径**。
 - 验证：`tsc --noEmit` 通过、`tsdown` 产出 `lib/client.js`（契约 `window.__ModuleLoader__.load({ id: "rulemux-dsh", …`）已核对。
 - 待实机确认：详情页是否出现该面板、中英切换、复制按钮、外链可点。
+
+### 2026-10-10 0.3.5 修正：面板不出现的根因是 `whileServed`
+
+用户反馈：「你确认你跟了 0.3.4 那个设置页面，什么都没出现？你好好去看看文档。」
+
+**根因**（读官方实现定位，不是猜）：
+
+- 详情页渲染配置区的判据是 `configured: ledger.bundles.has(openPkg.name)`，而账本的
+  `bundles` 就是 `keysOf("plugins.bundle.config")` —— **只看有没有注册，不看命名空间**
+  （`dsh-client-ui-plugin-manager/lib/client.js:62`、`:3545`）。
+- 而 0.3.4 把注册包在 `configForms.whileServed(['rulemux'])` 里，其判据是「宿主登记了该设置
+  命名空间」。命名空间要 host 侧 `Config` 派生，而 `Config` 又靠动态 `import('@deepseek-ai/schemastery')`
+  —— 只要它没登记（依赖没装上 / 时序），`whileServed` 就不回调 ⇒ **从不注册 ⇒ 面板静默消失**。
+- 属于「把一道不必要的门当成前置条件」：为了一个不读写设置值的只读面板，去等一个根本用不上的命名空间。
+
+**修法**：
+
+- client 只 `ctx.inject(['slots'], …)`，直接 `slots.inject` + `slots.register`，**去掉 `configForms` 与 `whileServed`**。
+- host 侧 `Config` 与 schemastery 依赖一并去掉（面板不读写设置值）⇒ 包回到**零运行时依赖**。
+- 加三条 `console.info`（apply / 词典注册 / 槽位注册），控制台搜 `[rulemux-dsh]` 就能分清
+  「浏览器半边压根没加载」还是「加载了但槽位没渲染」（参考项目 v0.6.x 的排查习惯）。
+- 版本 `0.3.4 → 0.3.5`。

@@ -1,6 +1,6 @@
 {
   "name": "rulemux-dsh",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "icon": "./icon.svg",
   "description": "rulemux rules inside DeepSeek Harness (dsh): reads the rule files rulemux syncs into <workspace>/.dsh/rules and injects them into the session.",
   "type": "module",
@@ -29,8 +29,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-plugin-manager",
-        "@deepseek-ai/dsh-client-ui-renderer",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-renderer"
       ],
       "platform": "web"
     }
@@ -59,9 +58,6 @@
     "build": "npm run build:client",
     "build:client": "tsdown --config tsdown.client.config.ts",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.4"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

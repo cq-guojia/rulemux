@@ -259,23 +259,27 @@ workspace = ["/work/miniapp-a"]`;
 		//#region src/client/index.tsx
 		const name = "rulemux-dsh";
 		/**
-		* 插件详情页配置槽位（dsh 0.1.7）。keyed 槽位，key 必须与包名逐字相同 ——
-		* 插件管理页用 `ledger.bundles.has(pkg.name)` 判断要不要在详情页渲染配置区。
+		* 插件详情页配置槽位。keyed 槽位，key 必须与包名逐字相同。
 		*/
 		const BUNDLE_CONFIG_SLOT = "plugins.bundle.config";
+		/** 排查用的日志前缀：控制台里搜它就能知道浏览器半边到底跑没跑。 */
+		const LOG = "[rulemux-dsh]";
 		function apply(ctx) {
+			console.info(`${LOG} client apply()`);
 			ctx.inject(["locale"], (localeCtx) => {
 				ctx.effect(() => localeCtx.locale.register(LOCALE_NS, {
 					zh,
 					en
 				}));
+				console.info(`${LOG} 词典已注册 (${LOCALE_NS})`);
 			});
-			ctx.inject(["slots", "configForms"], (sub) => {
-				ctx.effect(() => sub.configForms.whileServed([LOCALE_NS], () => sub.slots.inject(BUNDLE_CONFIG_SLOT, () => sub.slots.register({
+			ctx.inject(["slots"], (sub) => {
+				ctx.effect(() => sub.slots.inject(BUNDLE_CONFIG_SLOT, () => sub.slots.register({
 					name: BUNDLE_CONFIG_SLOT,
 					key: name,
 					locale: LOCALE_NS
-				}, ConfigPanel))));
+				}, ConfigPanel)));
+				console.info(`${LOG} 已注册说明面板到 ${BUNDLE_CONFIG_SLOT}`);
 			});
 		}
 		//#endregion
