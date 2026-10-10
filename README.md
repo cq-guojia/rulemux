@@ -119,7 +119,7 @@ directory and hook location have been confirmed by a real canary test. Today:
 | **codebuddy** | Tier-1 (real copy) | `.codebuddy/rules/` | ✅ **Verified — installable** (`codebuddy-cn` is an alias) |
 | **workbuddy** | Tier-1 (real copy) | `.workbuddy/rules/` | ✅ **Verified — installable** (separate app: own `~/.workbuddy/settings.json` hook, no longer an alias of codebuddy) |
 | claude (Claude Code) | Tier-1 | `.claude/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
-| trae (Trae) | Tier-1 | `.trae/rules/` | ⚠️ registered, **not verified yet** — cannot be installed |
+| **trae** (Trae CN) | Tier-1 (real copy) | `.trae/rules/` | ✅ **Verified — installable** (2026-10-09 canary: user-level hook `~/.trae-cn/hooks.json`; the international `~/.trae` build is not wired yet) |
 | codex | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |
 | opencode | Tier-2 (injection) | none — injects into context | ⚠️ registered, **not verified yet** |
 | **dsh** (DeepSeek Harness) | Tier-1 (real copy) | `.dsh/rules/` | ✅ **Verified — installable**; the reading half is a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only syncs; it does not install the plugin) |
@@ -184,6 +184,24 @@ rulemux init --refresh   # rewrite rulemux's OWN hooks only: never installs, nev
 `rulemux doctor` now reports a hook that is installed but out of date (and how to fix it). If you
 moved this agent's config directory with `CODEBUDDY_CONFIG_DIR`, rulemux follows it — see
 [design/external/agent-rules-dirs.md](docs/design/external/agent-rules-dirs.md) §五.
+
+### 3.1 dsh: a plugin, not a hook
+
+Every other agent is “`rulemux init --agent <id>` installs a session hook”. **dsh is the exception**:
+it has no hook file, so `rulemux init --agent dsh` installs nothing and only prints the command
+below — the reading half is a dsh plugin:
+
+```bash
+dsh plugin --profile <your profile> add rulemux-dsh        # npm
+# or straight from git, to try an unreleased change:
+dsh plugin --profile <your profile> add "github:cq-guojia/rulemux#path:/dsh-plugin"
+```
+
+**Restart dsh after installing**: the plugin becomes ready when dsh starts — it checks the
+`rulemux` CLI (upgrading it and re-checking when it is too old) and creates `~/.rulemux/config.toml`
+when it is missing (never overwriting one that exists). Any step that fails raises, so a session
+never quietly runs without rules. Because this happens at startup, the config file is already there
+when you go to edit it: install → restart → edit the config → open **one** session.
 
 ---
 

@@ -106,7 +106,7 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 | **codebuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/` | ✅ **已验证，可安装**（`codebuddy-cn` 是它的别名） |
 | **workbuddy** | Tier-1（真实拷贝） | `.workbuddy/rules/` | ✅ **已验证，可安装**（独立应用：自有 `~/.workbuddy/settings.json` 钩子，不再是 codebuddy 的别名） |
 | claude（Claude Code） | Tier-1 | `.claude/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
-| trae（Trae） | Tier-1 | `.trae/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
+| **trae**（Trae CN） | Tier-1（真实拷贝） | `.trae/rules/` | ✅ **已验证，可安装**（2026-10-09 canary 坐实：用户级钩子 `~/.trae-cn/hooks.json`；国际版目录 `~/.trae` 尚未接入） |
 | codex | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |
 | opencode | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |
 | **dsh**（DeepSeek Harness） | Tier-1（真实拷贝） | `.dsh/rules/` | ✅ **已验证，可安装**；读取那半由**独立的 dsh 插件**做 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责同步，不替你装插件） |
@@ -162,6 +162,22 @@ rulemux init --refresh   # 只刷新「我们自己装过的」钩子：不新�
 `rulemux doctor` 现在能报出「已安装但格式过期」，并给出上面这条修复命令。若你用
 `CODEBUDDY_CONFIG_DIR` 把该 agent 的配置目录挪走过，rulemux 会跟随 —— 见
 [`docs/design/external/agent-rules-dirs.md`](docs/design/external/agent-rules-dirs.md) §五。
+
+### 3.1 dsh：装的是插件，不是钩子
+
+其余 agent 都是「`rulemux init --agent <id>` 装一条会话钩子」，**dsh 例外**：它没有钩子配置文件，
+所以 `rulemux init --agent dsh` 什么都不装 —— 只把下面这条命令打印给你。规则由插件那半读：
+
+```bash
+dsh plugin --profile <你的 profile> add rulemux-dsh        # npm
+# 想试未发布的改动，也可以从 git 直装：
+dsh plugin --profile <你的 profile> add "github:cq-guojia/rulemux#path:/dsh-plugin"
+```
+
+**装完要重启 dsh**：插件在 dsh 启动时就绪 —— 检查 `rulemux` 命令行工具（版本不够会自动升级并复查）、
+并在 `~/.rulemux/config.toml` 缺失时替你生成（已存在绝不覆盖）。三步缺一步就抛错，不会悄悄跑在
+没有规则的会话里。因为就绪发生在启动时，你去改配置时那份文件已经在了：装插件 → 重启 → 改配置 →
+开**一次**会话。
 
 ---
 
