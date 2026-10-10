@@ -1,15 +1,19 @@
 {
   "name": "rulemux-dsh",
-  "version": "0.3.3",
+  "version": "0.3.4",
+  "icon": "./icon.svg",
   "description": "rulemux rules inside DeepSeek Harness (dsh): reads the rule files rulemux syncs into <workspace>/.dsh/rules and injects them into the session.",
   "type": "module",
   "main": "index.mjs",
   "exports": {
     ".": "./index.mjs",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "index.mjs",
+    "icon.svg",
+    "locale",
     "cordis.patch.yml",
     "README.md"
   ],

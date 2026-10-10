@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "会话规则注入(rulemux-dsh)",
+    "description": "把 rulemux 同步到当前工作区 .dsh/rules 下的规则文件注入每个 dsh 会话：规则一处维护、各家 agent 生效，真实拷贝、不用软链，每会话只注入一次。"
+  }
+}

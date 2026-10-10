@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Rules Injection (rulemux-dsh)",
+    "description": "Injects the rule files rulemux syncs into the current workspace's .dsh/rules into every dsh session: maintain your rules once and have them take effect across agents — real copies, never symlinks, injected once per session."
+  }
+}

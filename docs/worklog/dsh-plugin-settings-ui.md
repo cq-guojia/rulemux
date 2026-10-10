@@ -45,3 +45,20 @@
 | 配置路径写死 `~/.rulemux/config.toml`，由 `configPath()` 返回 | `dsh-plugin/index.mjs:86-88` |
 | CLI 解析先找依赖副本再回退 `PATH` | `dsh-plugin/index.mjs:153-174` `resolveCli()` |
 | dsh 为 plugin-first，扩展面是 Cordis 生命周期事件，无 hook binary | `hindsight-integrations/coding-agents/src/dsh.ts:1-24` |
+
+## 进展
+
+### 2026-10-10 ① 列表展示：图标 + 中英标题说明 ✅ 已落码（待实机确认）
+
+用户原话：「列表那个地方有一个图标、一个标题，还有一个像简单说明的那种…… 图标用
+`docs/话术提示词-选中.svg`，名字你改…… 标题…… 后面加一个括号把包名写上，备注里说明一下这个插件是做什么的……
+要根据用户的语境支持中英文。」
+
+- 图标：`dsh-plugin/icon.svg`（128×128，`viewBox` 沿用原图 1024），`package.json` 顶层 `icon` 接线，
+  并加入 `files`；源文件 `docs/话术提示词-选中.svg` 原样保留。
+- 标题 / 说明：新增 `dsh-plugin/locale/zh.json` 与 `locale/en.json`（`meta.title` / `meta.description`），
+  `exports` 加 `./locale/*.json`、`files` 加 `locale`；写法照参考实现 `dsh-session-title-pattern`
+  （干什么 + 半角括号包完整包名）。
+- 版本 `0.3.3 → 0.3.4`。
+- 结论回写：[`design/external/dsh-plugin-manifest.md`](../design/external/dsh-plugin-manifest.md)。
+- 未做（属 ②）：插件详情页的**配置表单** —— 仍需先调研 settings schema 的声明方式与取值落点（见「待执行事项」1–3）。
