@@ -9,27 +9,27 @@
  *     directory natively. It reads ONLY rulemux's own `__rulemux__` prefix, so it coexists with any
  *     other `.dsh/rules` reader.
  *
- * Why this package self-provisions instead of depending on `rulemux`:
- *   A hard npm dependency makes the whole `dsh plugin add` fail whenever the registry mirror lags —
- *   an install-time failure the user cannot act on, for a plugin they only wanted to add. So this
- *   package declares NO dependencies: it always installs, and the CLI is obtained on FIRST RUN,
- *   in-process, exactly once (provisionOnce):
- *     1. resolve it (a dependency copy if one exists → `rulemux` on PATH);
- *     2. if missing, install it globally (pnpm -g, falling back to npm -g);
- *     3. create ~/.rulemux/config.toml if missing (via `rulemux init --agent dsh`).
- *   Then the session syncs and injects as usual.
+ * READINESS (first run, once per process) is exactly THREE steps, and every one of them must hold:
+ *   ① the `rulemux` CLI is resolvable AND its version satisfies REQUIRED_CLI. "It is installed" is
+ *      only half of it: a present-but-outdated CLI is NOT success — it is upgraded (pnpm -g, falling
+ *      back to npm -g) and re-checked, and if the version still does not satisfy we FAIL;
+ *   ② this plugin is loaded — implied by the fact that this code is running at all; there is nothing
+ *      to check and nothing that could fail here;
+ *   ③ ~/.rulemux/config.toml exists. It is created with `rulemux init --agent dsh` when missing; an
+ *      existing config counts as success and is NEVER overwritten.
+ * A step that does not hold THROWS, so the session fails visibly (dsh shows the error). There is
+ * deliberately no "succeeded halfway" notice: a half-set-up plugin is useless, and pretending
+ * otherwise is worse than failing.
  *
- * The CLI is a HARD prerequisite, not a nice-to-have: without it there is no sync, so the session
- * would run on stale (or no) rules while looking perfectly healthy. Therefore provisioning BLOCKS
- * the first turn until it finishes — there is deliberately no "carry on without it" fallback — and
- * if it ultimately fails it THROWS, so the failure is visible rather than a quietly rule-less
- * session. A wrong rule set is worse than a loud failure.
+ * SYNCING is a separate concern, exactly as it is for every other agent: `rulemux sync` runs once per
+ * session, and if it fails (no [[source]] configured, a bad path, anything) that is LOGGED and the
+ * session carries on with whatever rule files are already on disk. Sync is not part of — and cannot
+ * fail — the three readiness steps above.
  *
- * The one thing that is NOT a failure: a config that has no active [[source]] yet (our CLI exits
- * non-zero for that). That is a setup state, not breakage — nothing configured means nothing to
- * sync, not something broken — so it is REPORTED to the user once (see readyNotice) instead of
- * raised. Raising there would make a fresh install permanently unusable, since the config we
- * auto-create starts empty.
+ * Why readiness lives here at all: this package declares NO npm dependencies on purpose, because a
+ * hard dependency makes the whole `dsh plugin add` fail whenever the registry mirror lags — an
+ * install-time failure the user cannot act on. So the package always installs, and the CLI it needs
+ * is obtained on first run instead.
  *
  * It imports nothing from dsh: every host shape is structurally typed here, so any dsh whose event
  * names still match can load it (the same approach hindsight's coding-agents takes in src/dsh.ts).
@@ -56,10 +56,13 @@ const MANAGED_HEADER = "<!-- rulemux:managed -->"; // marks our injected block (
 const SOURCE_KIND = "plugin:rulemux"; // producer-owned source kind dsh expects for injected messages
 const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() in the Go CLI
 
-// `rulemux sync` exits non-zero when the config declares no [[source]] at all. That means "you have
-// not configured any rules yet", not "rulemux is broken" — matched on our own CLI's wording; both
-// halves ship from this repo, so the string moves together with the plugin.
-const NO_SOURCES = /has no \[\[source\]\]/i;
+// The CLI version this plugin needs. Kept here — NOT in package.json's dependencies (that would make
+// the plugin itself uninstallable when the mirror lags) and NOT in peerDependencies (pnpm may then
+// refuse to install it). `>=` means "this or newer"; an exact pin ("0.3.0" / "=0.3.0") means "exactly
+// this". Either way an unsatisfied version is upgraded, then re-checked, and failing that we throw.
+// ⚠ Re-check before release: it must stay the first version whose registry entry ships the dsh
+// adapter, because it also decides what we upgrade *to* (see installTarget).
+const REQUIRED_CLI = ">=0.3.0";
 
 const INSTALL_TIMEOUT_MS = 120_000; // global install / sync: generous, but never hang forever
 const PROBE_TIMEOUT_MS = 15_000; // resolving / probing the CLI
@@ -75,6 +78,11 @@ function configPath() {
 function tail(s, max = 400) {
   const t = String(s || "").trim().replace(/\s+/g, " ");
   return t.length > max ? `…${t.slice(-max)}` : t;
+}
+
+/** A version triple as text, for messages ("unknown" when it could not be parsed). */
+function versionText(v) {
+  return v ? `${v.major}.${v.minor}.${v.patch}` : "unknown version";
 }
 
 /**
@@ -126,22 +134,61 @@ function run(cmd, args, { cwd, timeoutMs = INSTALL_TIMEOUT_MS } = {}) {
 
 /**
  * How to invoke the rulemux CLI, or null when it is nowhere to be found:
- *   - a copy installed alongside us as an npm dependency (legacy layout), else
+ *   - a copy installed alongside us as an npm dependency (legacy layout; this package declares none), else
  *   - `rulemux` on PATH.
  */
 async function resolveCli() {
   try {
     const pkg = require_.resolve("rulemux/package.json");
     const shim = join(dirname(pkg), "bin", "rulemux.js");
-    if (existsSync(shim)) return { cmd: process.execPath, args: [shim], how: "dependency" };
+    if (existsSync(shim)) return { cmd: process.execPath, args: [shim], how: `dependency (${pkg})` };
   } catch {
     /* not installed as a dependency (the normal case: this package has no dependencies) */
   }
   const probe = await run("rulemux", ["--version"], { timeoutMs: PROBE_TIMEOUT_MS });
   if (probe.code === 0) {
-    return { cmd: "rulemux", args: [], how: "PATH" };
+    return { cmd: "rulemux", args: [], how: "PATH", probeOut: probe.out };
   }
   return null;
+}
+
+/** The version the resolved CLI reports (`rulemux X.Y.Z`), or null when it cannot be read. */
+async function probeCliVersion(cli) {
+  const out =
+    cli.probeOut ?? (await run(cli.cmd, [...cli.args, "--version"], { timeoutMs: PROBE_TIMEOUT_MS })).out;
+  const m = String(out || "").match(/(\d+)\.(\d+)\.(\d+)/);
+  return m ? { major: +m[1], minor: +m[2], patch: +m[3] } : null;
+}
+
+/** Compare two version triples: negative / 0 / positive, like a comparator. */
+function compareVersions(a, b) {
+  return a.major - b.major || a.minor - b.minor || a.patch - b.patch;
+}
+
+/**
+ * Does `v` satisfy `spec`? Supported shapes: ">=1.2.3", ">1.2.3", or an exact pin ("1.2.3" / "=1.2.3").
+ * Anything else is NOT satisfied: an unrecognised requirement must fail loudly, never be guessed at.
+ * (No semver dependency — three numbers compared pairwise is the whole job here.)
+ */
+function satisfies(v, spec = REQUIRED_CLI) {
+  if (!v) return false;
+  const m = String(spec).trim().match(/^(>=|>|=)?\s*(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const want = { major: +m[2], minor: +m[3], patch: +m[4] };
+  const cmp = compareVersions(v, want);
+  if (m[1] === ">=") return cmp >= 0;
+  if (m[1] === ">") return cmp > 0;
+  return cmp === 0; // "=1.2.3" and a bare "1.2.3" both mean exactly this version
+}
+
+/**
+ * The package spec to install. A range (">=x.y.z") means "anything at least this new", so we ask for
+ * `latest`; an exact pin means that exact version. Either way the version is re-read afterwards and
+ * the result decides success — we never assume the install did what we asked.
+ */
+function installTarget() {
+  const m = String(REQUIRED_CLI).trim().match(/^(\d+)\.(\d+)\.(\d+)$/);
+  return m ? `rulemux@${m[0]}` : "rulemux@latest";
 }
 
 /** The global bin directory a package manager installs executables into ("" if unknown). */
@@ -175,9 +222,9 @@ async function cliInGlobalBin(pm) {
  * Install the CLI globally: pnpm first (dsh itself uses pnpm), then npm. Returns
  * { cli, installedBy } on success, or null with every failure appended to `reasons`.
  */
-async function installCli(reasons) {
+async function installCli(reasons, spec) {
   for (const pm of ["pnpm", "npm"]) {
-    const args = pm === "npm" ? ["install", "-g", "rulemux"] : ["add", "-g", "rulemux"];
+    const args = pm === "npm" ? ["install", "-g", spec] : ["add", "-g", spec];
     const r = await run(pm, args);
     if (r.error) {
       reasons.push(`${pm}: cannot run (${r.error.message})`);
@@ -195,10 +242,73 @@ async function installCli(reasons) {
 }
 
 /**
- * The one-time, process-wide setup. Idempotent by construction: a module-level singleton, plus an
- * existsSync check before touching the config. Rejects (never resolves partially) when the CLI
- * cannot be obtained or the config cannot be created — see the file header for why that is not
- * softened into a fallback.
+ * Readiness step ①: a CLI that exists AND satisfies REQUIRED_CLI.
+ *
+ * An existing but unsatisfying version is upgraded, never accepted. After the upgrade the CLI is
+ * resolved again and the version re-read: if it STILL does not satisfy — typically because an older
+ * copy (a legacy node_modules copy, or a pinned one elsewhere) is still the one in effect — we throw
+ * rather than report success on a version we did not ask for.
+ */
+async function ensureCli(reasons) {
+  let cli = await resolveCli();
+  let found = cli ? await probeCliVersion(cli) : null;
+  if (cli && satisfies(found, REQUIRED_CLI)) return cli;
+
+  if (cli) {
+    reasons.push(
+      `found an existing rulemux ${versionText(found)} at ${cli.how}, which does not satisfy ${REQUIRED_CLI}`,
+    );
+  }
+
+  const spec = installTarget();
+  const installed = await installCli(reasons, spec);
+  if (!installed) {
+    throw new Error(
+      `rulemux-dsh: the \`rulemux\` CLI (${REQUIRED_CLI}) is required but could not be installed, so ` +
+        "this session cannot sync your rules.\n" +
+        reasons.map((x) => `  - ${x}`).join("\n") +
+        "\n  If you want to install it yourself instead, start a new dsh session afterwards:\n" +
+        `    npm install -g ${spec}        # or: pnpm add -g ${spec}`,
+    );
+  }
+
+  cli = installed.cli;
+  found = await probeCliVersion(cli);
+  if (!satisfies(found, REQUIRED_CLI)) {
+    throw new Error(
+      `rulemux-dsh: rulemux ${versionText(found)} is still the version in effect after installing ` +
+        `${spec}, and it does not satisfy ${REQUIRED_CLI}.\n` +
+        `  in effect: ${cli.how} (${[cli.cmd, ...cli.args].join(" ")})\n` +
+        "  An outdated copy is shadowing the upgrade — remove or upgrade that copy, then start a " +
+        "new dsh session.",
+    );
+  }
+  return cli;
+}
+
+/**
+ * Readiness step ③: the config exists. Missing ⇒ `rulemux init --agent dsh` writes a commented
+ * sample; present ⇒ nothing happens (an existing config is never overwritten).
+ *
+ * (Step ② — "this plugin is loaded" — is implied by this code running at all; there is nothing to
+ * check, and no way for it to fail here.)
+ */
+async function ensureConfig(cli) {
+  const cfg = configPath();
+  if (existsSync(cfg)) return;
+  const r = await run(cli.cmd, [...cli.args, "init", "--agent", "dsh"]);
+  if (r.error || r.code !== 0) {
+    throw new Error(
+      `rulemux-dsh: could not create ${cfg} (\`rulemux init --agent dsh\`).\n` +
+        `  ${tail(r.err || r.out) || r.error?.message || `exit ${r.code}`}`,
+    );
+  }
+}
+
+/**
+ * The one-time, process-wide readiness chain: ① CLI (with version check) → ③ config. Idempotent by
+ * construction (a module-level singleton + an existsSync guard), and it either completes or rejects —
+ * there is no partial success to report.
  */
 let provisioning = null;
 
@@ -206,108 +316,35 @@ function provisionOnce() {
   if (!provisioning) {
     provisioning = (async () => {
       const reasons = [];
-      let cli = await resolveCli();
-      let installedBy = "";
-
-      if (!cli) {
-        const installed = await installCli(reasons);
-        if (!installed) {
-          throw new Error(
-            "rulemux-dsh: the `rulemux` CLI is required but could not be installed, so this " +
-              "session cannot sync your rules.\n" +
-              reasons.map((x) => `  - ${x}`).join("\n") +
-              "\n  Install it yourself and start a new dsh session:\n" +
-              "    npm install -g rulemux        # or: pnpm add -g rulemux",
-          );
-        }
-        cli = installed.cli;
-        installedBy = installed.installedBy;
-      }
-
-      const cfg = configPath();
-      let createdConfig = false;
-      if (!existsSync(cfg)) {
-        const r = await run(cli.cmd, [...cli.args, "init", "--agent", "dsh"]);
-        if (r.error || r.code !== 0) {
-          throw new Error(
-            `rulemux-dsh: could not create ${cfg} (\`rulemux init --agent dsh\`).\n` +
-              `  ${tail(r.err || r.out) || r.error?.message || `exit ${r.code}`}`,
-          );
-        }
-        createdConfig = true;
-      }
-
-      return { cli, installedBy, createdConfig, configPath: cfg };
+      const cli = await ensureCli(reasons); // ① (throws when unusable)
+      await ensureConfig(cli); // ③ (throws when it cannot be created)
+      return { cli };
     })();
   }
   return provisioning;
 }
 
 /**
- * The one-time notice shown in the first session after we installed / initialised something, or
- * after discovering that the config has no active [[source]] yet.
- */
-function readyNotice(prov) {
-  const lines = [];
-  if (prov.installedBy) {
-    lines.push(`- The rulemux CLI was installed globally (${prov.installedBy}).`);
-  }
-  if (prov.createdConfig) {
-    lines.push(`- A configuration file was created at ${prov.configPath}.`);
-  }
-  if (prov.nothingToSync) {
-    lines.push(
-      `- ${prov.configPath} declares no active [[source]] yet, so no rules are being synced. Add ` +
-        "your rule files there as [[source]] entries to start.",
-    );
-  }
-  if (!lines.length) return "";
-  return [
-    "rulemux (one-time setup): the rulemux dsh plugin finished setting itself up.",
-    ...lines,
-    "Tell the user this once, in the language you are currently using with them, before answering " +
-      "their request.",
-  ].join("\n");
-}
-
-/**
- * Sync once for this workspace. A non-zero exit is a failure and is raised — except for two cases:
- *   - a config with no [[source]] at all ⇒ { nothingToSync: true } (see the file header);
- *   - an OLD CLI that predates the dsh adapter answers "unknown agent": upgrade it globally once
- *     and retry.
+ * Sync once for this workspace — NOT part of readiness. Syncing is the same concern for every agent,
+ * and it is not ours to fail the session over: a non-zero exit is logged (with the CLI's own stderr)
+ * and the session carries on with whatever is already on disk. This is also where a config with no
+ * [[source]] yet lands: the CLI exits non-zero, we log it, and nothing is injected.
  */
 async function syncOnce(root, cli) {
-  let r = await run(cli.cmd, [...cli.args, "sync", "--hook", "--agent", "dsh"], { cwd: root });
-  if (r.code === 0) return { nothingToSync: false };
-  if (NO_SOURCES.test(`${r.err}\n${r.out}`)) return { nothingToSync: true };
-
-  const text = `${r.err}\n${r.out}`;
-  if (/unknown agent|not supported yet/i.test(text)) {
-    const up = await run("npm", ["install", "-g", "rulemux@latest"]);
-    if (up.code === 0) {
-      const newer = (await resolveCli()) || (await cliInGlobalBin("npm"));
-      if (newer) {
-        const retry = await run(newer.cmd, [...newer.args, "sync", "--hook", "--agent", "dsh"], {
-          cwd: root,
-        });
-        if (retry.code === 0) return { nothingToSync: false };
-        if (NO_SOURCES.test(`${retry.err}\n${retry.out}`)) return { nothingToSync: true };
-        r = retry;
-      }
-    }
+  const r = await run(cli.cmd, [...cli.args, "sync", "--hook", "--agent", "dsh"], { cwd: root });
+  if (r.code !== 0) {
+    console.error(
+      `rulemux-dsh: \`rulemux sync --hook --agent dsh\` failed in ${root} ` +
+        `(exit ${r.code ?? "n/a"}). Continuing with the rule files already on disk.\n` +
+        `  ${tail(r.err || r.out) || r.error?.message || "no output"}`,
+    );
   }
-
-  throw new Error(
-    `rulemux-dsh: \`rulemux sync --hook --agent dsh\` failed in ${root}.\n` +
-      `  ${tail(r.err || r.out) || r.error?.message || `exit ${r.code}`}`,
-  );
 }
 
-/** Ready-to-inject state for a workspace: CLI + config guaranteed, rules synced. */
+/** Readiness + one sync. Throws only for the three readiness steps — never for sync. */
 async function ensureReady(root) {
   const prov = await provisionOnce();
-  const sync = await syncOnce(root, prov.cli);
-  return { ...prov, nothingToSync: sync.nothingToSync };
+  await syncOnce(root, prov.cli);
 }
 
 /** The directory a session is working in (dsh records it on the session header). */
@@ -330,12 +367,6 @@ function readRules(root) {
     }
   }
   return parts.join("\n\n");
-}
-
-/** Our managed block: the header (re-injection check) plus whatever we have to say. */
-function composeBlock(notice, rules) {
-  const body = [notice, rules].filter(Boolean).join("\n\n");
-  return `${MANAGED_HEADER}\n\n${body}`;
 }
 
 /** The injection message: a non-user-typed message dsh renders as recalled material. */
@@ -386,8 +417,8 @@ function stateFor(agent) {
 /**
  * Kick off (or reuse) the one readiness chain for a session. Started at session-start so the
  * install/init work overlaps the user typing; awaited — with no upper bound — at the first turn.
- * The session-start copy must not reject unobserved, so a no-op catch is attached: the real error
- * is surfaced where it matters, at the first pre-step.
+ * The session-start copy must not reject unobserved, so a no-op catch is attached: the real error is
+ * surfaced where it matters, at the first pre-step.
  */
 function startReady(state) {
   if (!state.ready) {
@@ -396,9 +427,6 @@ function startReady(state) {
   }
   return state.ready;
 }
-
-/** Shown once per process: the fact that we installed / initialised something is setup news. */
-let noticeShown = false;
 
 export function apply(ctx) {
   ctx.on("agent/session-start", ({ agent }) => {
@@ -431,26 +459,17 @@ export function apply(ctx) {
       state.injected = false; // fall through and re-inject
     }
 
-    // Hard prerequisite: sync + injection only happen once the CLI and config are really there.
-    // A rejection here is meant to surface (see the file header) — it is not caught.
-    const prov = await startReady(state);
+    // The three readiness steps are a hard prerequisite. A rejection here is meant to surface as a
+    // visible session error (see the file header) — so it is deliberately not caught.
+    await startReady(state);
 
-    const rules = readRules(state.root);
-    let notice = "";
-    if (!noticeShown) {
-      notice = readyNotice(prov);
-      if (notice) noticeShown = true;
-    }
-
-    if (!rules && !notice) {
+    const text = readRules(state.root);
+    if (!text) {
       state.injected = true; // nothing to inject: do not re-scan on every later turn
       return decision;
     }
     state.injected = true;
-    return {
-      kind: "enter",
-      messages: [...decision.messages, injectionMessage(composeBlock(notice, rules))],
-    };
+    return { kind: "enter", messages: [...decision.messages, injectionMessage(text)] };
   });
 
   ctx.on("agent/disposed", ({ agent }) => {

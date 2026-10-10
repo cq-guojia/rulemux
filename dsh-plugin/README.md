@@ -33,32 +33,40 @@ There is no build step: `index.mjs` is plain ESM, so a git install needs no `all
 
 **Restart dsh after installing** — the plugin mounts on the next start.
 
-## Nothing else to install: the first run sets itself up
+## First run: three steps, all or nothing
 
 This package declares **no dependencies** on purpose: a hard `rulemux` dependency would make the
 whole `dsh plugin add` fail whenever the registry mirror lags — an install-time failure you cannot
-act on, for a plugin you only wanted to add. The `rulemux` CLI is instead obtained on the **first
-run**, inside the session, exactly once:
+act on. So instead the plugin makes itself ready on the **first run**, and it does exactly three
+things. **Every one of them must hold; otherwise the session fails with an error.**
 
-1. resolve it — a dependency copy if one exists, else `rulemux` on `PATH`;
-2. if missing, install it globally: `pnpm add -g rulemux`, falling back to `npm install -g rulemux`;
-3. create `~/.rulemux/config.toml` if it is missing (a commented sample — add your `[[source]]` entries).
+1. **The CLI is there and current.** `rulemux` is resolved (a dependency copy if one exists, else
+   `PATH`) and its version must satisfy `>=0.3.0`. "It is installed" is only half of it: an older CLI
+   (or none) is upgraded with `pnpm add -g`, falling back to `npm install -g`, and the version is
+   re-read afterwards. If the version still does not satisfy — e.g. an outdated copy elsewhere keeps
+   shadowing the upgrade — that is a **failure**, not a success.
+2. **This plugin is loaded.** Nothing to check: the fact that this code runs at all is the proof.
+3. **The config exists.** `~/.rulemux/config.toml`, created with `rulemux init --agent dsh` when it is
+   missing. An existing config counts as success and is **never overwritten**.
 
-Then the session syncs and injects as usual, and the first session carries one short notice telling
-you what was installed and created.
+Failures are loud and actionable: the error names the step that failed, carries the raw output, and
+says where to fix it (then restart the session to retry). There is deliberately no "succeeded
+halfway" notice — a half-ready plugin is useless, and it must not look healthy.
 
-**Failure is loud, not silent.** The CLI is a hard prerequisite: without it nothing syncs, so the
-session would run on stale (or empty) rules while looking perfectly healthy. Provisioning therefore
-**blocks** the first turn until it finishes, and if it ultimately fails it **raises an error**,
-naming each reason and the command to run by hand — it never carries on without rules.
+## Syncing is separate, and never fails the session
 
-The one thing that is *not* an error: a config with no `[[source]]` yet. That is a setup state, not
-a broken install, so it is reported to you once instead of raised.
+`rulemux sync --hook --agent dsh` runs once per session, exactly as it does for every other agent.
+A non-zero exit is **logged** (`console.error`, which lands in dsh's log) and the session carries on
+with whatever rule files are already on disk.
+
+A config with no `[[source]]` yet lands here too — the CLI exits non-zero, it is logged, and nothing
+is injected. That is a normal syncing outcome, **not** a readiness failure: it has no bearing on the
+three steps above.
 
 ## What it does
 
-- `agent/session-start` → starts the one-time setup above, then runs `rulemux sync --hook --agent dsh`
-  **once**, so the on-disk copies are current.
+- `agent/session-start` → starts the one-time three-step readiness chain, then runs
+  `rulemux sync --hook --agent dsh` **once**, so the on-disk copies are current.
 - `agent/pre-step` → on the first turn that carries user input, reads `.dsh/rules/__rulemux__*.md`
   and injects them as recalled material. It injects **once** per session and only re-injects if a
   later compaction provably dropped the block — never every turn.
@@ -68,7 +76,7 @@ a broken install, so it is reported to you once instead of raised.
 ## Requirements
 
 - Node 18+ (plain ESM) — dsh's own runtime satisfies this.
-- Network and permission for a global install, **only if** `rulemux` is not already resolvable.
+- Network and permission for a global install, **only if** `rulemux` is missing or too old.
 - A rulemux config (`~/.rulemux/config.toml`) whose `[[source]]` entries cover the workspace; it is
   created for you on first run, then it is yours to fill in.
 
