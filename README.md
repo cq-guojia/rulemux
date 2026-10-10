@@ -58,13 +58,14 @@ directory and hook location have been confirmed by a real canary test. Today:
   the normal dsh way — straight from git, no npm publish needed:
   `dsh plugin --profile web add "github:cq-guojia/rulemux#path:/dsh-plugin"`. So
   `rulemux init --agent dsh` installs nothing — it just prints the plugin command.
-  That plugin then **sets itself up on first run** (restart dsh after installing). Readiness is three
-  steps and **all of them must hold**: the `rulemux` CLI is resolved *and* its version satisfies the
+  That plugin then **sets itself up as dsh starts** (restart dsh after installing): readiness is three
+  steps and **all of them must hold** — the `rulemux` CLI is resolved *and* its version satisfies the
   plugin's minimum (an older one is upgraded with pnpm/npm and re-checked — never accepted as-is),
   the plugin itself is loaded, and `~/.rulemux/config.toml` exists (created for you when missing,
   never overwritten). Any step that does not hold **raises**, so the session fails visibly instead of
-  quietly running without rules. Syncing is a separate concern: a failing `rulemux sync` is logged,
-  and the session carries on.
+  quietly running without rules. Because it happens at startup, `~/.rulemux/config.toml` is already
+  there when you go to edit it: install → restart → edit the config → open **one** session. Syncing
+  is a separate concern: a failing `rulemux sync` is logged, and the session carries on.
 
 ---
 

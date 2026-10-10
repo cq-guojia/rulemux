@@ -33,12 +33,25 @@ There is no build step: `index.mjs` is plain ESM, so a git install needs no `all
 
 **Restart dsh after installing** — the plugin mounts on the next start.
 
-## First run: three steps, all or nothing
+## The flow you get
+
+```bash
+dsh plugin --profile <p> add "github:cq-guojia/rulemux#path:/dsh-plugin"
+# restart dsh              → ~/.rulemux/config.toml now exists (see below)
+# edit it                  → add your [[source]] entries
+# open ONE session         → the rules are injected
+```
+
+No throwaway "chat once so it can create the config" session: readiness starts at load, before any
+session exists.
+
+## At dsh startup: three steps, all or nothing
 
 This package declares **no dependencies** on purpose: a hard `rulemux` dependency would make the
 whole `dsh plugin add` fail whenever the registry mirror lags — an install-time failure you cannot
-act on. So instead the plugin makes itself ready on the **first run**, and it does exactly three
-things. **Every one of them must hold; otherwise the session fails with an error.**
+act on. dsh runs no install scripts either, so instead the plugin makes itself ready **when it loads,
+i.e. when dsh starts**, and it does exactly three things. **Every one of them must hold; otherwise the
+session fails with an error.**
 
 1. **The CLI is there and current.** `rulemux` is resolved (a dependency copy if one exists, else
    `PATH`) and its version must satisfy `>=0.3.0`. "It is installed" is only half of it: an older CLI
@@ -49,15 +62,18 @@ things. **Every one of them must hold; otherwise the session fails with an error
 3. **The config exists.** `~/.rulemux/config.toml`, created with `rulemux init --agent dsh` when it is
    missing. An existing config counts as success and is **never overwritten**.
 
+Because steps 1 and 3 need no workspace, they run at load; step 2 is the load itself.
+
 Failures are loud and actionable: the error names the step that failed, carries the raw output, and
 says where to fix it (then restart the session to retry). There is deliberately no "succeeded
 halfway" notice — a half-ready plugin is useless, and it must not look healthy.
 
 ## Syncing is separate, and never fails the session
 
-`rulemux sync --hook --agent dsh` runs once per session, exactly as it does for every other agent.
-A non-zero exit is **logged** (`console.error`, which lands in dsh's log) and the session carries on
-with whatever rule files are already on disk.
+`rulemux sync --hook --agent dsh` runs once per session — it needs the session's workspace, which
+does not exist at load time — exactly as syncing works for every other agent. A non-zero exit is
+**logged** (`console.error`, which lands in dsh's log) and the session carries on with whatever rule
+files are already on disk.
 
 A config with no `[[source]]` yet lands here too — the CLI exits non-zero, it is logged, and nothing
 is injected. That is a normal syncing outcome, **not** a readiness failure: it has no bearing on the
@@ -65,8 +81,9 @@ three steps above.
 
 ## What it does
 
-- `agent/session-start` → starts the one-time three-step readiness chain, then runs
-  `rulemux sync --hook --agent dsh` **once**, so the on-disk copies are current.
+- At load (dsh startup) → starts the three-step readiness chain, so `~/.rulemux/config.toml` is there
+  before you need it. At `agent/session-start` → runs `rulemux sync --hook --agent dsh` **once**, so
+  the on-disk copies are current.
 - `agent/pre-step` → on the first turn that carries user input, reads `.dsh/rules/__rulemux__*.md`
   and injects them as recalled material. It injects **once** per session and only re-injects if a
   later compaction provably dropped the block — never every turn.
@@ -78,7 +95,7 @@ three steps above.
 - Node 18+ (plain ESM) — dsh's own runtime satisfies this.
 - Network and permission for a global install, **only if** `rulemux` is missing or too old.
 - A rulemux config (`~/.rulemux/config.toml`) whose `[[source]]` entries cover the workspace; it is
-  created for you on first run, then it is yours to fill in.
+  created for you at dsh startup, then it is yours to fill in.
 
 ## License
 

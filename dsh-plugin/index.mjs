@@ -9,7 +9,7 @@
  *     directory natively. It reads ONLY rulemux's own `__rulemux__` prefix, so it coexists with any
  *     other `.dsh/rules` reader.
  *
- * READINESS (first run, once per process) is exactly THREE steps, and every one of them must hold:
+ * READINESS is exactly THREE steps, and every one of them must hold:
  *   ① the `rulemux` CLI is resolvable AND its version satisfies REQUIRED_CLI. "It is installed" is
  *      only half of it: a present-but-outdated CLI is NOT success — it is upgraded (pnpm -g, falling
  *      back to npm -g) and re-checked, and if the version still does not satisfy we FAIL;
@@ -21,15 +21,24 @@
  * deliberately no "succeeded halfway" notice: a half-set-up plugin is useless, and pretending
  * otherwise is worse than failing.
  *
+ * WHEN it runs: at plugin LOAD — i.e. when dsh starts — not at the first session. dsh calls apply()
+ * while composing this plugin, and the workspace-independent half of readiness (① CLI, ③ config)
+ * needs no session context, so it starts right there. That is what makes the flow sane: install the
+ * plugin, restart dsh, find ~/.rulemux/config.toml already waiting, fill in your [[source]] entries,
+ * then open ONE session — and the rules are injected. No throwaway "chat once to generate the
+ * config" session. (The first session after a load still re-checks nothing: readiness is a
+ * process-wide singleton.)
+ *
  * SYNCING is a separate concern, exactly as it is for every other agent: `rulemux sync` runs once per
- * session, and if it fails (no [[source]] configured, a bad path, anything) that is LOGGED and the
- * session carries on with whatever rule files are already on disk. Sync is not part of — and cannot
- * fail — the three readiness steps above.
+ * session (it needs the session's workspace, which does not exist at load time), and if it fails (no
+ * [[source]] configured, a bad path, anything) that is LOGGED and the session carries on with
+ * whatever rule files are already on disk. Sync is not part of — and cannot fail — the three
+ * readiness steps above.
  *
  * Why readiness lives here at all: this package declares NO npm dependencies on purpose, because a
  * hard dependency makes the whole `dsh plugin add` fail whenever the registry mirror lags — an
- * install-time failure the user cannot act on. So the package always installs, and the CLI it needs
- * is obtained on first run instead.
+ * install-time failure the user cannot act on. dsh runs no install scripts either, so the package
+ * always installs and the CLI it needs is obtained when the plugin loads instead.
  *
  * It imports nothing from dsh: every host shape is structurally typed here, so any dsh whose event
  * names still match can load it (the same approach hindsight's coding-agents takes in src/dsh.ts).
@@ -415,10 +424,10 @@ function stateFor(agent) {
 }
 
 /**
- * Kick off (or reuse) the one readiness chain for a session. Started at session-start so the
- * install/init work overlaps the user typing; awaited — with no upper bound — at the first turn.
- * The session-start copy must not reject unobserved, so a no-op catch is attached: the real error is
- * surfaced where it matters, at the first pre-step.
+ * Kick off (or reuse) the one readiness chain for a session, and sync once for its workspace.
+ * Awaited — with no upper bound — at the first turn. The copy started here must not reject
+ * unobserved, so a no-op catch is attached: the real error is surfaced where it matters, at the
+ * first pre-step.
  */
 function startReady(state) {
   if (!state.ready) {
@@ -429,9 +438,15 @@ function startReady(state) {
 }
 
 export function apply(ctx) {
+  // Start the workspace-independent half of readiness NOW. dsh calls apply() at startup — well before
+  // any session — so ~/.rulemux/config.toml is already there by the time the user goes to edit it.
+  // The rejection is deliberately swallowed here (an unhandled rejection at load could disturb dsh's
+  // startup) and re-surfaces at the first pre-step, which awaits the very same promise.
+  provisionOnce().catch(() => {});
+
   ctx.on("agent/session-start", ({ agent }) => {
     const state = stateFor(agent);
-    if (state) startReady(state);
+    if (state) startReady(state); // fallback (if apply was never called) + the per-session sync
   });
 
   ctx.on("agent/pre-step", async ({ agent, signal }, next) => {
