@@ -1,6 +1,6 @@
 # DSH（DeepSeek Harness）适配器
 
-> 状态：🔧 进行中（2026-10-09 开块；2026-10-10 定稿「仓库子包」方案并连做四轮收口：自给自足 → 三步全成或抛错 → 就绪时机提到 dsh 启动装载）
+> 状态：✅ 完成封卷（2026-10-10 真机 canary 通过：`.dsh/rules` 注入成功、装载期生成 `~/.rulemux/config.toml`、就绪三步全过、token 成本与原生读文件一致且命中提示缓存）
 > 类型：新 agent 适配器（plugin-first 宿主）
 > 关联：`docs/design/external/agent-rules-dirs.md` §一 DSH 行 · `docs/PROGRESS.md` T3 · 子包 [`dsh-plugin/`](../../dsh-plugin/)
 
@@ -78,7 +78,7 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 | 无 CLI | 装载期不炸；首个 pre-step 抛错 | ✅ |
 | 旧版 + 升级无效 / 升级成功 | 抛错 / 通过（升级到 0.3.1） | ✅ |
 
-**新增 canary 待核**：① 真机上「重启后**不开任何会话**」`~/.rulemux/config.toml` 是否已存在 —— 这条依赖「dsh 在启动装载时就会调用 `apply()`」这一前提，本机查 hindsight 知识库未见既有结论，属未坐实假设；② 装载期的失败是否确实不在启动时炸掉 dsh（应只在会话里抛）。
+**canary 已于 2026-10-10 真机坐实**（容器 `ccaf4e6ccb4a`）：① 「重启后不开任何会话，`~/.rulemux/config.toml` 已存在」✅ —— 装载期 `apply()` 即生成（log `05:26:25 apply() called` 下无 `readiness failed`）；② 装载期失败不炸 dsh 启动、只在会话里可见抛错 ✅ —— 0.3.2 那次 `readiness failed` 既入 `~/.rulemux-dsh-load.log` 又会话可见；③ 升级到 0.3.3（判据改为「版本满足 `>=0.3.1` 或 CLI 认识 `dsh`」）后三步全过、配置生成、注入一次（用户侧截图「历史召回 plugin:rulemux」T1 S1）✅。
 
 ## 真源（已查，非文档推测）
 
@@ -102,15 +102,15 @@ DSH 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook b
 | Go 侧「不装宿主配置」 | ✅ | `internal/hooks/install.go` 的 `ErrHookExternal`；init/doctor/uninstall 提示分支 |
 | 移除旧方案 A | ✅ | 删 `internal/hooks/dsh.go`、`assets/rulemux-dsh.js`、`dsh_test.go` |
 | 验证 | ✅ | `go build` / `go vet` / `go test ./...` 全绿；`npm pack --dry-run` 4 文件、`node --check` 通过；假 ctx 冒烟见上表 |
-| **canary 坐实** | 🔴 待办 | 本机无 dsh；需在装了 dsh 的机器装插件并核验注入 |
+| **canary 坐实** | ✅ | 2026-10-10 真机（容器 `ccaf4e6ccb4a`）：装插件+重启 → 装载期生成 `~/.rulemux/config.toml`、注入一次成功、token 成本与原生读文件一致且命中提示缓存 |
 
 ## 待办 / 未决
 
-1. **🔴 canary**：装 dsh → 重启 → `dsh plugin --profile web add rulemux-dsh`（或 `.tgz` / git spec）→ 新会话核验「规则被读到、无重复注入、无任何提示」。
-2. **首次就绪的三个待核**：① 装完插件后 `pnpm/npm` 在那个宿主进程里是否真的可执行；② **抛错在真机上是否表现为会话可见的失败**（而不是被宿主吞掉后静默继续）——这是本轮设计的交付前提；③ 版本探测在真机 CLI 上的输出形态（当前按 `rulemux X.Y.Z` 解析）。
-3. **🔴 先发 0.3.1（当前阻塞，见上「发布缺口」）**：`REQUIRED_CLI` 已改为 `>=0.3.1`，而 npm 上最新仍是 0.3.0 且其不含 dsh ⇒ 在 0.3.1 发布前任何机器都会卡在第①/③步。发版 = master 推 tag `v0.3.1`；发完 `npm view rulemux version` 核对（CI 的 npm 步骤可能因缺 `NPM_TOKEN` 被静默跳过）。
-4. **发 npm？**：用户口径「能发就发，发不了 git 装也行」——包已可 `npm pack`，是否 publish 待定。
-5. **二期**：`$DSH_HOME/rules` 全局规则需 rulemux 目前没有的「用户级 sources」概念，暂不做。
+1. **✅ canary**：2026-10-10 真机（容器 `ccaf4e6ccb4a`）通过 —— 装载期生成 `~/.rulemux/config.toml`、注入一次成功、token 成本与原生读文件一致且命中提示缓存。
+2. **✅ 首次就绪三待核**：① 宿主进程内 `pnpm/npm` 可用（自动升级走通）② 抛错会话可见（log 实证）③ 版本探测输出形态（按 `rulemux X.Y.Z` + `--help` 列 dsh）— 均通过。
+3. **✅ 先发 0.3.1**：2026-10-10T04:09Z 发版、npm `latest`（见 PROGRESS 说明）。
+4. **发 npm（rulemux-dsh）？**：git 装已可用；是否 `npm publish` 待定（转 PROGRESS 未决项）。
+5. **二期**：`$DSH_HOME/rules` 全局规则需 rulemux 尚无的「用户级 sources」概念，明确不做（转 PROGRESS 未决项留痕）。
 
 ## 发布缺口（2026-10-10 发现，当前阻塞）
 

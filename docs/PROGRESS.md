@@ -22,13 +22,13 @@
 
 | # | 问题 | 现状与影响 | 将来怎么解（方向，未定） |
 |---|---|---|---|
-| T3 | **DeepSeek Harness 适配器（子包方案）已实现，🔴 待 canary** | 定稿：「Go 同步进 `.dsh/rules` + 仓库子包 `dsh-plugin/`（npm 名 `rulemux-dsh`）经 `dsh plugin add` 安装注入」；registry `dsh` = Tier1 / `Style=external` / `Verified=true`（先行开放）。旧「内嵌 + `init`」方案 A 已删。2026-10-10 插件定稿「无依赖 + 三步就绪全成或抛错」：① CLI 可得**且版本合规**（旧版自动升级，复查仍不合规即失败）② 插件已装载 ③ 配置存在（已有绝不覆盖）；**同步与就绪解耦**，sync 失败只记日志；已无「成功了一半」的提示。就绪在 `apply()`（dsh 启动装载）时**立即**开始 ⇒ 重启后 `~/.rulemux/config.toml` 已就位，改完配置开**一次**会话即注入 | 装了 dsh 的机器 `dsh plugin --profile <p> add rulemux-dsh` + 新会话核验注入；回写 `external/agent-rules-dirs.md` §四 |
-| T4 | **各 agent 核实未完成（剩余家）** | Claude Code 已于 2026-10-07 经官方文档核实；CodeBuddy、WorkBuddy 已坐实；**Trae 已于 2026-10-09 随 `v0.3.0` 坐实（见 T10）**；**Codex / OpenCode / DeepSeek 🔴 待补** ⇒ 除已核实项外不得作实现依据 | 其余各家按 `features/verification.md` 跑实测闭环，并补齐适用版本与出处 |
+| T4 | **各 agent 核实未完成（剩余家）** | Claude Code 已于 2026-10-07 经官方文档核实；CodeBuddy、WorkBuddy 已坐实；**Trae 已于 2026-10-09 随 `v0.3.0` 坐实（见 T10）**；**Codex / OpenCode 🔴 待补**（DeepSeek ✅ 2026-10-10 随 dsh 适配器 canary 坐实）⇒ 除已核实项外不得作实现依据 | 其余各家按 `features/verification.md` 跑实测闭环，并补齐适用版本与出处 |
 | T6 | **Codex hooks 配置落点待查证**（Trae 已坐实） | Trae `hooks.json` 落点与 schema 已随 `v0.3.0` 坐实；**Codex（`~/.codex/config.toml`）仍待补** | Codex 接入时再查。结论回写 `external/` |
-| T10 | **canary 实测坐实外部事实（剩余家）** | CodeBuddy ✅（2026-10-08）、WorkBuddy ✅（2026-10-09, `v0.2.7`）、Trae ✅（2026-10-09, `v0.3.0`）均已坐实；**Codex / OpenCode / Claude / DeepSeek 🔴 待补** | codex / opencode 按 `features/verification.md` 跑 `rulemux verify`；结论回写 `external/agent-rules-dirs.md` §四 |
+| T10 | **canary 实测坐实外部事实（剩余家）** | CodeBuddy ✅（2026-10-08）、WorkBuddy ✅（2026-10-09, `v0.2.7`）、Trae ✅（2026-10-09, `v0.3.0`）均已坐实；**Codex / OpenCode / Claude 🔴 待补**（DeepSeek ✅ 2026-10-10 随 dsh 适配器 canary 坐实） | codex / opencode 按 `features/verification.md` 跑 `rulemux verify`；结论回写 `external/agent-rules-dirs.md` §四 |
 | T11 | **Claude 侧 sync 未落地（open bug）** | 本工作区那次 Claude 会话里 `.claude/` 仅有 `settings.json`、无 `rules/` 目录，canary 暗号未被读到 ⇒ 同步链路未在该 agent 生效；根因未定（adapter 路径 / hook 触发 / 该工作区未装钩子） | 开一次 Claude Code 会话，查 `rulemux sync --agent claude` 是否真生成 `.claude/rules/__rulemux__*`；结合 `doctor` 与 `external/agent-rules-dirs.md` §四 排查 |
+| T16 | **rulemux-dsh npm 发布（可选）** | dsh 适配器已用 git 装可用；是否 `npm publish` 由「能发就发」口径决定（不发也不阻塞使用） | 择机 `npm publish`（或保持 git 装）；CLI 发布缺口 `v0.3.1` 已发、npm `latest` 闭环 |
 
-> 已结案项（**T0 / T1 / T2 / T5 / T7 / T8 / T9 / T12 / T13 / T14 / T15**）已移入 [`PROGRESS-HISTORY.md`](PROGRESS-HISTORY.md)，本表只留在办事项。
+> 已结案项（**T0 / T1 / T2 / T3 / T5 / T7 / T8 / T9 / T12 / T13 / T14 / T15**）已移入 [`PROGRESS-HISTORY.md`](PROGRESS-HISTORY.md)，本表只留在办事项。
 
 ---
 
@@ -38,6 +38,5 @@
 
 - **给仓库配 `NPM_TOKEN` secret**（Settings → Secrets → Actions，Automation 类型 token）：否则 CI 的 npm 步骤按设计跳过，每次发版只能手动 `npm publish`（0.2.7 就是手动发的）。
 - `WORKBUDDY_CONFIG_DIR` 是否决定用户级配置目录：仍未坐实（产物里只在 safe-delete 日志白名单出现）；坐实后再考虑加入注册表 `HookDirEnv`。
-- **DSH（DeepSeek Harness）适配器（子包方案）**：Go 侧（sync 落 `.dsh/rules`、`Style=external`）与子包 `dsh-plugin/` 均完成；2026-10-10 插件定稿「**无依赖 + 三步就绪（CLI 版本合规 / 插件已装载 / 配置存在）全成或抛错**」，同步与就绪解耦（sync 失败只记日志），且就绪在**插件装载（dsh 启动）时**即开始。**待办**：① 装了 dsh 的机器装插件 + 重启 → **先核「不开任何会话，`~/.rulemux/config.toml` 是否已存在」**（依赖「dsh 启动装载即调用 `apply()`」这一未坐实假设）→ 再开会话核「规则被读到、不重复注入、无提示」（canary）；② 核验真机里 `pnpm/npm` 是否可执行、**抛错是否表现为会话可见的失败**、装载期失败是否不炸启动；③ **CLI 0.3.1 已发**（2026-10-10T04:09Z，npm `latest`）。插件的就绪判据同时从「只看版本」改为「**版本满足 `>=0.3.1`，或该 CLI 真的认识 `dsh`**」——真机暴露：用 `go build` / `go install` 直编的二进制自报 `main.go` 里写死的 `0.3.0`（发布流水线才用 `-X main.version` 覆盖），但它的树里带 dsh，旧判据会误杀一个完全可用的 CLI；④ 发不发 npm 属可选（不发也能 git 装）。过程见 `docs/worklog/dsh-adapter.md`。
-
-> 各 agent 接入 / 核实 / canary 的剩余工作见 §二 未决项（T3 / T4 / T6 / T10 / T11）。
+- **DSH 插件设置界面（rulemux-dsh）**：dsh 适配器 canary 已坐实（见 `worklog/dsh-adapter.md`），下个会话立项做「插件设置界面」——让用户在 dsh 设置面板直接配置，替代手改 `~/.rulemux/config.toml`；待执行事项见 `worklog/dsh-plugin-settings-ui.md`（先调研 dsh 插件如何声明 settings schema，再定最小集与实现）。
+> 各 agent 接入 / 核实 / canary 的剩余工作见 §二 未决项（T4 / T6 / T10 / T11）；DSH 插件设置界面见 `worklog/dsh-plugin-settings-ui.md`。
