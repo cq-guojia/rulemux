@@ -144,7 +144,9 @@ ok "workspace matching"
 # 12. Ledger: uninstalling from one workspace also sweeps the other recorded ones.
 # Prior steps synced into $WS and wsA, so both are in the ledger (wsB is undeclared
 # and therefore skipped => never recorded).
-"$BIN" uninstall --agent "$AGENT" --workspace "$TMP/wsB" --yes >"$TMP/uninstall.log" 2>&1 || fail "uninstall exited non-zero"
+# --config is required here: pruning needs the config to know what is still in use, and an
+# unreadable config deliberately leaves every file untouched (safety guard, see uninstall.go).
+"$BIN" uninstall --agent "$AGENT" --config "$CFG" --workspace "$TMP/wsB" --yes >"$TMP/uninstall.log" 2>&1 || fail "uninstall exited non-zero"
 [ ! -f "$TMP/wsB/$RULES_REL/__rulemux__a.md" ] || fail "wsB residue was not removed"
 [ ! -f "$TMP/wsA/$RULES_REL/__rulemux__a.md" ] || fail "ledger sweep missed wsA"
 [ ! -f "$WS/$RULES_REL/__rulemux__a.md" ]     || fail "ledger sweep missed $WS"
