@@ -69,7 +69,7 @@ func workspace(v string) (string, error) {
 //
 // Trae / Claude Code 的 hook 事件会把 `cwd` 与 `workspace_roots` 透传进 JSON 载荷
 // （2026-10-09 Trae SessionStart 实测：
-//  {"cwd":"/workspace/Temp","workspace_roots":["/workspace/Temp"],"hook_event_name":"SessionStart",...}），
+// {"cwd":"/workspace/Temp","workspace_roots":["/workspace/Temp"],"hook_event_name":"SessionStart",...}），
 // 由此定位工作区比依赖 os.Getwd() 更可靠——钩子可能从任意 cwd 拉起 rulemux。
 // 解析失败（无管道 / 交互式终端 / 非 JSON / 缺字段）返回 ("", false)，调用方回退到 os.Getwd()。
 func hookWorkspace() (string, bool) {
