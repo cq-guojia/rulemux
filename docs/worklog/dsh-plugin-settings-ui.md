@@ -1,6 +1,6 @@
 # DSH 插件设置界面（rulemux-dsh）
 
-> 状态：🔧 进行中（待下个会话执行；2026-10-10 由 `dsh-adapter` canary 坐实后立项）
+> 状态：✅ 完成封卷（2026-10-10；① 列表展示 0.3.4、② 说明面板 0.3.5 均已实机确认）
 > 类型：dsh 插件能力增强（plugin-first 宿主）
 > 关联：`docs/design/external/agent-rules-dirs.md` §四 DSH 行 · 子包 [`dsh-plugin/`](../../dsh-plugin/) · 前序 [`dsh-adapter.md`](dsh-adapter.md)（canary 已坐实）
 

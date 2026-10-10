@@ -132,8 +132,9 @@ directory and hook location have been confirmed by a real canary test. Today:
   [design/features/hook-injection.md](docs/design/features/hook-injection.md).
 - **dsh is a two-part story**: it has no hook file. rulemux writes `.dsh/rules/` (Tier-1); a
   **separate plugin package** in this repo ([`dsh-plugin/`](dsh-plugin/)) reads it back, installed
-  the normal dsh way — straight from git, no npm publish needed:
-  `dsh plugin --profile web add "github:cq-guojia/rulemux#path:/dsh-plugin"`. So
+  the normal dsh way — it is on npm as `rulemux-dsh`:
+  `dsh plugin --profile web add rulemux-dsh` (or straight from git:
+  `add "github:cq-guojia/rulemux#path:/dsh-plugin"`). So
   `rulemux init --agent dsh` installs nothing — it just prints the plugin command.
   That plugin then **sets itself up as dsh starts** (restart dsh after installing): readiness is three
   steps and **all of them must hold** — the `rulemux` CLI is resolved *and* its version satisfies the

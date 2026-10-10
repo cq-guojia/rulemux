@@ -117,8 +117,9 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
   且绝不碰你自己的 `AGENTS.md`；但它满足不了「永不淡出」。见
   [`docs/design/features/hook-injection.md`](docs/design/features/hook-injection.md)。
 - **dsh 是「两半」的故事**：它没有钩子配置文件。rulemux 负责写 `.dsh/rules/`（Tier-1）；读取那半由本仓库里
-  **独立的插件包** [`dsh-plugin/`](dsh-plugin/) 做，按 dsh 正常方式安装 —— **直接 git 装，无需发 npm**：
-  `dsh plugin --profile web add "github:cq-guojia/rulemux#path:/dsh-plugin"`。
+  **独立的插件包** [`dsh-plugin/`](dsh-plugin/) 做，按 dsh 正常方式安装（npm 上就是 `rulemux-dsh`）：
+  `dsh plugin --profile web add rulemux-dsh`（也可 git 直装：
+  `add "github:cq-guojia/rulemux#path:/dsh-plugin"`）。
   所以 `rulemux init --agent dsh` 什么都不装 —— 只打印插件安装命令。
   装完后该插件会**在 dsh 启动时（插件装载）自动就绪**（装完插件记得重启 dsh）。就绪是**三步，必须全部成立**：
   `rulemux` 命令行工具可得**且版本满足插件要求**（偏旧会用 pnpm/npm 升级并复查，不会「装了就当成过」）、

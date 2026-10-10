@@ -14,20 +14,12 @@ a rules directory natively.
 dsh plugin --profile <name> add rulemux-dsh
 ```
 
-No npm publish is required — any of these work:
+That is the whole thing — the plugin is published on npm. Installing straight from git also works
+(no npm involved), which is handy for testing an unreleased change:
 
 ```bash
-# straight from git, pointing at this sub-package. The `#path:/<subdir>` spec is how dsh
-# installs a package that lives in a subdirectory of a repo (quote it: `#` starts a shell comment).
 dsh plugin --profile <name> add "github:cq-guojia/rulemux#path:/dsh-plugin"
-
-# or from a packed tarball
-npm pack                       # -> rulemux-dsh-<version>.tgz
-dsh plugin --profile <name> add ./rulemux-dsh-<version>.tgz
 ```
-
-> Publishing to npm is **optional**: it lets dsh install the prebuilt package and gives the plugin a
-> download count in the market — but listing and installation work exactly the same without it.
 
 The host half needs no build: `index.mjs` is plain ESM. The details-page panel is bundled into
 `lib/client.js`, and that artifact is committed — so a git install still needs no `allowBuilds`
