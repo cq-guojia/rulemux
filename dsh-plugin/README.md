@@ -29,9 +29,32 @@ dsh plugin --profile <name> add ./rulemux-dsh-<version>.tgz
 > Publishing to npm is **optional**: it lets dsh install the prebuilt package and gives the plugin a
 > download count in the market — but listing and installation work exactly the same without it.
 
-There is no build step: `index.mjs` is plain ESM, so a git install needs no `allowBuilds` approval.
+The host half needs no build: `index.mjs` is plain ESM. The details-page panel is bundled into
+`lib/client.js`, and that artifact is committed — so a git install still needs no `allowBuilds`
+approval (see “Build” below if you change `src/client/`).
 
 **Restart dsh after installing** — the plugin mounts on the next start.
+
+## What you see in dsh
+
+- **Plugin list**: an icon and a title, in the language of your UI (English / Chinese).
+- **Plugin detail page**: an **informational** panel — the config file path
+  `~/.rulemux/config.toml` (with a copy button), what you need to edit by hand, a minimal example,
+  and a button that opens the project on GitHub.
+
+It **does not save anything**. `~/.rulemux/config.toml` is the single source of truth and you edit
+it in your own editor. dsh's own settings document is not a second home for it: the official config
+form can only store values in dsh's document (the active profile's Cordis patch), and a plugin on
+the detail page has no session context — it cannot read a file off your disk. So the panel tells you
+where the file is and what it looks like, and the editing stays where it always was.
+
+## Build (only for the details-page panel)
+
+```bash
+npm install
+npm run build      # -> lib/client.js   (re-run and commit the artifact after changing src/client/)
+npm run typecheck
+```
 
 ## The flow you get
 

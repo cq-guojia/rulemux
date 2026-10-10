@@ -65,3 +65,34 @@
 - 版本 `0.3.3 → 0.3.4`。
 - 结论回写：[`design/external/dsh-plugin-manifest.md`](../design/external/dsh-plugin-manifest.md)。
 - 未做（属 ②）：插件详情页的**配置表单** —— 仍需先调研 settings schema 的声明方式与取值落点（见「待执行事项」1–3）。
+
+### 2026-10-10 ② 拍板：设置区做成「只读说明面板」，不做保存
+
+用户原话：「不要取消，不接受这种设置…… 我的逻辑是，我现在只是让你做界面。
+如果不行，这里所有的框都必须去保存到官方的那个地方，然后你再提出来，我们去讨论。」
+→ 讨论后拍板：「直接在这里把设置方式介绍出来，显示出配置文件的地址。」
+
+**先核实再动手的关键事实**（逐条有出处，已回写
+[`design/external/dsh-plugin-manifest.md`](../design/external/dsh-plugin-manifest.md) §三）：
+
+- 官方配置表单的值**只能**存进 dsh 自己的设置文档（当前 profile 的 Cordis patch），
+  host 端**没有**读写拦截钩子 ⇒ 「保存 = 落到官方」是唯一官方路径。
+- 详情页 `scope: 'root'`、**没有 sessionId** ⇒ 命令通道 / `workspaceFiles` 都用不了，
+  第三方也没有注册自定义 remote 的公开口子 ⇒ **浏览器端读不到磁盘文件**。
+  所以「把 config.toml 读进框」这条路上，载体只能是官方设置值，
+  即「先灌进记录区 → 编辑 → 再存回文件」这一种绕法。
+- 用户不接受把配置存进官方设置当第二份真源 ⇒ **放弃编辑/保存/重置**，改只读说明。
+
+**落码**：
+
+| 文件 | 作用 |
+|---|---|
+| `src/client/index.tsx` | 注册词典 + `plugins.bundle.config`（key = 包名 `rulemux-dsh`） |
+| `src/client/config-panel.tsx` | 说明面板：路径 `~/.rulemux/config.toml` + 复制按钮、手动改什么、示例 toml、GitHub 外链（原生 `<a>`，`target=_blank` + `noopener`） |
+| `src/client/locales.ts` | 中英双语词典（namespace `rulemux`） |
+| `index.mjs` | 新增 `Config` 导出（**占位字段**，只为让宿主登记命名空间 ⇒ 配置区才渲染）；拿不到 schemastery 就退化为无面板，核心注入不受影响 |
+| `package.json` / `tsconfig.json` / `tsdown.client.config.ts` | 浏览器半边构建链；产物 `lib/client.js` **提交进仓库**（git 装没有构建步骤） |
+
+- 「打开」按钮做不到（浏览器打不开宿主本地文件）⇒ 按用户「不行就只显示」的口径给**复制路径**。
+- 验证：`tsc --noEmit` 通过、`tsdown` 产出 `lib/client.js`（契约 `window.__ModuleLoader__.load({ id: "rulemux-dsh", …`）已核对。
+- 待实机确认：详情页是否出现该面板、中英切换、复制按钮、外链可点。

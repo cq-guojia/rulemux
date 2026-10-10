@@ -38,5 +38,5 @@
 
 - **给仓库配 `NPM_TOKEN` secret**（Settings → Secrets → Actions，Automation 类型 token）：否则 CI 的 npm 步骤按设计跳过，每次发版只能手动 `npm publish`（0.2.7 就是手动发的）。
 - `WORKBUDDY_CONFIG_DIR` 是否决定用户级配置目录：仍未坐实（产物里只在 safe-delete 日志白名单出现）；坐实后再考虑加入注册表 `HookDirEnv`。
-- **DSH 插件设置界面（rulemux-dsh）**：① 列表展示（图标 + 中英标题说明）已落码（`dsh-plugin/icon.svg`、`locale/{zh,en}.json`，版本 `0.3.4`），待用户实机确认渲染；② 插件详情页的**配置表单**待做 —— 先调研 dsh 插件如何声明 settings schema、值存哪、插件怎么读，再定最小集与实现。过程见 `worklog/dsh-plugin-settings-ui.md`，已核实事实见 `design/external/dsh-plugin-manifest.md`。
+- **DSH 插件设置界面（rulemux-dsh）**：① 列表展示（图标 + 中英标题说明）已落码（`dsh-plugin/icon.svg`、`locale/{zh,en}.json`，版本 `0.3.4`）；② 详情页**只读说明面板**已落码（`src/client/*` + 构建产物 `lib/client.js`，已 `tsc` / `tsdown` 验证），**待实机确认渲染**；编辑/保存/重置**明确不做** —— 官方设置只能把值存进 dsh 自己的文档（会成为第二份真源），真源仍是 `~/.rulemux/config.toml`。过程见 `worklog/dsh-plugin-settings-ui.md`，已核实事实见 `design/external/dsh-plugin-manifest.md` §三。
 > 各 agent 接入 / 核实 / canary 的剩余工作见 §二 未决项（T4 / T6 / T10 / T11）；DSH 插件设置界面见 `worklog/dsh-plugin-settings-ui.md`。
