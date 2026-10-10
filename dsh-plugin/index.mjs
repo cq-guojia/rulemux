@@ -51,7 +51,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -441,14 +441,32 @@ function startReady(state) {
   return state.ready;
 }
 
+// TEMP canary — drop once the dsh integration is confirmed on a real machine. It answers the one
+// question that cannot be answered from a machine without dsh: does dsh actually call apply()?
+// (no file = never called), and it records a load-time readiness failure, which would otherwise stay
+// silent until a session's first turn.
+function loadCanary(line) {
+  try {
+    appendFileSync(join(homedir(), ".rulemux-dsh-load.log"), `${new Date().toISOString()} ${line}\n`);
+  } catch {
+    /* diagnostics must never break the host */
+  }
+}
+
 export function apply(ctx) {
   // Start the workspace-independent half of readiness NOW. dsh calls apply() at startup — well before
   // any session — so ~/.rulemux/config.toml is already there by the time the user goes to edit it.
-  // The rejection is deliberately swallowed here (an unhandled rejection at load could disturb dsh's
-  // startup) and re-surfaces at the first pre-step, which awaits the very same promise.
-  provisionOnce().catch(() => {});
+  loadCanary("apply() called");
+  provisionOnce().catch((err) => {
+    // A readiness failure is real and must not be silent: record it where it can be seen. (An
+    // unhandled rejection at load could disturb dsh's startup, so we log rather than rethrow; the
+    // first pre-step still throws the same error, which is the session-visible half.)
+    loadCanary(`readiness failed: ${err?.message ?? err}`);
+    console.error(`rulemux-dsh: readiness failed at plugin load: ${err?.message ?? err}`);
+  });
 
   ctx.on("agent/session-start", ({ agent }) => {
+    loadCanary("agent/session-start");
     const state = stateFor(agent);
     if (state) startReady(state); // fallback (if apply was never called) + the per-session sync
   });
