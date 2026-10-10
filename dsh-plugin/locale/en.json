@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Session Rules Injection (rulemux-dsh)",
-    "description": "One source of truth for your rules, fanned out by layer — org-wide → dev / non-dev → domain (mini-app, backend, client) → per-workspace — so one edit reaches every agent in every workspace."
+    "description": "One source of truth for your rules, fanned out by as many layers as you like — org-wide → dev / non-dev → domain (mini-app, backend, client) → … → per-workspace — so one edit reaches every agent in every workspace."
   }
 }

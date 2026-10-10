@@ -34,13 +34,17 @@ One source of truth (your own .md files, declared in ~/.rulemux/config.toml)
 │   │
 │   ├─ Layer 2 · dev rules
 │   │   ├─ Layer 3 · mini-app rules
+│   │   │     └─ Layer 4 · … · Layer N   as deep as you like
 │   │   ├─ Layer 3 · backend rules
+│   │   │     └─ …
 │   │   └─ Layer 3 · client-side rules
+│   │         └─ …
 │   │
 │   └─ Layer 2 · non-dev rules
 │       └─ Layer 3 · workspace daily rules …
+│             └─ …
 │
-└─ Layer 4 · one workspace's own rules ──► only in that workspace
+└─ Bottom layer (Layer N) · one workspace's own rules ──► only in that workspace
 
               rulemux sync  ↓  real copies (never fades out / never accumulates / no symlinks)
 
@@ -48,8 +52,11 @@ One source of truth (your own .md files, declared in ~/.rulemux/config.toml)
     workspace B ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
 ```
 
-- **Rules are reused**: layer 3 inherits layer 2, layer 2 inherits layer 1 — write what is shared
-  once, and get more specific as you go down.
+- **Rules are reused**: a layer inherits the one above it (layer 3 inherits layer 2, layer 2
+  inherits layer 1) — write what is shared once, and get more specific as you go down.
+- **As many layers as you like**: three is just the usual cut — `use` is expanded **recursively**,
+  so you can nest as deep as you want; the bottom layer is normally "this workspace's own rules".
+  The only thing not allowed is a **cycle** (A uses B and B uses A), which fails at config load.
 - **Layers fan out**: each layer declares which agents and which workspaces it applies to; no
   file is duplicated per combination.
 - **Edit once, applies everywhere**: change a sentence up top and every workspace and agent that
@@ -262,6 +269,9 @@ Things worth knowing:
 
 - **`use` is a list** — `use = ["dev", "qa"]` reuses several groups at once, and groups nest
   (A pulls in B plus its own files).
+- **There is no depth limit** — `use` is expanded **recursively** (for file groups and workspace
+  groups alike), so you can nest as deep as you like. The only thing not allowed is a **cycle**
+  (A uses B and B uses A), which fails at config load.
 - **Mixing is allowed**: `groups` with `path`, and `workspace_groups` with `workspace`, in the same
   source. The result is the union.
 - **Duplicates are harmless** — everything is deduplicated by value, so each file is processed once.
