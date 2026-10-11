@@ -3,7 +3,7 @@
 > 状态：✅ 完成封卷（2026-10-10）
 > 类型：对外文档（README 中英两版 + dsh 插件简介）
 > 来源：用户原话（见下）
-> 关联：前一篇 [`project-readme-positioning.md`](project-readme-positioning.md)（已封卷，不回改）
+> 关联：前一篇 [`project-readme-positioning-4x9v.md`](project-readme-positioning-4x9v.md)（已封卷，不回改）
 
 ## 一、需求原话
 

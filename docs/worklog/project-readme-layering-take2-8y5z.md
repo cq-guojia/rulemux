@@ -3,8 +3,8 @@
 > 状态：✅ 完成封卷（2026-10-10）
 > 类型：对外文档（README 中英两版）
 > 来源：用户原话（见下）
-> 关联：前两篇 [`project-readme-positioning.md`](project-readme-positioning.md)、
-> [`project-readme-layering.md`](project-readme-layering.md)（均已封卷，不回改）
+> 关联：前两篇 [`project-readme-positioning-4x9v.md`](project-readme-positioning-4x9v.md)、
+> [`project-readme-layering-6q3w.md`](project-readme-layering-6q3w.md)（均已封卷，不回改）
 
 ## 一、需求原话
 

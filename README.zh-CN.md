@@ -370,4 +370,4 @@ MIT —— 见 [LICENSE](LICENSE)。
 | 功能列表 | [`docs/design/features.md`](docs/design/features.md) |
 | 接入新 agent 的清单 | [`docs/design/features/agent-onboarding.md`](docs/design/features/agent-onboarding.md) |
 | 各家 agent 的规则目录（外部事实） | [`docs/design/external/agent-rules-dirs.md`](docs/design/external/agent-rules-dirs.md) |
-| 当前进度与未决项 | [`docs/PROGRESS.md`](docs/PROGRESS.md) |
+| 当前进度与未决项 | [`docs/progress.json`](docs/progress.json) |

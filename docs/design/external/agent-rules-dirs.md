@@ -4,7 +4,7 @@
 > **适用版本**：见下表「适用版本」列；上游升级后据此复核
 > **状态**：🟡 **部分核实** —— Claude Code 经官方文档核实（2026-10-07，见 §三）；CodeBuddy / WorkBuddy 经 canary 实测坐实（2026-10-08，**同日复核并更正**，见 §四）；**Trae 的安装目录（用户级 `~/.trae-cn/hooks.json` + Claude 系 hook 协议 + 顶层 `version`）经 hindsight 实装与本机核实（2026-10-09，见 §二·续），其规则目录 `.trae/rules` 经 2026-10-09 canary 坐实（见 §二·续）**；Codex / OpenCode 待补；**Claude 运行时 canary 未落地（open bug，见 §四）**。**除已核实项外不得作为实现依据**
 > **来源**：前期调研（原根 `DESIGN.md` §3）+ 本机 CodeBuddy 安装目录源码核查 + Claude Code 官方文档（`code.claude.com/docs/en/hooks`、`/memory`，2026-10-07）+ CodeBuddy 官方规则文档（`www.codebuddy.ai/docs/zh/ide/User-guide/Rules`，2026-10-08）
-> **配套**：[`../features/dir-sync.md`](../features/dir-sync.md)（我方怎么适配）· [`../../PROGRESS.md`](../../PROGRESS.md)（核实任务）
+> **配套**：[`../features/dir-sync.md`](../features/dir-sync.md)（我方怎么适配）· [`../../progress.json`](../../progress.json)（核实任务）
 
 > ⚠️ 本文件只记**上游读取能力**（目录 / 扩展名 / 读不读全部）。
 > 「我方据此怎么落文件」是设计，归 [`../features/dir-sync.md`](../features/dir-sync.md)，**不写在这**。
@@ -198,7 +198,7 @@ function getCodeBuddyProjectsDir() { return path.join(getCodeBuddyHomeDir(), "pr
 但它与 `CODEBUDDY_CONFIG_DIR` 并列，仅用于拼 **npm 缓存日志**白名单
 （`<configDir>/binaries/node/cli-connector-cache/_logs`）。
 **没有任何证据表明它决定 `settings.json` 的位置** ⇒ rulemux **不采用**，留待 WorkBuddy 侧的
-canary 或官方文档坐实（记在 `PROGRESS.md` 待办里）。
+canary 或官方文档坐实（记在 `progress.json` 待办里）。
 
 ### 5.3 rulemux 据此怎么落地
 

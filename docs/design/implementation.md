@@ -1,8 +1,9 @@
 # rulemux 实现方案：待定项清单
 
-> **状态**：📝 进行中（逐条拍板，拍板一项划掉一项）
+> **状态**：✅ 完成封卷（历史决策归档；T0–T16 已全部结案，见 [`../PROGRESS-HISTORY.md`](../PROGRESS-HISTORY.md)）
 > **来源**：用户 2026-10-07 要求立项为「实现细节设计方案」任务，基于本文档逐项讨论后落定
-> **配套**：[`requirements.md`](requirements.md)（要什么）· [`architecture.md`](architecture.md)（为什么）· [`features.md`](features.md)（怎么做）· [`external/agent-rules-dirs.md`](external/agent-rules-dirs.md)（各家目录）· [`../PROGRESS.md`](../PROGRESS.md)（在办任务 T0–T7）
+> **配套**：[`requirements.md`](requirements.md)（要什么）· [`architecture.md`](architecture.md)（为什么）· [`features.md`](features.md)（怎么做）· [`external/agent-rules-dirs.md`](external/agent-rules-dirs.md)（各家目录）· [`../progress.json`](../progress.json)（状态表）
+> **说明**：本文是项目启动前的调研与跨工作包决策记录（体量跨整个实现期，非单工作包），归为 rulemux 项目特例存档（见 `docs/README.md`）。项目范围已于 2026-10-10 封板为 4 家 agent（codebuddy / workbuddy / trae / dsh），`claude` / `codex` / `opencode` 保留注册但未核实、不再补齐；文内仍出现的 6-agent 表述为历史原貌，以现状为准。
 
 ---
 

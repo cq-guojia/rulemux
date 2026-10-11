@@ -2,7 +2,7 @@
 
 > **状态**：✅ 已定（2026-10-07 逐项拍板，结论进 [`implementation.md`](implementation.md)）
 > **来源**：用户立项诉求（原根 `DESIGN.md`，已分解迁入本文件）
-> **配套**：[`architecture.md`](architecture.md)（为什么这么设计）· [`features.md`](features.md)（怎么做）· [`../PROGRESS.md`](../PROGRESS.md)（在办任务）
+> **配套**：[`architecture.md`](architecture.md)（为什么这么设计）· [`features.md`](features.md)（怎么做）· [`../progress.json`](../progress.json)（在办任务）
 
 ---
 

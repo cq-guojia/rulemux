@@ -3,7 +3,7 @@
 > 状态：✅ 完成封卷（2026-10-10）
 > 类型：对外文档（README 中英两版 + dsh 插件列表简介）
 > 来源：用户原话（见下）
-> 关联：[`../../README.md`](../../README.md) · [`../../README.zh-CN.md`](../../README.zh-CN.md) · [`dsh-plugin-settings-ui.md`](dsh-plugin-settings-ui.md)
+> 关联：[`../../README.md`](../../README.md) · [`../../README.zh-CN.md`](../../README.zh-CN.md) · [`dsh-plugin-settings-ui-2m8n.md`](dsh-plugin-settings-ui-2m8n.md)
 
 ## 一、需求原话
 

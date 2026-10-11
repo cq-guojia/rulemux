@@ -2,7 +2,7 @@
 
 > 状态：✅ 完成封卷（2026-10-10 真机 canary 通过：`.dsh/rules` 注入成功、装载期生成 `~/.rulemux/config.toml`、就绪三步全过、token 成本与原生读文件一致且命中提示缓存）
 > 类型：新 agent 适配器（plugin-first 宿主）
-> 关联：`docs/design/external/agent-rules-dirs.md` §一 DSH 行 · `docs/PROGRESS.md` T3 · 子包 [`dsh-plugin/`](../../dsh-plugin/)
+> 关联：`docs/design/external/agent-rules-dirs.md` §一 DSH 行 · `docs/progress.json` T3 · 子包 [`dsh-plugin/`](../../dsh-plugin/)
 
 ## 定稿方案：写一半（Go 同步）+ 读一半（仓库子包插件）
 

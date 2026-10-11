@@ -73,7 +73,7 @@ MCP 缓存 `installed_servers_cache.json` 中条目状态为 `"connected"`、`"c
 > **适用版本**：`@vectorize-io/hindsight-coding-agents` **0.6.1**（容器内 linux，取自 `~/.hindsight/coding-agents/package.json`）
 > **状态**：🟢 **已核实**（直接读 dist 源码，非文档推测）；⚠ **用户 macOS 上的那份版本待复核**
 > **来源**：`~/.hindsight/coding-agents/dist/index.js:305-308`（`configuredDir`）
-> **配套**：[`../config-groups.md`](../config-groups.md)（rulemux 据此决定配置侧也支持 `~`）
+> **配套**：[`../features/config-groups.md`](../features/config-groups.md)（rulemux 据此决定配置侧也支持 `~`）
 
 ```js
 function configuredDir(dir) {

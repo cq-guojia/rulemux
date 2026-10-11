@@ -2,7 +2,7 @@
 
 > 状态：✅ 完成封卷（2026-10-10；① 列表展示 0.3.4、② 说明面板 0.3.5 均已实机确认）
 > 类型：dsh 插件能力增强（plugin-first 宿主）
-> 关联：`docs/design/external/agent-rules-dirs.md` §四 DSH 行 · 子包 [`dsh-plugin/`](../../dsh-plugin/) · 前序 [`dsh-adapter.md`](dsh-adapter.md)（canary 已坐实）
+> 关联：`docs/design/external/agent-rules-dirs.md` §四 DSH 行 · 子包 [`dsh-plugin/`](../../dsh-plugin/) · 前序 [`dsh-adapter-9f1e.md`](dsh-adapter-9f1e.md)（canary 已坐实）
 
 ## 背景与目标
 
@@ -35,7 +35,7 @@
 
 - **不要**在没有和用户定清楚前，把设置界面做成「绕过 Go CLI config 的第二条配置源」——`config.toml` 是 rulemux 各 agent 的统一真源，加第二条源会引入一致的歧义。
 - 设置项若与 `config.toml` 已有字段重复，**以谁为准**要先定（建议：设置界面是 `config.toml` 的友好前端，最终仍落到 toml，不另起炉灶）。
-- `$DSH_HOME/rules` 全局规则（二期）不在本任务内（见 `dsh-adapter.md` 待办 #5，已明确不做）。
+- `$DSH_HOME/rules` 全局规则（二期）不在本任务内（见 `dsh-adapter-9f1e.md` 待办 #5，已明确不做）。
 
 ## 真源 / 参考资料
 
@@ -61,7 +61,7 @@
   （干什么 + 半角括号包完整包名）。
 - **简介口径（同日用户纠正后）**：`meta.description` 改为浓缩核心痛点 —— 唯一真源、层级下放复用、
   一处修改同步到所有 agent 与所有工作区；**不写**软链 / 注入时机这类实现细节。
-  完整定位口径见 [`project-readme-positioning.md`](project-readme-positioning.md) §三。
+  完整定位口径见 [`project-readme-positioning-4x9v.md`](project-readme-positioning-4x9v.md) §三。
 - 版本 `0.3.3 → 0.3.4`。
 - 结论回写：[`design/external/dsh-plugin-manifest.md`](../design/external/dsh-plugin-manifest.md)。
 - 未做（属 ②）：插件详情页的**配置表单** —— 仍需先调研 settings schema 的声明方式与取值落点（见「待执行事项」1–3）。

@@ -406,4 +406,4 @@ MIT — see [LICENSE](LICENSE).
 | Feature list | [docs/design/features.md](docs/design/features.md) |
 | Checklist for adding a new agent | [docs/design/features/agent-onboarding.md](docs/design/features/agent-onboarding.md) |
 | Each agent's rules directory (external facts) | [docs/design/external/agent-rules-dirs.md](docs/design/external/agent-rules-dirs.md) |
-| Current progress and open items | [docs/PROGRESS.md](docs/PROGRESS.md) |
+| Current progress and open items | [docs/progress.json](docs/progress.json) |

@@ -77,7 +77,7 @@ dsh 是 **plugin-first** 宿主：它**不原生扫描规则目录**，扩展面
 > ⚠ rulemux 自身**不注入**（Tier-1 只真实拷贝，也**不替 dsh 装插件** —— registry 里 dsh 是 `Style="external"`，
 > init/doctor 只打印装插件提示）；注入由**子包插件**完成，与 Tier-2「rulemux 往 stdout 注入正文」是两回事。
 > 🔴 DSH 链路**尚未 canary 坐实**（本机未装 dsh）⇒ registry 里 `Verified` 标「先行开放」而非「坐实」。
-> 事实与真源见 [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §一 DSH 行；过程见 [`../../worklog/dsh-adapter.md`](../../worklog/dsh-adapter.md)。
+> 事实与真源见 [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §一 DSH 行；过程见 [`../../worklog/dsh-adapter-9f1e.md`](../../worklog/dsh-adapter-9f1e.md)。
 
 ## 边界（不做什么）
 

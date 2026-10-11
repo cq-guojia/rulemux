@@ -38,7 +38,7 @@
 
 候选（备查）：`rulecast` / `rulehub` / `ruleseed` / `ruleflow` 等。
 
-> npm 是否占用属**外部事实**且会变化 ⇒ 发布前重新核实，记录日期与来源（见 [`../PROGRESS.md`](../PROGRESS.md) 未决项）。
+> npm 是否占用属**外部事实**且会变化 ⇒ 发布前重新核实，记录日期与来源（见 [`../progress.json`](../progress.json) 未决项）。
 
 ## 四、实现结构（核心引擎 + 每 agent 适配器）
 
@@ -57,7 +57,7 @@
        → engine.Sync / engine.RenderInject（统一方法）
 ```
 
-> 详细代码结构、任务拆解与优先级见 [`../ops/implementation-workplan.md`](../ops/implementation-workplan.md)。
+> 详细代码结构、任务拆解与优先级见 `ops/implementation-workplan.md`。
 > 适配器是**一个二进制内的多个适配模块**（不是每个 agent 一个独立程序），分发仍是单文件。
 
 ## 五、hook 落点决策：Tier-1 保持 workspace 级（不挪 user 级）
