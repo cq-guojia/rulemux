@@ -1,0 +1,2 @@
+> **✅ 完成封卷**（2026-10-08 00:00，GuoJia-Agent）
+需求拍板（无中央真源，源文件由 TOML 列出，implementation.md #4/#5/#6）；CodeBuddy/Trae `.mdc` frontmatter 语义坐实（非隐藏 `.md` + `alwaysApply:true` / Trae `.md` frontmatter 可选、`.mdc` 不加载）；Codex/OpenCode 走 Tier-2 SessionStart 注入、取消受管区拼接（#9/#12）；固定前缀 `__rulemux__` + 删残留算法无 manifest（#10/#11）；实现细节 1–13 拍定（#14 测试 / #15 文档留待实现）；用户 workspace 数组提案＝已实现；hook 落点改 user 级（codebuddy→`~/.codebuddy/settings.json`、workbuddy→`~/.workbuddy/settings.json`，`HookAbs:true`）；新 Agent 接入清单沉淀为 agent-onboarding.md

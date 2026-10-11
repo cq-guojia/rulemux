@@ -227,7 +227,7 @@
 4. **别名归一化（四个入口）**：① 配置 `agents` 值（`config.go:186-198` 现按原字符串匹配，`agents=["workbuddy"]` 不会命中合并后的 codebuddy）；② CLI `--agent`；③ hook 命令行 agentID；④ 账本读写。收敛为**单一入口函数**。
 5. **README/usage**：删 `README.md:176-184` / `README.zh-CN.md:164-169`「改完配置后手动跑 sync」段；命令表（`README.md:208` / `README.zh-CN.md:191`）与 `main.go:31` usage 补 `sync --all` 与 `--hook`。
 6. **A3 例外登记**：在 `architecture.md`（§一 铁律处）与 `requirements.md`（A1–A3 处）显式登记"变化提示"是**瞬态、一次性、有变化才发**的例外，并回链本稿。
-7. **全仓旧前缀残留**（真值 `__rulemux__`）：`dir-sync.md:12,13,17`、`features.md:9`、`architecture.md:45`、`agent-onboarding.md:48`、`implementation.md:85,106,107,115,118,122,149,150`、`verification.md:10,11`、`progress.json:30,35,36,37,38,46`、`ops/implementation-workplan.md:82,126,127,145`、`worklog/canary-2026-10-08-a1b2.md:15,16,26`、**`scripts/smoke.sh:63-141`**（冒烟脚本仍断言旧前缀，对当前代码已失真）。
+7. **全仓旧前缀残留**（真值 `__rulemux__`）：`dir-sync.md:12,13,17`、`features.md:9`、`architecture.md:45`、`agent-onboarding.md:48`、`implementation.md:85,106,107,115,118,122,149,150`、`verification.md:10,11`、`progress.json:30,35,36,37,38,46`、`ops/implementation-workplan.md:82,126,127,145`、`worklog/202610/canary-2026-10-08-a1b2.md:15,16,26`、**`scripts/smoke.sh:63-141`**（冒烟脚本仍断言旧前缀，对当前代码已失真）。
 8. **其它矛盾**：`architecture.md` §五 标题/`:76` 与 `:64` 自相矛盾；`progress.json:35`（T10 仍写"会读点文件"）与 `external/agent-rules-dirs.md:114`（不读）冲突；`external/agent-rules-dirs.md:117` 需撤回"钩子先于读规则"。
 9. **`uninstall` 文件归属**：`removeRuleFiles`（`uninstall.go:158-171`）用 `dir/__rulemux__*` 通配删 ⇒ 方案 A 下每目录只剩一家，风险消除；文档标注"零改动仅在方案 A 前提成立"。
 10. **`Record` 签名变更**：同步更新 `agent-onboarding.md:57` 的 `state.Record(ws)` 与 §四 账本小节。

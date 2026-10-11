@@ -10,7 +10,7 @@
 | 文档规范 | `docs/README.md` | 本文件 |
 | 状态表 | `docs/progress.json` | 与通用一致（2026-10-11 由旧 `PROGRESS.md` 迁入） |
 | 已结案 | `docs/PROGRESS-HISTORY.md` | 与通用一致 |
-| 过程叙事 | `docs/worklog/<任务号>.md` | 与通用一致 |
+| 过程叙事 | `docs/worklog/<年月>/<任务号>.md` | 与通用一致（<年月> 取任务创建月份，如 `202610`） |
 | 运行逻辑 | `docs/design/architecture.md` | 与通用一致 |
 | 功能总索引 | `docs/design/features.md` | 与通用一致 |
 | 各功能 | `docs/design/features/` | 含 `config-groups.md` 等 |
