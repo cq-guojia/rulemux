@@ -1,12 +1,12 @@
 # 20261009-0000-workbuddy-rules-dir-5h6t：WorkBuddy 工作区目录坐实 + 共享目录并集/卸载收敛（发 `v0.2.7`，本机验收通过）
 
-> **✅ 完成封卷**（2026-10-09 00:00:00，GuoJia-Agent）
-> **创建**：2026-10-09 00:00:00（GuoJia-Agent）
+> **✅ 完成封卷**：2026-10-09 00:00:00（@GuoJia-Agent）
+> **创建**：2026-10-09 00:00:00（@GuoJia-Agent）
 
 ## 背景
 此前模型认为 WorkBuddy **工作区级**规则目录也独立（`.workbuddy/rules`），但规则落进 WorkBuddy 从不读的目录，连续数个会话读不到——而钩子明明装对了、文件也落了盘。
 
-## 欠什么
+## 待办
 （已结案）历史遗留的孤儿目录 `.workbuddy/rules/`（按旧落点落下的 `__rulemux__*.md`）与探针文件需**手动删除**；某条 source 只写 `agents=["workbuddy"]` 时文件同样出现在 `.codebuddy/rules` 被 CodeBuddy 读到，无法两全。
 
 ## 下一步

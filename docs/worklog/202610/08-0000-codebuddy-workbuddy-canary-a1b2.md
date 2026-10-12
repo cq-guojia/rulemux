@@ -1,12 +1,12 @@
 # 20261008-0000-codebuddy-workbuddy-canary-a1b2：CodeBuddy / WorkBuddy canary 坐实
 
-> **✅ 完成封卷**（2026-10-08 00:00:00，GuoJia-Agent）
-> **创建**：2026-10-08 00:00:00（GuoJia-Agent）
+> **✅ 完成封卷**：2026-10-08 00:00:00（@GuoJia-Agent）
+> **创建**：2026-10-08 00:00:00（@GuoJia-Agent）
 
 ## 背景
 需在 CodeBuddy 工作区验证暗号 `RULEMUX-CANARY-43371345` 能否被念出；并确认用户提出的「workspace 数组 + all/*/unset + 合并→文件清单→增删比对」方案是否已实现。
 
-## 欠什么
+## 待办
 （已结案）Claude 侧 sync 未落地，留为 open bug（T11）；trae/codex/opencode 待实测。
 
 ## 下一步
