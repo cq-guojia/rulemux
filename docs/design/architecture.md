@@ -57,7 +57,7 @@
        → engine.Sync / engine.RenderInject（统一方法）
 ```
 
-> 详细代码结构、任务拆解与优先级见 `../../docs.legacy/ops/implementation-workplan.md`。
+> 实现期决策清单（已封卷）见 [`implementation.md`](implementation.md)；已结案工作包见 [`../PROGRESS-HISTORY.md`](../PROGRESS-HISTORY.md)。
 > 适配器是**一个二进制内的多个适配模块**（不是每个 agent 一个独立程序），分发仍是单文件。
 
 ## 五、hook 落点决策：Tier-1 保持 workspace 级（不挪 user 级）
