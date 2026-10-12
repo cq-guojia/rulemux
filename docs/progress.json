@@ -1,3 +1,14 @@
 {
-  "tasks": {}
+  "tasks": {
+    "20261012-1724-skill-注入调研与设计-5731": {
+      "created": "2026-10-12 17:24:38",
+      "creator": "GuoJia-Agent",
+      "finished": null,
+      "owner": "GuoJia-Agent",
+      "started": "2026-10-12 17:24:38",
+      "status": "doing",
+      "title": "skill 注入调研与设计",
+      "worklog": "worklog/202610/12-1724-skill-注入调研与设计-5731.md"
+    }
+  }
 }

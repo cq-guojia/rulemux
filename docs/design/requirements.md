@@ -51,3 +51,43 @@
 - **不做自动更新、不做自更新**：升级一律**交给包管理器、由用户手动执行**（`go install github.com/cq-guojia/rulemux@latest`，将来 brew / scoop / apt 同理）。—— 2026-10-08 拍板。
   依据：核心链路是「SessionStart 钩子调 `rulemux sync`」，而各家钩子都有超时（本机实测 Hindsight 的钩子均为 30–60s），在热路径里联网自更新会拖慢甚至挂住会话；且自我替换二进制一旦失败，后续所有同步都被锁死。收益也有限：rulemux 无后台状态、无服务端，版本差异通常只影响边缘行为。
   补充：即便日后加 `rulemux update`，也须是**手动触发 + 校验 checksum/签名**，绝不放在钩子路径里自动跑。
+
+---
+
+## 六、skill 注入（2026-10-12 立项草案，🟡 待拍板）
+
+> **状态**：🔴 草案 —— 2026-10-12 用户提出，调研与论证已完成并回写（`external/skill-ecosystem.md`、任务 `20261012-1724-skill-注入调研与设计-5731`），**本节未经逐项拍板，不得作为实现依据**。
+> **来源**：用户 2026-10-12 诉求（原话见任务 worklog「背景」节）。
+> **配套**：[`external/skill-ecosystem.md`](external/skill-ecosystem.md)（上游事实）· [`features/skill-sync.md`](features/skill-sync.md)（方案草案）
+
+### 6.1 需求归并（用户四点）
+
+| # | 需求 | 要点 |
+|---|---|---|
+| S1 | **skill 实时分发（核心）** | 沿用规则注入逻辑：配置文件声明 skill 源，经 SessionStart hook（`rulemux sync --hook`）把 skill **真实拷贝**进各 agent 的原生 skills 目录 |
+| S2 | **全局注入升级** | 现有注入只到工作区；升级为**规则 + skill 同时**支持注入到 agent **用户级（全局）**目录，与工作区级并存、由配置声明作用域 |
+| S3 | **市场贡献与跟进** | 管理自己的源（本地目录 / git 仓库），并能**跟进**别人开发的 skill（如 GitHub 上的）的上游更新 |
+| S4 | **自定义 skill 管理** | 管理自己的 skill：创作、组织、分发、删除 |
+
+### 6.2 验收判据草案（A1–A6 向 skill 的延伸）
+
+| # | 标准 | 判据 |
+|---|---|---|
+| B1 | **效果等价** | 与手动把 skill 目录放进 `.claude/skills` 等原生目录等价——模型能按名调用 |
+| B2 | **不破坏渐进式披露** | 同步只落目录、不经 hook 注入全文；启动期只暴露 name+description（与手放一致，token 不膨胀） |
+| B3 | **永不淡出 + 不用软链** | 真实拷贝进原生目录；**明确不采用 npx skills 的默认 symlink 模式** |
+| B4 | **加删自由** | 配置增删 skill 源，目标目录跟着变；残留 skill 目录被清理（带前缀标识，不误删用户自建 skill） |
+| B5 | **全局/工作区双域** | 同一份源可按 agent 声明落工作区级或用户级；两者互不干扰、可并存 |
+| B6 | **开源通用 + 不半开放** | 不绑某一家 agent；未实测坐实的 agent（及其目录）标 🔴 不开放安装 |
+
+### 6.3 与现有工具的边界（论证结论草案）
+
+- **复用 npx skills（vercel-labs/skills）作主通道不可行**：交互式安装、按 cwd 落盘（无目标工作区参数）、默认 symlink、无 lockfile、无 hook 实时同步、无配置驱动扇出、无残留清理；且**不覆盖 workbuddy / dsh**（兼容表逐字证据见 `external/skill-ecosystem.md` §二）。
+- **可借鉴**：其源写法（GitHub 简写 / git URL / 本地路径 / `.claude-plugin/marketplace.json` 发现）作为 skill 源配置的参照。
+- **rulemux 差异化成立**：配置驱动「一份源 → N agent × M 工作区（+ 全局）」+ 真实拷贝 + 残留清理 + hook 实时同步 —— 与规则注入同一套哲学。
+
+### 6.4 暂定不做（待拍板确认）
+
+- **不自建 skill 市场服务端**：市场形态归第三方（SkillsMP / SkillHub / 官方市场），rulemux 只做「源 → agent」的投递。
+- **不做 skill 内容生成 / 改写**（同 §五规则侧）。
+- **不做版本锁定 / lockfile**：沿用「update = 拉最新」的简单语义；用户若要锁定再议。
