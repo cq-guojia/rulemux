@@ -17,8 +17,8 @@
 ## 二、方案草案（只记结论，不动码）
 
 1. **引擎（`internal/engine/`）**：在现有「文件 + 前缀 + 内容比对 + 删残留」旁增加**目录树同步**：目标名 = `__rulemux__<skill-name>/`，整树内容比对（逐文件），删残留扩展到**目录级**（不在应有集合内的 `__rulemux__*` 目录整树删除）；用户自建（非前缀）skill 目录一律不碰。
-2. **适配器（`internal/agents/registry.go`）**：Agent 增加 skills 落点字段——`SkillsDir`（工作区，如 `.claude/skills`）与用户级 skills 目录（如 `~/.codebuddy/skills`、`~/.trae-cn/skills`）；全局注入升级还需**用户级 rules 目录**字段。**未实测坐实的落点一律留空 + 标 🔴，`rulemux init/doctor` 不开放**（沿用现有 Verified 闸门）。注意 Trae CN 的用户级是 `~/.trae-cn/skills`（本机实测），不是 intl 口径 `~/.trae/skills`。
-3. **共享目录冲突**：规则侧 `SharingRulesDir` 的并集/收敛机制需平移到 skills 侧（codebuddy 与 workbuddy 的 skills 是否共享目录**未实测**，先按「不共享、各自落」设计，实测后校正——🔴）。
+2. **适配器（`internal/agents/registry.go`）**：Agent 增加 skills 落点字段——`SkillsDir`（工作区）+ 用户级 skills 目录；rules 侧同步加**用户级 rules 目录**字段（S2 双域）。**用户级对 CodeBuddy 家族要写两个目录**：`~/.codebuddy/skills` + `~/.workbuddy/skills`（2026-10-12 同源模型：CodeBuddy 合并读两家、WorkBuddy 只读自己的 ⇒ 只写一个必漏一家；证据见 [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §5.5、[`../external/skill-ecosystem.md`](../external/skill-ecosystem.md) §三·续）；rules 用户级同理两目录（`~/.codebuddy/rules` + `~/.workbuddy/rules`）。**未实测坐实的落点一律留空 + 标 🔴，`rulemux init/doctor` 不开放**（沿用现有 Verified 闸门）。注意 Trae CN 的用户级是 `~/.trae-cn/skills`（本机实测），不是 intl 口径 `~/.trae/skills`；CodeBuddy 用户级 rules = `~/.codebuddy/rules`（2026-10-12 代码级坐实）。
+3. **共享目录（2026-10-12 代码级已答）**：**工作区级** skills 与 rules 同规律——两家共用 `<ws>/.codebuddy/skills`（`getProjectSkillsDir()` 用静态 `WORKSPACE_DATA_DIR_NAME`；WorkBuddy 读 `.codebuddy/rules` 已实测）⇒ 规则侧 `SharingRulesDir` 并集/收敛机制平移到 skills 侧，一家写两家读。**用户级不共享且方向不对称**：CodeBuddy 合并读 `~/.codebuddy/skills` + `~/.workbuddy/skills`，WorkBuddy 只读 `~/.workbuddy/skills` ⇒ 用户级按品牌各写各的（双写重叠由宿主重名去重，无害），无并集问题；剩余 🔴 = WorkBuddy 两级装载的 Mac canary。
 4. **配置（`~/.rulemux/config.toml`）**：新增 `[[skill_source]]`（本地目录 / git 源 / 市场索引引用），复用现有 `agents` / `workspace` / `workspace_groups` / `use` 匹配机制；新增**作用域声明**（工作区 / 全局），规则侧同步加同一字段实现 S2 双域。
 5. **hook 与提示语义**：`rulemux sync --hook` 同步规则 + skills；skill 变更**要不要**「请新开会话」提示待 canary——CodeBuddy 产物有 `skills-changed` 事件字符串（疑似热重载），若坐实则 skills 不需要该提示（与规则侧 `SessionHint` 的判据分开）。
 6. **命令面（最小集）**：`sync` 默认带 skills（配置里有 `[[skill_source]]` 才动 skills 目录）；源刷新后续加 `rulemux skill list / update`（S3 的「跟进上游」）。本轮不设计交互式安装 UI。
@@ -30,10 +30,10 @@
 
 ## 四、实现前置（🔴 未核实项，全部来自 `external/skill-ecosystem.md` §六）
 
-1. WorkBuddy skills 两级目录实测（用户级二手一致指向 `~/.workbuddy/skills/`；工作区级未知）；
-2. dsh skills 目录（`.dsh/skills` / `.agents/skills`、不递归）对官方文档复核 + 用户级落点；
+1. WorkBuddy skills 两级**装载** Mac canary（落点已代码级确定：用户级 `~/.workbuddy/skills`、工作区级 `.codebuddy/skills`）+ 用户级 rules `~/.workbuddy/rules` 装载；
+2. dsh skills 目录（`.dsh/skills` / `.agents/skills`、不递归）官方文档复核 + 用户级落点；
 3. Trae 工作区 `.trae/skills` 本机 canary + intl `~/.trae/skills` 探测；
-4. Claude Code skills 本机 canary（目录文档级已足，会话级验证未做）；
-5. 各家**用户级 rules 目录**（S2 全局注入的前提，CodeBuddy 尤其）；
-6. skills 加载行为 canary（渐进式披露是否符合预期 / `skills-changed` 是否热重载）；
-7. CodeBuddy 官方市场是否支持第三方源接入（决定 S3 能否借宿主机制）。
+4. skills 加载行为 canary（渐进式披露 / `skills-changed` 是否热重载 / 要不要「新开会话」提示）；
+5. CodeBuddy 用户级 rules `~/.codebuddy/rules` 装载 canary（落点已代码级坐实，验合并加载与 frontmatter 语义）。
+
+**已销项（2026-10-12）**：Claude canary（不在支持范围）、CodeBuddy 用户级 rules 落点（代码级坐实）、市场第三方源接入（已答**不支持** ⇒ S3 由 rulemux 自管，不借宿主机制）。

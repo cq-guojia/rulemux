@@ -13,7 +13,7 @@
 
 | Agent | 工作区规则目录 | 扩展名 / 结构 | 读目录全部？ | 会话内重读？ | hook stdout 协议 | 适用版本 | 备注 |
 |---|---|---|---|---|---|---|---|
-| **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | ❌ **不会**：会话开始即固定规则快照，改动要下一个会话才生效（见 §四） | `hookSpecificOutput{hookEventName:"SessionStart", additionalContext}`（2026-10-09 实证，见下） | 4.12.1（本机） | 「用户级 / 项目级」两类规则；运行时真值 `.codebuddy/rules` 非官方文案 `.rules`；`SessionHint=true` |
+| **CodeBuddy** | `.codebuddy/rules/`（canary 坐实，见 §二/§四） | `.md` / `.mdc` 均可 | ⚠️ **只读平铺「非隐藏」`.md`**，且**须带 `alwaysApply:true` frontmatter**；点开头隐藏文件被**跳过** | ❌ **不会**：会话开始即固定规则快照，改动要下一个会话才生效（见 §四） | `hookSpecificOutput{hookEventName:"SessionStart", additionalContext}`（2026-10-09 实证，见下） | 4.12.1（本机） | 「用户级 / 项目级」两类规则；项目级运行时真值 `.codebuddy/rules` 非官方文案 `.rules`；**用户级落盘位置 2026-10-12 坐实 = `~/.codebuddy/rules`**（`userBasePath`，与项目级同一 `DefaultRuleManager`，见 §5.5）；`SessionHint=true` |
 | Claude Code | `.claude/rules/` | `.md` | ✅ 全部（官方文档） | 部分：`/compact` 会重读项目 `CLAUDE.md`，但 `.claude/rules/` 子目录**不保证**自动回读 | 同上（`hookSpecificOutput.additionalContext`） | v2.0.64+ | ⚠️ 本工作区 canary 未落地（open bug，见 §四） |
 | Trae | `.trae/rules/`（2026-10-09 canary 坐实，见 §二·续） | `.md`（带/不带 frontmatter 均可）；**`.mdc` 不加载** | ✅ 递归（子目录也读） | 🔴 待补（会话内重读未测） | Claude 系 `additionalContext` 协议；hook 载荷带 `cwd`/`workspace_roots`（2026-10-09 实测） | CN `~/.trae-cn`（2026-10-09 本机）；intl `~/.trae` | 安装目录 + 规则目录均已核实（见 §二·续）；`Verified=true` |
 | WorkBuddy | **`.codebuddy/rules/`**（与 CodeBuddy **共享**，2026-10-09 三位置对照探针坐实，见 §5.4） | `.md`（带 alwaysApply:true） | ✅ 读平铺非隐藏 `.md` | ❌ 不会（会话开始固定快照） | 同上 | 5.7.6（本机实测） | **用户级**配置/钩子独立：`~/.workbuddy/settings.json`；**工作区级**规则目录与 CodeBuddy 相同 ⇒ 两者共享目录，需走并集同步 |
@@ -65,7 +65,7 @@
 2. 是否递归扫描子目录、有无层数 / 大小 / 数量上限（实测平铺有效，子目录 `RULE.mdc` 加载不稳定，不依赖）。
 3. 加载时机（打开工作区 / 重载窗口 / 每轮）与改动后是否热更新。
 4. ~~缺 frontmatter 时的降级行为~~ → **已解**：无 `alwaysApply:true` 的规则**不会**在会话开始自动加载（见 §四）。
-5. 用户级规则的落盘位置与「合并 or 覆盖」策略。
+5. ~~用户级规则的落盘位置~~ → **已解（2026-10-12，bundle 代码级）**：`~/.codebuddy/rules`（`userBasePath = join(homePath, USER_DATA_DIR_NAME, "rules")`，是 `DefaultRuleManager(project, user, hidden)` 三路径之一、带文件监听、`RuleScope.USER` 有权限检查）；「合并 or 覆盖」预期为**合并加载**（项目级 + 用户级 + hidden 三路径共同进 RuleManager），待 canary 实证，见 §5.5。
 
 > 官方文档称「每条规则 = 一个含 `RULE.mdc` 的子目录」（`www.codebuddy.ai/docs/zh/ide/User-guide/Rules`，2026-10-08 抓取），但**本机实测与该文案不符**：平铺 `RULE.mdc` 子目录的加载**不稳定**，平铺非隐藏 `.md`（带 `alwaysApply:true`）才是稳定生效的形态。**以实测为准。**
 
@@ -238,3 +238,28 @@ canary 或官方文档坐实（记在 `progress.json` 待办里）。
 - 但 `RulesDir` 是 `.codebuddy/rules`，与 `codebuddy` **共享** ⇒ 同步走并集、卸载走收敛
   （`agents.SharingRulesDir` / `config.SourcesForAny`），否则两个 agent 会互删对方文件。
 - 历史遗留：曾按 `.workbuddy/rules` 落过盘的工作区，那个目录是孤儿（WorkBuddy 不读），需手动删除。
+
+### 5.5 CodeBuddy ↔ WorkBuddy 同源：品牌决定用户级目录，工作区级目录两家共享（2026-10-12 bundle 代码级坐实）
+
+> **来源**：本机 CodeBuddy CN 安装产物 `~/.codebuddy-server-cn/bin/stable-757a5b2f…/extensions/genie/out/extension/index.js`（21 MB，构建于 2026-09-20）逐段核查；与 2026-10-09 WorkBuddy 本机实测（§5.4）互相印证。
+> **适用版本**：CodeBuddy CN 4.12.1（本机）；WorkBuddy 5.7.6（§5.4 实测）。
+> **状态**：✅ 代码级坐实（用户级 skills 合并方向另有活证：本机 `~/.codebuddy/skills/hindsight-coding-agent` 在本会话装载可用）；WorkBuddy 侧两级目录的**装载**仍待 Mac 实测。
+> **配套**：[`skill-ecosystem.md`](skill-ecosystem.md) §三·续（skills 双目录同源模型）。
+
+**两者是同一套代码库的两个品牌**：bundle 内 38 处 `workbuddy` 引用；用户级目录名由 product 配置决定——`getBrandUserDataDirName()` 读 `getCurrentConfiguration().dataFolderName`，兜底 `.codebuddy`。本机 CN 安装的 `product.json` 为 `dataFolderName:".codebuddycn"` / `applicationName:"buddycn"`，但**实际生效目录仍是 `~/.codebuddy`**（活证：钩子 `settings.json`、skills、rules 注入均落在此且被读取）⇒ `getBrandUserDataDirName()` 与静态常量 `USER_DATA_DIR_NAME=".codebuddy"` 两套路径并存，**以静态常量路径为生效口径**（市场安装器 `userSkillsDir=join(homedir(),".codebuddy","skills")` 即此路径）。
+
+| 谁读什么 | 用户级 | 工作区级 |
+|---|---|---|
+| CodeBuddy | `~/.codebuddy/rules`（✅ 坐实）、`~/.codebuddy/skills`（✅ 坐实）**+ `~/.workbuddy/skills` 合并**（✅ 代码级 + 活证） | `.codebuddy/rules`（canary 坐实）、`.codebuddy/skills`（✅ 代码级 + 本仓库实例在装） |
+| WorkBuddy | `~/.workbuddy/rules`（🟡 同源模型推断，未实测）、`~/.workbuddy/skills`（🟡 同上）；`~/.workbuddy/settings.json` 已实测（§5.4） | `.codebuddy/rules`（✅ §5.4 实测坐实）、`.codebuddy/skills`（🟡 同源推断，未实测） |
+
+- **skills 用户级合并是单向的**：`resolveUserSkillsDirs()` 仅当品牌目录名为 `.codebuddy` 时把 `.workbuddy` 加入合并集合 ⇒ CodeBuddy 读两家的用户级 skills，**WorkBuddy 只读自己的**（重名时「skipped in favor of earlier」）。
+- **工作区级两家共享**：`getProjectSkillsDir()` / `projectBasePath` 均用静态常量 `WORKSPACE_DATA_DIR_NAME=".codebuddy"`（bundle 内仅此一个值）⇒ 与 rules 侧 §5.4 实测（WorkBuddy 读 `.codebuddy/rules`）同规律。
+- rules 侧无 `.workbuddy` 并列逻辑（`userBasePath` 单目录）⇒ 用户级 rules **不合并**，两品牌各读各的。
+
+**对 rulemux 的影响**：
+
+- 用户级注入要覆盖两家 ⇒ rules 与 skills 都需写**两个**目录（`~/.codebuddy/…` + `~/.workbuddy/…`）；只写一个必然漏一家。
+- 工作区级维持现状（`.codebuddy/rules` / `.codebuddy/skills` 一家写、两家读）。
+- 用户级双写有受控重叠：rulemux 给两家写同名 skill，CodeBuddy 合并读两目录时重名去重（跳过后者），无害；清理时两个目录都要登记。
+- WorkBuddy 用户级 skills/rules 目录仍待 Mac 实测（§5.4 只坐实了它的 settings.json 与工作区 rules）。
