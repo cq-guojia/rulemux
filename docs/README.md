@@ -8,7 +8,7 @@
 | 槽位 | 本项目落点 | 说明 |
 |---|---|---|
 | 文档规范 | `docs/README.md` | 本文件 |
-| 状态表 | `docs/progress.json` | 2026-10-11 由旧 `PROGRESS.md` 迁入 |
+| 状态表 | `docs/progress.json` | 在办任务状态表（结构化索引） |
 | 已结案 | `docs/PROGRESS-HISTORY.md` | — |
 | 过程叙事 | `docs/worklog/<年月>/` | 按月归档（<年月> 取任务创建月份）；文件名由过程文档建档机制生成，实际路径以状态表 `worklog` 字段为准，命名规则不在此复制 |
 | 运行逻辑 | `docs/design/architecture.md` | — |
@@ -26,4 +26,3 @@
 
 1. **需求类（追加槽位）**：`docs/design/requirements.md` —— 需求变了改这里、方案变了改架构。
 2. **实现期调研归档（特例）**：`docs/design/implementation.md` 是项目启动前的调研与跨工作包决策记录，体量跨整个实现期、不是单个工作包，故独立成文；搬入时同步更新过时内容。
-3. **状态表已迁 `progress.json`**：2026-10-11 由旧 `PROGRESS.md`（Markdown）迁入。
