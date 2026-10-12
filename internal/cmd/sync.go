@@ -121,64 +121,34 @@ func Sync(args []string) int {
 			requestedID = ra.ID
 		}
 	}
+	createAgent := ""
+	if hook && requestedID != "" {
+		createAgent = requestedID
+	}
 
-	exit := 0
-	changed := false
-	var processed []string
-	doneDirs := map[string]bool{} // 共享同一目录的 agent 只处理一次（见下）
+	run := newSyncRun(cfg, ws, createAgent)
 	for _, a := range targets {
 		if a.Tier == agents.Tier2 {
 			// Tier-2 没有规则目录可丢文件，由 inject 子命令负责注入
 			continue
 		}
-		dir := a.RulesDirAbs(ws)
-		// 共享同一规则目录的 agent（codebuddy / workbuddy 都是 .codebuddy/rules）必须**按并集**
-		// 同步：engine 的删残留是「整目录下带 __rulemux__ 前缀、不在本次计划内的一律删」
-		// （engine/sync.go:164-185），若各自只算自己的 sources，就会互相把对方的文件当残留
-		// 删掉 ⇒ 两个钩子轮流触发时文件来回消失。取并集后谁跑都不会删别人的。
-		//
-		// 同一目录也可能被 targets 里的多个 agent 命中（手动 sync 不带 --agent 时），
-		// 并集结果相同 ⇒ 第二次是纯白跑，还会重复记账，故按目录去重。
-		if doneDirs[dir] {
-			continue
-		}
-		doneDirs[dir] = true
-		srcs := cfg.SourcesForAny(unionAgentIDs(a, ws), ws)
-		create := hook && requestedID != "" && a.ID == requestedID
-		res, err := engine.Sync(dir, srcs, a.NeedsFrontmatter, create)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
-			exit = 1
-			continue
-		}
-		printSyncResult(os.Stderr, a, dir, res)
-		if res.HasChanges() {
-			changed = true
-		}
-		// 只有真正落到一个已存在目录上（没被 SkippedNoDir 跳过）才算「用过」。
-		if !res.SkippedNoDir {
-			processed = append(processed, a.ID)
-		}
+		run.agent(a)
 	}
 
-	// 记入账本（收窄触发条件）：只有确实处理过某个目录时才记账 —— 否则原则 2 下
-	// 大量「跳过」会把无关工作区灌进账本。记的是「工作区 × agent」。
-	// 钩子是全局的，但规则文件落在各工作区本地；卸载时要靠这份账本逐一回访清理，
-	// 否则钩子一去、残留将永无机会被自动删除。
-	for _, id := range processed {
-		if err := state.Record(ws, id); err != nil {
-			fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
-		}
-	}
-
-	// 顺手同步（仅 hook 路径）：把这个工作区历史上用过的**其它**写目录 agent 也一并同步。
+	// 顺手同步（仅 hook 路径）：把这个工作区历史上用过的**其它** agent 也一并同步。
 	// 只读账本 + 只写已存在目录（原则 2），因此不会新建任何目录、不会碰到没配置的地方。
 	if hook {
-		done := make(map[string]bool, len(processed))
-		for _, id := range processed {
-			done[id] = true
+		run.cascade()
+	}
+
+	// 记入账本（收窄触发条件）：只有确实落到一个已存在目录上（没被 SkippedNoDir 跳过）
+	// 才算「用过」。记的是「工作区 × agent」；一个 agent 本轮同步多个目录只记一次。
+	// 钩子是全局的，但规则文件落在各工作区本地；卸载时要靠这份账本逐一回访清理，
+	// 否则钩子一去、残留将永无机会被自动删除。
+	for _, e := range run.landed {
+		if err := state.Record(e.ws, e.id); err != nil {
+			fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
 		}
-		cascade(cfg, ws, done)
 	}
 
 	// hook 路径下、且确有变化时，给模型一句话（它应转告用户重开会话）。
@@ -186,12 +156,153 @@ func Sync(args []string) int {
 	//
 	// per-agent 门禁：只有被点名的那个 agent 明确「需要提示 + 协议已知」时才输出
 	// （见设计 §六「per-agent」）——有的 agent 会话内会重读规则，根本不该提示。
-	if hook && changed {
+	// 注意 changed 只统计 rules（含用户级 rules）；skills 变化不计入——热重载行为
+	// 待 canary（docs/design/external/skill-ecosystem.md §六-4），不注入未验证的提示。
+	if hook && run.changed {
 		if a, ok := agents.Get(requested); ok && a.SessionHint && a.HintProtocol != "" {
 			emitChangeNotice(os.Stdout, a.HintProtocol)
 		}
 	}
-	return exit
+	if run.failed {
+		return 1
+	}
+	return 0
+}
+
+// syncRun 是一次 sync 运行的共享状态：跨 agent 的目录去重 + 变化/落盘汇总。
+//
+// 每个 agent 同步四类目录（工作区 rules / 工作区 skills / 用户级 rules / 用户级 skills），
+// 与规则同步完全同构：共享目录按并集（否则删残留互删对方文件）、同一目录只跑一次。
+type syncRun struct {
+	cfg *config.Config
+	ws  string
+	// createAgent 是「允许创建目录」的 agent（只有 hook 路径被 --agent 点名的那一个）；
+	// 空 = 谁都不建（手动 sync / cascade / sync --all 一律只写已存在目录）。
+	createAgent string
+	doneDirs    map[string]bool       // 工作区目录（rules + skills）去重
+	doneUser    map[string]bool       // 用户级目录去重（全局，跨工作区只跑一次）
+	changed     bool                  // rules 变化（含用户级 rules；skills 不计入）
+	failed      bool                  // 任一路径出错（抬退出码）
+	landed      []landedEntry         // 落过盘的（工作区, agent），供账本记账
+}
+
+// landedEntry 是一条「在某个工作区落过盘」的记录（账本 key）。
+type landedEntry struct {
+	ws  string
+	id  string
+}
+
+func newSyncRun(cfg *config.Config, ws, createAgent string) *syncRun {
+	return &syncRun{
+		cfg:         cfg,
+		ws:          ws,
+		createAgent: createAgent,
+		doneDirs:    map[string]bool{},
+		doneUser:    map[string]bool{},
+	}
+}
+
+// agent 同步一个 agent 的全部目录：工作区 rules + 工作区 skills + 用户级 rules ×N + 用户级 skills ×N。
+func (r *syncRun) agent(a agents.Agent) {
+	// 只有被 hook 点名的那一个 agent 才允许创建目录（设计 §二 原则 1）。
+	create := r.createAgent != "" && a.ID == r.createAgent
+
+	// 1. 工作区 rules：共享目录（codebuddy / workbuddy 同落 .codebuddy/rules）按并集同步，
+	// 否则 engine 的删残留会把另一方的文件当残留删掉 ⇒ 两个钩子轮流触发时文件来回消失。
+	if a.Tier == agents.Tier1 && a.RulesDir != "" {
+		dir := a.RulesDirAbs(r.ws)
+		if !r.doneDirs[dir] {
+			r.doneDirs[dir] = true
+			r.syncFiles(a, dir, r.cfg.SourcesForAny(unionAgentIDs(a, r.ws), r.ws), a.NeedsFrontmatter, create)
+		}
+	}
+
+	// 2. 工作区 skills：与 rules 同规律（共享 .codebuddy/skills，2026-10-12 代码级，见 registry 注释）。
+	if a.SkillsDir != "" {
+		dir := a.SkillsDirAbs(r.ws)
+		if !r.doneDirs[dir] {
+			r.doneDirs[dir] = true
+			r.syncSkillDirs(a, dir, r.cfg.SkillSourcesForAny(unionSkillIDs(a, r.ws), r.ws), create)
+		}
+	}
+
+	// 3-4. 用户级（全局）rules / skills：目录与工作区无关 ⇒ 忽略 workspace 匹配；
+	// codebuddy 家族双目录（~/.codebuddy + ~/.workbuddy）才覆盖两家（CodeBuddy 合并读两家、
+	// WorkBuddy 只读自己的，见 docs/design/external/agent-rules-dirs.md §5.5）。
+	userIDs := unionUserIDs(a, r.ws)
+	for _, dir := range a.UserRulesDirsAbs() {
+		if r.doneUser[dir] {
+			continue
+		}
+		r.doneUser[dir] = true
+		r.syncFiles(a, dir, r.cfg.UserSourcesForAny(userIDs), a.NeedsFrontmatter, create)
+	}
+	for _, dir := range a.UserSkillsDirsAbs() {
+		if r.doneUser[dir] {
+			continue
+		}
+		r.doneUser[dir] = true
+		r.syncSkillDirs(a, dir, r.cfg.UserSkillSourcesForAny(userIDs), create)
+	}
+}
+
+// syncFiles 同步一个规则目录（工作区或用户级）。
+func (r *syncRun) syncFiles(a agents.Agent, dir string, srcs []config.Source, frontmatter, create bool) {
+	res, err := engine.Sync(dir, srcs, frontmatter, create)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
+		r.failed = true
+		return
+	}
+	printSyncResult(os.Stderr, a, dir, res)
+	if res.HasChanges() {
+		r.changed = true
+	}
+	if !res.SkippedNoDir {
+		r.landed = append(r.landed, landedEntry{ws: r.ws, id: a.ID})
+	}
+}
+
+// syncSkillDirs 同步一个 skills 目录（工作区或用户级）。
+func (r *syncRun) syncSkillDirs(a agents.Agent, dir string, srcs []config.SkillSource, create bool) {
+	res, err := engine.SyncSkills(dir, srcs, create)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
+		r.failed = true
+		return
+	}
+	printSyncResult(os.Stderr, a, dir, res)
+	// shortcut: skills 变化不计入 changed（不触发「新开会话」提示）——skills 是否热重载
+	// 待 canary（docs/design/external/skill-ecosystem.md §六-4）；坐实后再按 per-agent 判据补。
+	if !res.SkippedNoDir {
+		r.landed = append(r.landed, landedEntry{ws: r.ws, id: a.ID})
+	}
+}
+
+// cascade 顺手同步该工作区历史上用过的**其它** Tier-1 agent。
+//
+// 硬规则（设计 §七）：
+//   - 候选来自**账本**（该工作区用过哪些 agent），不是扫盘、也不是配置通配符；
+//   - 只处理已核实（Verified）的 Tier-1 agent；查不到 / 未核实 ⇒ 跳过（账本条目保留）；
+//   - **任何域都没有源** ⇒ 什么也不做（不去清一个配置已不再覆盖的 agent 的目录）；
+//   - **只一层**，不顺带再顺带；失败只记 warning，不影响主流程退出码。
+func (r *syncRun) cascade() {
+	l := state.Load()
+	done := map[string]bool{}
+	for _, e := range r.landed {
+		if e.ws == r.ws {
+			done[e.id] = true
+		}
+	}
+	for _, a := range agentsFromLedger(l.AgentsFor(r.ws)) {
+		if done[a.ID] || a.Tier != agents.Tier1 {
+			continue
+		}
+		if !r.cfg.HasAnyFor(unionAgentIDs(a, r.ws), r.ws) {
+			continue // 任何域都没有源 ⇒ 不碰
+		}
+		r.agent(a)
+	}
 }
 
 // healHooks 把 targets 里每个 agent「已存在的自家钩子」升级到当前格式（幂等）。
@@ -216,46 +327,31 @@ func healHooks(ws string, targets []agents.Agent) {
 	}
 }
 
-// cascade 顺手同步该工作区历史上用过的**其它** Tier-1 agent。
+// peerIDs 取一组 agent 的规范 ID（供 config 的 *ForAny 查询用）。
+func peerIDs(ps []agents.Agent) []string {
+	ids := make([]string, 0, len(ps))
+	for _, p := range ps {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+// hookedPeersIn 返回 group 中还装着 rulemux 钩子的 agent；一个都没装 ⇒ 退回整组
+// （手动 sync 的兜底：没钩子可判时按整组并集，保证手动跑仍有东西落）。
 //
-// 硬规则（设计 §七）：
-//   - 候选来自**账本**（该工作区用过哪些 agent），不是扫盘、也不是配置通配符；
-//   - 目录存在性**只认 os.Stat**（账本不作数，目录可能已被手工删）⇒ 不存在就跳过，**绝不创建**；
-//   - 只处理已核实（Verified）的 agent；查不到 / 未核实 ⇒ 跳过（账本条目保留）；
-//   - want 为空 ⇒ 什么也不做（不去清别人家的目录）；
-//   - **只一层**，不顺带再顺带；失败只记 warning，不影响主流程退出码。
-func cascade(cfg *config.Config, ws string, done map[string]bool) {
-	l := state.Load()
-	for _, a := range agentsFromLedger(l.AgentsFor(ws)) {
-		if done[a.ID] || a.Tier != agents.Tier1 {
-			continue
-		}
-		dir := a.RulesDirAbs(ws)
-		if dir == "" {
-			continue
-		}
-		if _, err := os.Stat(dir); err != nil {
-			continue // 目录不在（或不可读）⇒ 不碰、更不建
-		}
-		// 同主循环：共享目录取并集，避免删掉另一方的文件。
-		srcs := cfg.SourcesForAny(unionAgentIDs(a, ws), ws)
-		if len(srcs) == 0 {
-			continue // want 为空 ⇒ 不碰
-		}
-		res, err := engine.Sync(dir, srcs, a.NeedsFrontmatter, false)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "rulemux: warning: cascade sync for %s failed: %v\n", a.ID, err)
-			continue
-		}
-		if !res.IsEmpty() {
-			printSyncResult(os.Stderr, a, dir, res)
-		}
-		if !res.SkippedNoDir {
-			if err := state.Record(ws, a.ID); err != nil {
-				fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
-			}
+// 「还装着」是判断某个 agent 是否仍在使用的唯一依据：卸载 = 摘钩子，钩子一没它就自然
+// 退出并集，因此**不需要任何额外的状态文件**。
+func hookedPeersIn(group []agents.Agent, ws string) []agents.Agent {
+	var hooked []agents.Agent
+	for _, b := range group {
+		if hookInstalled(b, ws) {
+			hooked = append(hooked, b)
 		}
 	}
+	if len(hooked) == 0 {
+		return group
+	}
+	return hooked
 }
 
 // syncAll 实现 `rulemux sync --all`：只遍历账本记录过的工作区，把它们各自对齐到当前配置。
@@ -266,6 +362,8 @@ func cascade(cfg *config.Config, ws string, done map[string]bool) {
 //   - **只写已存在的目录**（create=false，原则 2），目录不存在就跳过、绝不新建；
 //   - 顺手 GC：路径**确实不存在**（ENOENT）的账本条目会被清掉；其它错误（权限 / 断连）
 //     只跳过、保留条目（可能是临时不可用的外挂盘）。
+//
+// 用户级目录是全局的：整个 --all 只同步一次（syncRun.doneUser 跨工作区去重）。
 func syncAll(cfg *config.Config) int {
 	l := state.Load()
 	workspaces := l.AllWorkspaces()
@@ -276,6 +374,7 @@ func syncAll(cfg *config.Config) int {
 
 	exit := 0
 	var gone []string
+	run := newSyncRun(cfg, "", "") // createAgent 空 ⇒ 一律只写已存在目录
 	for _, ws := range workspaces {
 		if _, err := os.Stat(ws); err != nil {
 			if os.IsNotExist(err) {
@@ -285,21 +384,16 @@ func syncAll(cfg *config.Config) int {
 			}
 			continue
 		}
+		run.ws = ws
 		for _, a := range agentsFromLedger(l.AgentsFor(ws)) {
-			dir := a.RulesDirAbs(ws)
-			// 同主循环：共享目录取并集，避免删掉另一方的文件。
-			res, err := engine.Sync(dir, cfg.SourcesForAny(unionAgentIDs(a, ws), ws), a.NeedsFrontmatter, false)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s in %s: %v\n", a.ID, ws, err)
-				exit = 1
-				continue
-			}
-			printSyncResult(os.Stderr, a, dir, res)
-			if !res.SkippedNoDir {
-				if err := state.Record(ws, a.ID); err != nil {
-					fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
-				}
-			}
+			run.agent(a)
+		}
+	}
+
+	// 记账：只记确实落过盘的（工作区 × agent）；一个 agent 同步多个目录只记一次。
+	for _, e := range run.landed {
+		if err := state.Record(e.ws, e.id); err != nil {
+			fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
 		}
 	}
 
@@ -310,6 +404,9 @@ func syncAll(cfg *config.Config) int {
 		} else {
 			fmt.Fprintf(os.Stderr, "rulemux: pruned %d ledger entr(ies) whose directory no longer exists\n", len(gone))
 		}
+	}
+	if run.failed {
+		exit = 1
 	}
 	return exit
 }
@@ -395,29 +492,17 @@ func emitChangeNotice(w io.Writer, protocol string) {
 	fmt.Fprintln(w, string(b))
 }
 
-// targetAgents 决定本次处理哪些 agent；未指定则处理全部「已验证」的 Tier-1。
-// 未做好的 agent（Verified==false）一律不参与，从源头保证只动做好的适配。
 // hookedPeers 返回「与 a 共享同一规则目录、且还装着 rulemux 钩子」的 agent（含 a 自己）。
 //
 // 「还装着」是判断某个 agent 是否仍在使用的唯一依据：卸载 = 摘钩子，钩子一没它就自然
 // 退出并集，因此**不需要任何额外的状态文件**。
 //
 // 若共享组里一个都没装钩子（纯手动 sync 的场景）⇒ 退回该共享组全部 agent，
-// 保证手动跑 `rulemux sync` 仍有东西落。
+// 保证手动跑 `rulemux sync` 仍有东西落（见 hookedPeersIn）。
 //
 // ⚠ 卸载侧调用时必须在 `hooks.Uninstall` **之前**取好结果：钩子一摘就判不出谁还在用。
 func hookedPeers(a agents.Agent, ws string) []agents.Agent {
-	group := agents.SharingRulesDir(a)
-	var hooked []agents.Agent
-	for _, b := range group {
-		if hookInstalled(b, ws) {
-			hooked = append(hooked, b)
-		}
-	}
-	if len(hooked) == 0 {
-		return group // 一个都没装 ⇒ 退回整组（手动 sync 兜底）
-	}
-	return hooked
+	return hookedPeersIn(agents.SharingRulesDir(a), ws)
 }
 
 // hookInstalled 报告该 agent 是否还装着 rulemux 的 SessionStart 钩子。
@@ -429,14 +514,21 @@ func hookInstalled(a agents.Agent, ws string) bool {
 	return err == nil && installed
 }
 
-// unionAgentIDs 返回参与并集的 agent 规范 ID 列表（供 config.SourcesForAny 使用）。
+// unionAgentIDs 返回参与**工作区 rules** 并集的 agent 规范 ID（供 config.SourcesForAny 使用）。
 func unionAgentIDs(a agents.Agent, ws string) []string {
-	peers := hookedPeers(a, ws)
-	ids := make([]string, 0, len(peers))
-	for _, p := range peers {
-		ids = append(ids, p.ID)
-	}
-	return ids
+	return peerIDs(hookedPeers(a, ws))
+}
+
+// unionSkillIDs 返回参与**工作区 skills** 并集的 agent 规范 ID（共享 skills 目录，同 rules 规律）。
+func unionSkillIDs(a agents.Agent, ws string) []string {
+	return peerIDs(hookedPeersIn(agents.SharingSkillsDir(a), ws))
+}
+
+// unionUserIDs 返回参与**用户级**（rules + skills）并集的 agent 规范 ID。
+// 用户级目录两家共享（codebuddy 家族双目录）⇒ 同样必须按并集，否则一家的 hook 会把
+// 另一家投的文件当残留删掉。
+func unionUserIDs(a agents.Agent, ws string) []string {
+	return peerIDs(hookedPeersIn(agents.SharingUserDirs(a), ws))
 }
 
 func targetAgents(id string) []agents.Agent {

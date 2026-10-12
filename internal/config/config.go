@@ -22,6 +22,15 @@ import (
 	"github.com/cq-guojia/rulemux/internal/agents"
 )
 
+// 作用域（scope）：规则 / skill 落在哪个域。
+const (
+	// ScopeWorkspace 工作区级（默认）：落到各工作区的 agent 目录（如 .codebuddy/rules）。
+	ScopeWorkspace = "workspace"
+	// ScopeUser 用户级（全局）：落到 agent 的用户级目录（如 ~/.codebuddy/rules），
+	// 与工作区无关 ⇒ 查询时忽略 workspace 匹配。
+	ScopeUser = "user"
+)
+
 // Source 是配置里列出的一条源规则（可含一个或多个文件）。
 type Source struct {
 	// Paths 是源文件路径列表，每个都可以是磁盘上的任意位置。
@@ -35,12 +44,37 @@ type Source struct {
 	// 既支持单个：workspace = "/path/to/proj"
 	// 也支持数组：workspace = ["/a", "/b"]
 	// 也可通过 workspace_groups 引用“工作区分组”，解析阶段会把组内所有路径合并进来。
+	// 注意：Scope 为 user 时本字段被忽略（用户级目录本就与工作区无关）。
 	Workspaces []string
 	// Groups 引用哪些文件组（按 [[file_group]].name），解析阶段展开成具体文件并入 Paths。
 	Groups []string
 	// WorkspaceGroups 引用哪些工作区分组（按 [[workspace_group]].name），解析阶段展开成具体路径并入 Workspaces。
 	WorkspaceGroups []string
+	// Scope 投放域："" / "workspace"（默认）= 工作区级；"user" = 用户级（全局）。
+	Scope string
 }
+
+// IsUserScope 报告该条是否投放到用户级（全局）域。
+func (s Source) IsUserScope() bool { return strings.EqualFold(s.Scope, ScopeUser) }
+
+// SkillSource 是配置里列出的一条 skill 源（v1：仅本地目录）。
+//
+// 语义与 [[source]] 平行，但源是**目录**而非文件：path 指向一个 skill 根目录，
+// 其下每个含 SKILL.md（大小写不敏感）的子目录就是一个 skill；若根目录自身含
+// SKILL.md，则根本身也是一个 skill（单技能目录布局同样支持）。
+type SkillSource struct {
+	// Paths 是 skill 根目录列表（单个或数组均可）。
+	Paths []string
+	// Agents 指定投递给哪些 agent；为空表示全部支持的 agent。
+	Agents []string
+	// Workspaces 适用工作区（仅 workspace 域生效；user 域忽略）。
+	Workspaces []string
+	// Scope 投放域："" / "workspace"（默认）| "user"。
+	Scope string
+}
+
+// IsUserScope 报告该条是否投放到用户级（全局）域。
+func (s SkillSource) IsUserScope() bool { return strings.EqualFold(s.Scope, ScopeUser) }
 
 // FileGroup 是配置中的一个“文件组”，把若干规则文件打包，供 [[source]] 用 groups 引用。
 // 组与组之间可互相引用（use），形成嵌套。
@@ -61,6 +95,7 @@ type WorkspaceGroup struct {
 // Config 是 rulemux 的完整配置。
 type Config struct {
 	Sources         []Source
+	SkillSources    []SkillSource
 	FileGroups      []FileGroup
 	WorkspaceGroups []WorkspaceGroup
 	// File 是本次实际读取的配置文件路径。
@@ -91,11 +126,12 @@ func Load(path string) (*Config, error) {
 	const (
 		curNone = iota
 		curSource
+		curSkillSource
 		curFileGroup
 		curWSGroup
 	)
 	cur := curNone
-	srcIdx, fgIdx, wgIdx := -1, -1, -1
+	srcIdx, skillIdx, fgIdx, wgIdx := -1, -1, -1, -1
 
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -111,6 +147,10 @@ func Load(path string) (*Config, error) {
 				c.Sources = append(c.Sources, Source{})
 				srcIdx = len(c.Sources) - 1
 				cur = curSource
+			case "skill_source":
+				c.SkillSources = append(c.SkillSources, SkillSource{})
+				skillIdx = len(c.SkillSources) - 1
+				cur = curSkillSource
 			case "file_group":
 				c.FileGroups = append(c.FileGroups, FileGroup{})
 				fgIdx = len(c.FileGroups) - 1
@@ -151,6 +191,21 @@ func Load(path string) (*Config, error) {
 				c.Sources[srcIdx].Groups = parseArray(val)
 			case "workspace_groups":
 				c.Sources[srcIdx].WorkspaceGroups = parseArray(val)
+			case "scope":
+				c.Sources[srcIdx].Scope = normalizeScope(unquote(val))
+			}
+		case curSkillSource:
+			// v1 不支持 groups：skill 源是目录不是文件，没有「文件组」可引用
+			//（shortcut：源布局用目录本身表达，见 SkillSource 注释）。
+			switch key {
+			case "path":
+				c.SkillSources[skillIdx].Paths = parsePaths(val)
+			case "agents":
+				c.SkillSources[skillIdx].Agents = parseArray(val)
+			case "workspace":
+				c.SkillSources[skillIdx].Workspaces = parsePaths(val)
+			case "scope":
+				c.SkillSources[skillIdx].Scope = normalizeScope(unquote(val))
 			}
 		case curFileGroup:
 			switch key {
@@ -184,13 +239,15 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	c.canonicalizeAgents()
+	c.normalizeScopes()
 	return c, nil
 }
 
 // expandHomes 把配置里所有路径值中的 "~" / "~/" 展开为当前用户的 HOME，
 // 使同一份配置能跨机器、跨用户复用（不必硬编码 /Users/xxx 这类前缀）。
 //
-// 覆盖四处：Source.Paths、Source.Workspaces、FileGroup.Paths、WorkspaceGroup.Workspaces。
+// 覆盖五处：Source.Paths、Source.Workspaces、FileGroup.Paths、WorkspaceGroup.Workspaces、
+// SkillSource.Paths、SkillSource.Workspaces。
 // 含 glob 的值（如 "~/proj/*"）同样先展开再匹配，单段 "*" / 跨段 "**" 的语义不变。
 //
 // 展开逻辑复用 agents.ExpandHome（全项目 "~" 展开的单一真源），此处不做第二份实现；
@@ -199,6 +256,10 @@ func (c *Config) expandHomes() {
 	for i := range c.Sources {
 		c.Sources[i].Paths = expandHomesAll(c.Sources[i].Paths)
 		c.Sources[i].Workspaces = expandHomesAll(c.Sources[i].Workspaces)
+	}
+	for i := range c.SkillSources {
+		c.SkillSources[i].Paths = expandHomesAll(c.SkillSources[i].Paths)
+		c.SkillSources[i].Workspaces = expandHomesAll(c.SkillSources[i].Workspaces)
 	}
 	for i := range c.FileGroups {
 		c.FileGroups[i].Paths = expandHomesAll(c.FileGroups[i].Paths)
@@ -220,12 +281,16 @@ func expandHomesAll(in []string) []string {
 	return out
 }
 
-// SourcesFor 返回在指定工作区下、应投递给指定 agent 的源规则。
+// SourcesFor 返回在指定工作区下、应投递给指定 agent 的源规则（**仅 workspace 域**）。
 //   - agents 为空 ⇒ 该条投递给全部 agent
 //   - workspace 为空 / 含 "*" / "all" ⇒ 该条适用于全部工作区
+//   - scope 为 user 的条目不在此列（走 UserSourcesFor）
 func (c *Config) SourcesFor(agentID, workspace string) []Source {
 	out := make([]Source, 0, len(c.Sources))
 	for _, s := range c.Sources {
+		if s.IsUserScope() {
+			continue
+		}
 		if len(s.Agents) != 0 && !containsFold(s.Agents, agentID) {
 			continue
 		}
@@ -237,7 +302,8 @@ func (c *Config) SourcesFor(agentID, workspace string) []Source {
 	return out
 }
 
-// SourcesForAny 返回在指定工作区下、应投递给 agentIDs 中**任一** agent 的源规则的**并集**。
+// SourcesForAny 返回在指定工作区下、应投递给 agentIDs 中**任一** agent 的源规则的**并集**
+//（**仅 workspace 域**）。
 //
 // 与 SourcesFor 的差别只在 agent 那一维：命中任一 id 即收录（agents 为空视为命中全部），
 // 且每条 source 只收录一次、保持 c.Sources 原序 —— 所以对共享规则目录的多个 agent
@@ -255,6 +321,9 @@ func (c *Config) SourcesForAny(agentIDs []string, workspace string) []Source {
 	}
 	out := make([]Source, 0, len(c.Sources))
 	for _, s := range c.Sources {
+		if s.IsUserScope() {
+			continue
+		}
 		if len(s.Agents) != 0 && !containsAnyFold(s.Agents, agentIDs) {
 			continue
 		}
@@ -264,6 +333,97 @@ func (c *Config) SourcesForAny(agentIDs []string, workspace string) []Source {
 		out = append(out, s) // 一条只收录一次：命中任一 id 即 break 出循环
 	}
 	return out
+}
+
+// UserSourcesFor 返回应投递给指定 agent 的用户级（全局）规则源。
+// 用户级目录与工作区无关 ⇒ 忽略 workspace 匹配。
+func (c *Config) UserSourcesFor(agentID string) []Source {
+	return c.UserSourcesForAny([]string{agentID})
+}
+
+// UserSourcesForAny 返回应投递给 agentIDs 中任一 agent 的用户级规则源并集（忽略 workspace）。
+func (c *Config) UserSourcesForAny(agentIDs []string) []Source {
+	if len(agentIDs) == 0 {
+		return nil
+	}
+	out := make([]Source, 0, len(c.Sources))
+	for _, s := range c.Sources {
+		if !s.IsUserScope() {
+			continue
+		}
+		if len(s.Agents) != 0 && !containsAnyFold(s.Agents, agentIDs) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// SkillSourcesFor 返回在指定工作区下、应投递给指定 agent 的 skill 源（**仅 workspace 域**）。
+func (c *Config) SkillSourcesFor(agentID, workspace string) []SkillSource {
+	out := make([]SkillSource, 0, len(c.SkillSources))
+	for _, s := range c.SkillSources {
+		if s.IsUserScope() {
+			continue
+		}
+		if len(s.Agents) != 0 && !containsFold(s.Agents, agentID) {
+			continue
+		}
+		if !s.MatchesWorkspace(workspace) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// SkillSourcesForAny 返回在指定工作区下、应投递给 agentIDs 中任一 agent 的 skill 源并集
+// （**仅 workspace 域**）。共享 skills 目录（如 .codebuddy/skills）按并集同步，同 rules。
+func (c *Config) SkillSourcesForAny(agentIDs []string, workspace string) []SkillSource {
+	if len(agentIDs) == 0 {
+		return nil
+	}
+	out := make([]SkillSource, 0, len(c.SkillSources))
+	for _, s := range c.SkillSources {
+		if s.IsUserScope() {
+			continue
+		}
+		if len(s.Agents) != 0 && !containsAnyFold(s.Agents, agentIDs) {
+			continue
+		}
+		if !s.MatchesWorkspace(workspace) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// UserSkillSourcesForAny 返回应投递给 agentIDs 中任一 agent 的用户级 skill 源并集（忽略 workspace）。
+func (c *Config) UserSkillSourcesForAny(agentIDs []string) []SkillSource {
+	if len(agentIDs) == 0 {
+		return nil
+	}
+	out := make([]SkillSource, 0, len(c.SkillSources))
+	for _, s := range c.SkillSources {
+		if !s.IsUserScope() {
+			continue
+		}
+		if len(s.Agents) != 0 && !containsAnyFold(s.Agents, agentIDs) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// HasAnyFor 报告任一域（工作区/用户级 × 规则/skill）是否有投给 agentIDs 任一的源。
+// 供 cascade 判断「这个 agent 还有没有可同步的东西」。
+func (c *Config) HasAnyFor(agentIDs []string, workspace string) bool {
+	return len(c.SourcesForAny(agentIDs, workspace)) > 0 ||
+		len(c.SkillSourcesForAny(agentIDs, workspace)) > 0 ||
+		len(c.UserSourcesForAny(agentIDs)) > 0 ||
+		len(c.UserSkillSourcesForAny(agentIDs)) > 0
 }
 
 // containsAnyFold 报告 list 与 ids 是否存在交集（忽略大小写）。
@@ -276,17 +436,22 @@ func containsAnyFold(list, ids []string) bool {
 	return false
 }
 
-// DeclaresWorkspace 报告「该工作区是否被配置里任何一条 [[source]] 覆盖」。
+// DeclaresWorkspace 报告「该工作区是否被配置里任何一条 [[source]] / [[skill_source]] 覆盖」。
 //
 // 用途：sync 的守卫 —— 若 cwd 不属于配置声明的工作区，则整体跳过（不建、不删、
 // 不记账）。否则「空 want ⇒ 删残留」会清空一个我们无权管辖的目录。
 // 见 docs/design/features/sync-all-and-change-notice.md §二「清空的正确姿势」/ §八。
 //
-// 注意：省略 workspace、或写 "*"/"**"/"all" 的 source 适用于所有工作区，
-// 因此只要配置里有这类全局 source，任意路径都会被判为「已声明」。
+// 注意：省略 workspace、或写 "*"/"**"/"all" 的条目适用于所有工作区；scope=user 的条目
+// 本就与工作区无关 ⇒ 同样视为「已声明」。因此只要配置里有这类条目，任意路径都会被判为已声明。
 func (c *Config) DeclaresWorkspace(ws string) bool {
 	for _, s := range c.Sources {
-		if s.MatchesWorkspace(ws) {
+		if s.IsUserScope() || s.MatchesWorkspace(ws) {
+			return true
+		}
+	}
+	for _, s := range c.SkillSources {
+		if s.IsUserScope() || s.MatchesWorkspace(ws) {
 			return true
 		}
 	}
@@ -299,10 +464,20 @@ func (c *Config) DeclaresWorkspace(ws string) bool {
 //   - 含 "*" / "?" / "[" 等 glob ⇒ 按业界标准 glob 匹配（"*" 单段，"**" 跨段递归）
 //   - 其余                      ⇒ 与当前工作区路径完全相等（规范化 + 解析符号链接后）
 func (s Source) MatchesWorkspace(ws string) bool {
-	if len(s.Workspaces) == 0 {
+	return matchesWorkspace(s.Workspaces, ws)
+}
+
+// MatchesWorkspace 与 Source.MatchesWorkspace 同语义（skill 源复用同一匹配器）。
+func (s SkillSource) MatchesWorkspace(ws string) bool {
+	return matchesWorkspace(s.Workspaces, ws)
+}
+
+// matchesWorkspace 是 workspace 匹配的唯一实现（Source 与 SkillSource 共用）。
+func matchesWorkspace(workspaces []string, ws string) bool {
+	if len(workspaces) == 0 {
 		return true
 	}
-	for _, w := range s.Workspaces {
+	for _, w := range workspaces {
 		if w == "*" || w == "**" || strings.EqualFold(w, "all") {
 			return true // 全局通配
 		}
@@ -322,12 +497,23 @@ func (s Source) MatchesWorkspace(ws string) bool {
 
 // Validate 校验配置是否可用。
 func (c *Config) Validate() error {
-	if len(c.Sources) == 0 {
-		return fmt.Errorf("config %s has no [[source]]; run rulemux init first to generate a sample config and fill in your source files", c.File)
+	if len(c.Sources) == 0 && len(c.SkillSources) == 0 {
+		return fmt.Errorf("config %s has no [[source]] or [[skill_source]]; run rulemux init first to generate a sample config and fill in your source files", c.File)
 	}
 	for i, s := range c.Sources {
 		if len(s.Paths) == 0 {
 			return fmt.Errorf("config %s: [[source]] #%d is missing path", c.File, i+1)
+		}
+		if !validScope(s.Scope) {
+			return fmt.Errorf("config %s: [[source]] #%d has unknown scope %q (expected \"workspace\" or \"user\")", c.File, i+1, s.Scope)
+		}
+	}
+	for i, s := range c.SkillSources {
+		if len(s.Paths) == 0 {
+			return fmt.Errorf("config %s: [[skill_source]] #%d is missing path", c.File, i+1)
+		}
+		if !validScope(s.Scope) {
+			return fmt.Errorf("config %s: [[skill_source]] #%d has unknown scope %q (expected \"workspace\" or \"user\")", c.File, i+1, s.Scope)
 		}
 	}
 	return nil
@@ -592,7 +778,7 @@ func containsStr(list []string, s string) bool {
 	return false
 }
 
-// canonicalizeAgents 把每条 source 的 agents 值归一为注册表里的规范 ID（别名 → 规范 ID）。
+// canonicalizeAgents 把每条 source / skill_source 的 agents 值归一为注册表里的规范 ID（别名 → 规范 ID）。
 //
 // 否则用户在配置里写别名（如 agents = ["workbuddy"]）时，SourcesFor 用规范 ID 去匹配
 // 会**静默漏投**。这是「别名归一」四个入口之一（见设计 §十 #4）。
@@ -600,6 +786,33 @@ func (c *Config) canonicalizeAgents() {
 	for i := range c.Sources {
 		c.Sources[i].Agents = canonicalAgents(c.Sources[i].Agents)
 	}
+	for i := range c.SkillSources {
+		c.SkillSources[i].Agents = canonicalAgents(c.SkillSources[i].Agents)
+	}
+}
+
+// normalizeScope 归一化作用域值：空串按 workspace（默认）处理；其余原样返回，
+// 由 Validate 拒绝无法识别的值（宁可报错也不静默按默认域投放）。
+func normalizeScope(s string) string {
+	if s == "" {
+		return ScopeWorkspace
+	}
+	return s
+}
+
+// normalizeScopes 把省略 scope 的条目补默认值（解析期只有显式写出 scope 才会赋值）。
+func (c *Config) normalizeScopes() {
+	for i := range c.Sources {
+		c.Sources[i].Scope = normalizeScope(c.Sources[i].Scope)
+	}
+	for i := range c.SkillSources {
+		c.SkillSources[i].Scope = normalizeScope(c.SkillSources[i].Scope)
+	}
+}
+
+// validScope 报告作用域值是否可识别。
+func validScope(s string) bool {
+	return s == "" || strings.EqualFold(s, ScopeWorkspace) || strings.EqualFold(s, ScopeUser)
 }
 
 // canonicalAgents 把一组 agent 名归一为规范 ID 并去重（保持首次出现顺序）。

@@ -1,7 +1,10 @@
-# skill 同步（草案，未拍板）
+# skill 同步（v1 已实现：codebuddy / workbuddy）
 
-> **状态**：🔴 草案（2026-10-12 立项，方案结论待用户逐项拍板；实现前置见 §四）
-> **配套**：[`../requirements.md`](../requirements.md) §六（需求与验收判据草案）· [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md)（上游事实：各家 skills 目录、市场格局）· [`dir-sync.md`](dir-sync.md)（规则同步主方案，本篇沿用其哲学）
+> **状态**：🟢 **v1 已实现**（2026-10-12，`internal/engine/skill.go` + registry 双域字段 +
+> `[[skill_source]]`/`scope` 配置 + sync/uninstall 编排；`go build/vet/test` + `scripts/smoke.sh` 20 项全绿）。
+> 范围：**仅 codebuddy / workbuddy**；**仅本地源**；用户级（全局）双域同版交付。
+> 剩余 canary 待办见 §五。
+> **配套**：[`../requirements.md`](../requirements.md) §六（需求与验收判据）· [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md)（上游事实：各家 skills 目录、市场格局）· [`dir-sync.md`](dir-sync.md)（规则同步主方案，本篇沿用其哲学）· [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §5.5（双品牌同源模型）
 
 ## 一、与规则同步的相同与不同
 
@@ -14,21 +17,41 @@
 | 作用域 | 仅工作区 | **双域**：工作区级 + 用户级（全局），由配置声明 |
 | 源形态 | 本地文件路径 | 本地目录 / git 仓库（GitHub 简写等，参照 npx skills 源写法）/ 市场索引引用 |
 
-## 二、方案草案（只记结论，不动码）
+## 二、实现口径（v1，2026-10-12 落地）
 
-1. **引擎（`internal/engine/`）**：在现有「文件 + 前缀 + 内容比对 + 删残留」旁增加**目录树同步**：目标名 = `__rulemux__<skill-name>/`，整树内容比对（逐文件），删残留扩展到**目录级**（不在应有集合内的 `__rulemux__*` 目录整树删除）；用户自建（非前缀）skill 目录一律不碰。
-2. **适配器（`internal/agents/registry.go`）**：Agent 增加 skills 落点字段——`SkillsDir`（工作区）+ 用户级 skills 目录；rules 侧同步加**用户级 rules 目录**字段（S2 双域）。**用户级对 CodeBuddy 家族要写两个目录**：`~/.codebuddy/skills` + `~/.workbuddy/skills`（2026-10-12 同源模型：CodeBuddy 合并读两家、WorkBuddy 只读自己的 ⇒ 只写一个必漏一家；证据见 [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §5.5、[`../external/skill-ecosystem.md`](../external/skill-ecosystem.md) §三·续）；rules 用户级同理两目录（`~/.codebuddy/rules` + `~/.workbuddy/rules`）。**未实测坐实的落点一律留空 + 标 🔴，`rulemux init/doctor` 不开放**（沿用现有 Verified 闸门）。注意 Trae CN 的用户级是 `~/.trae-cn/skills`（本机实测），不是 intl 口径 `~/.trae/skills`；CodeBuddy 用户级 rules = `~/.codebuddy/rules`（2026-10-12 代码级坐实）。
-3. **共享目录（2026-10-12 代码级已答）**：**工作区级** skills 与 rules 同规律——两家共用 `<ws>/.codebuddy/skills`（`getProjectSkillsDir()` 用静态 `WORKSPACE_DATA_DIR_NAME`；WorkBuddy 读 `.codebuddy/rules` 已实测）⇒ 规则侧 `SharingRulesDir` 并集/收敛机制平移到 skills 侧，一家写两家读。**用户级不共享且方向不对称**：CodeBuddy 合并读 `~/.codebuddy/skills` + `~/.workbuddy/skills`，WorkBuddy 只读 `~/.workbuddy/skills` ⇒ 用户级按品牌各写各的（双写重叠由宿主重名去重，无害），无并集问题；剩余 🔴 = WorkBuddy 两级装载的 Mac canary。
-4. **配置（`~/.rulemux/config.toml`）**：新增 `[[skill_source]]`（本地目录 / git 源 / 市场索引引用），复用现有 `agents` / `workspace` / `workspace_groups` / `use` 匹配机制；新增**作用域声明**（工作区 / 全局），规则侧同步加同一字段实现 S2 双域。
-5. **hook 与提示语义**：`rulemux sync --hook` 同步规则 + skills；skill 变更**要不要**「请新开会话」提示待 canary——CodeBuddy 产物有 `skills-changed` 事件字符串（疑似热重载），若坐实则 skills 不需要该提示（与规则侧 `SessionHint` 的判据分开）。
-6. **命令面（最小集）**：`sync` 默认带 skills（配置里有 `[[skill_source]]` 才动 skills 目录）；源刷新后续加 `rulemux skill list / update`（S3 的「跟进上游」）。本轮不设计交互式安装 UI。
+1. **引擎（`internal/engine/skill.go`）**：`SyncSkills(dir, srcs, create)` 与文件级 `Sync` 同构——
+   目标名 = `__rulemux__<skill目录名>/`（跨源同名追加源目录短 hash）；逐文件字节比对增量复制；
+   计划内目录多出的文件删除、变空子目录清理；计划外 `__rulemux__*` 目录 `RemoveAll`；
+   用户自建（非前缀）目录一律不碰；`create=false` 且目录不存在返回 `SkippedNoDir`。
+   skill 识别 = 目录含 `SKILL.md`（大小写不敏感）；源根本身含 SKILL.md 时根本身也是一个 skill
+   （单技能目录布局）；无 SKILL.md 的子目录静默跳过。符号链接跳过（shortcut：只同步真实文件）。
+2. **适配器（`internal/agents/registry.go`）**：Agent 增加 `SkillsDir`（工作区）/
+   `UserSkillsDirs` / `UserRulesDirs`（用户级，`~` 走 `ExpandHome`）。codebuddy 与 workbuddy 填同值：
+   `SkillsDir=".codebuddy/skills"`；用户级 skills/rules 各**双目录**（`~/.codebuddy/…` + `~/.workbuddy/…`）
+   —— 用户级要覆盖两家必须双写（§一证据同前）。其余 agent 三字段留空 ⇒ 天然不参与（trae/dsh 下轮）。
+   共享判定 `SharingSkillsDir` / `SharingUserDirs` 与 rules 侧 `SharingRulesDir` 同规律。
+3. **共享目录**：工作区级 skills 与 rules 同规律——两家共用 `.codebuddy/skills`，同步按并集
+   （`unionSkillIDs`），谁跑都不删别人的。用户级不共享且方向不对称 ⇒ 按品牌各写各的，
+   双写重叠由宿主重名去重（无害）；卸载时两个目录都登记清理。
+4. **配置（`~/.rulemux/config.toml`）**：新增 `[[skill_source]]`（`path`/`agents`/`workspace`/`scope`，
+   v1 不支持 groups——shortcut：源是目录不是文件）；`[[source]]` 增加同一 `scope` 字段实现 S2 双域。
+   查询分层：`SourcesFor(Any)` / `SkillSourcesFor(Any)` 只返 workspace 域，`UserSourcesFor(Any)` /
+   `UserSkillSourcesForAny` 返 user 域（忽略 workspace 匹配）。`scope=user` 的条目让
+   `DeclaresWorkspace` 恒真（全局目录本就与工作区无关）。
+5. **hook 与提示语义**：`rulemux sync --hook` 同步规则 + skills + 用户级，同一道 create 门禁
+   （仅被 `--agent` 点名的那一个 agent 可建目录）。**skills 变化不计入「新开会话」提示**
+   （shortcut：热重载待 canary，见 §四）；rules（含用户级 rules）变化照旧提示。
+6. **命令面（最小集）**：零新命令——`sync`（含 hook 自愈、`--all`、cascade）顺带同步 skills 与用户级；
+   `init` 示例配置与 `doctor` 自检同步扩展；`uninstall` 对用户级目录追加收敛（只删前缀内容，目录保留）。
 
 ## 三、明确不做（对齐 requirements §6.4）
 
 - 不自建市场服务端；不做 skill 内容生成/改写；不做 lockfile 版本锁定。
 - 不做 Tier-2 式 hook 注入 skills（破坏渐进式披露，B2 不满足）。
+- **第一版只支持本地 skill 源**；远程 / git 源（S3「跟进上游」）与 `rulemux skill list/update`
+  子命令留待后续版本。
 
-## 四、实现前置（🔴 未核实项，全部来自 `external/skill-ecosystem.md` §六）
+## 四、剩余 canary 待办（🔴，需真机会话；全部来自 `external/skill-ecosystem.md` §六）
 
 1. WorkBuddy skills 两级**装载** Mac canary（落点已代码级确定：用户级 `~/.workbuddy/skills`、工作区级 `.codebuddy/skills`）+ 用户级 rules `~/.workbuddy/rules` 装载；
 2. dsh skills 目录（`.dsh/skills` / `.agents/skills`、不递归）官方文档复核 + 用户级落点；
@@ -37,3 +60,24 @@
 5. CodeBuddy 用户级 rules `~/.codebuddy/rules` 装载 canary（落点已代码级坐实，验合并加载与 frontmatter 语义）。
 
 **已销项（2026-10-12）**：Claude canary（不在支持范围）、CodeBuddy 用户级 rules 落点（代码级坐实）、市场第三方源接入（已答**不支持** ⇒ S3 由 rulemux 自管，不借宿主机制）。
+
+## 五、v1 实现记录（2026-10-12）
+
+| 层 | 落点 | 内容 |
+|---|---|---|
+| 配置 | `internal/config/config.go` | `SkillSource` 结构 + `[[skill_source]]` 解析；`Source.Scope`；域查询 `SourcesFor(Any)`/`SkillSourcesFor(Any)`/`UserSourcesFor(Any)`/`UserSkillSourcesForAny`/`HasAnyFor`；`Validate` 放宽（有任一来源即可 + scope 校验）；`DeclaresWorkspace` 覆盖 skill 源与 user 域 |
+| 引擎 | `internal/engine/skill.go`（新） | `BuildSkillPlan` / `SyncSkills` / `syncTree` / `pruneEmptyDirs`；复用 `Prefix`/`shortHash`/`SyncResult`（`Plan.Missing` 记录不可用源根） |
+| 适配器 | `internal/agents/registry.go` | `SkillsDir`/`UserSkillsDirs`/`UserRulesDirs` + `SkillsDirAbs`/`UserSkillsDirsAbs`/`UserRulesDirsAbs`；`SharingSkillsDir`/`SharingUserDirs`；codebuddy/workbuddy 填双域同值 |
+| 编排 | `internal/cmd/sync.go` | `syncRun`（四路同步 + 跨 agent 目录去重 + `landed` 记账）；`unionSkillIDs`/`unionUserIDs`；cascade 方法化（`HasAnyFor` 闸）；`syncAll` 同规则（用户级目录全局只跑一次） |
+| 卸载 | `internal/cmd/uninstall.go` | `remainingUserPeers`/`pruneUserDirs`/`pruneSkillsDir`；账本回访加 skills 清理 |
+| 命令面 | `internal/cmd/init.go` / `doctor.go` | 示例配置补 `scope` 与 `[[skill_source]]`；doctor 展示 skills/用户级目录存在性 |
+| 测试 | `internal/engine/skill_test.go`、`internal/config/config_test.go`、`internal/agents/registry_test.go`、`internal/cmd/skill_sync_test.go`、`scripts/smoke.sh`（17–20 步） | 首拷/幂等/覆盖/清残留/树内清理/同名 hash/缺失源/create 门禁/用户文件不碰；用户级双写；skills-only 不触发提示；卸载用户级收敛 |
+
+**shortcut 清单**（已知限制，升级时机）：
+
+- skill 源**仅本地目录**；git/远程源 = v2（S3）。
+- `[[skill_source]]` 不支持 groups / workspace_groups = 需要分组时再扩（源布局用目录本身表达）。
+- skills 变化**不触发**「新开会话」提示 = 待 §四-4 热重载 canary 后按 per-agent 判据补。
+- 符号链接不同步（只同步真实文件）= 有需求再处理。
+- 用户级目录只在 hook 路径创建（被 `--agent` 点名时）；手动 sync / `--all` 只写已存在目录 = 与 rules 同一条铁律。
+- WorkBuddy 用户级落点（`~/.workbuddy/{rules,skills}`）为**代码级推断**，双写策略对两家均安全，装载待 Mac canary（§四-1）。

@@ -43,7 +43,7 @@ func Doctor(args []string) int {
 		fmt.Printf("Config: ✗ %v\n", cfgErr)
 		fmt.Println("  Hint: run rulemux init first")
 	} else {
-		fmt.Printf("Config: ✓ %s (%d source(s))\n", cfgPath, len(cfg.Sources))
+		fmt.Printf("Config: ✓ %s (%d source(s), %d skill source(s))\n", cfgPath, len(cfg.Sources), len(cfg.SkillSources))
 		for _, s := range cfg.Sources {
 			target := "all agents"
 			if len(s.Agents) > 0 {
@@ -87,6 +87,29 @@ func Doctor(args []string) int {
 			fmt.Printf("      Rules dir: %s (%s)\n", dir, state)
 		} else {
 			fmt.Println("      Rules dir: none (Tier-2, injected via SessionStart)")
+		}
+
+		// skills 目录（工作区 + 用户级）：未声明 = 该 agent 本轮不接 skill 同步
+		if dir := a.SkillsDirAbs(ws); dir != "" {
+			state := "directory does not exist (only this agent's own session hook creates it)"
+			if st, err := os.Stat(dir); err == nil && st.IsDir() {
+				state = "directory exists"
+			}
+			fmt.Printf("      Skills dir: %s (%s)\n", dir, state)
+		}
+		for _, dir := range a.UserRulesDirsAbs() {
+			state := "directory does not exist"
+			if st, err := os.Stat(dir); err == nil && st.IsDir() {
+				state = "directory exists"
+			}
+			fmt.Printf("      User rules dir: %s (%s)\n", dir, state)
+		}
+		for _, dir := range a.UserSkillsDirsAbs() {
+			state := "directory does not exist"
+			if st, err := os.Stat(dir); err == nil && st.IsDir() {
+				state = "directory exists"
+			}
+			fmt.Printf("      User skills dir: %s (%s)\n", dir, state)
 		}
 
 		// 宿主侧配置三态：已装且最新 / 已装但格式过期（如升级后还缺 --hook）/ 未装。

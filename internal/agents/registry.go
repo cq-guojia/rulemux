@@ -41,6 +41,19 @@ type Agent struct {
 	Tier Tier
 	// RulesDir 是工作区规则目录（相对工作区根），Tier2 为空。
 	RulesDir string
+	// SkillsDir 是工作区 skills 目录（相对工作区根）；空 = 该 agent 本轮不接 skill 同步。
+	// 例：codebuddy 为 ".codebuddy/skills"（bundle getProjectSkillsDir，2026-10-12 代码级坐实，
+	// 见 docs/design/external/agent-rules-dirs.md §5.5）。
+	SkillsDir string
+	// UserRulesDirs 是用户级（全局）规则目录（可含 ~，经 ExpandHome 展开）；空 = 不投用户级 rules。
+	// 例：codebuddy 家族 {"~/.codebuddy/rules", "~/.workbuddy/rules"} —— 用户级要覆盖两家必须
+	// 双写（CodeBuddy 读 ~/.codebuddy/rules，WorkBuddy 读自己的 ~/.workbuddy/rules，
+	// 2026-10-12 bundle 代码级，见 agent-rules-dirs.md §5.5）。
+	UserRulesDirs []string
+	// UserSkillsDirs 是用户级（全局）skills 目录（可含 ~）；空 = 不投用户级 skills。
+	// 例：{"~/.codebuddy/skills", "~/.workbuddy/skills"} —— CodeBuddy 合并读两家、
+	// WorkBuddy 只读自己的（resolveUserSkillsDirs，2026-10-12），双写对两家均安全。
+	UserSkillsDirs []string
 	// HookFile 是钩子配置文件路径；HookAbs 为 true 时表示它是绝对路径（含 ~）。
 	HookFile string
 	// HookAbs 表示 HookFile 是否为绝对路径（不拼工作区）。
@@ -100,6 +113,13 @@ var registry = []Agent{
 		Aliases:  []string{"codebuddy-cn"},
 		Tier:     Tier1,
 		RulesDir: ".codebuddy/rules",
+		// skills 双域（2026-10-12 bundle 代码级坐实，见 external/agent-rules-dirs.md §5.5）：
+		// 工作区 .codebuddy/skills（getProjectSkillsDir，与 WorkBuddy 共享）；
+		// 用户级双写 ~/.codebuddy/skills + ~/.workbuddy/skills（CodeBuddy 合并读两家、
+		// WorkBuddy 只读自己的 ⇒ 双写才覆盖两家）；rules 用户级同理双目录。
+		SkillsDir:      ".codebuddy/skills",
+		UserSkillsDirs: []string{"~/.codebuddy/skills", "~/.workbuddy/skills"},
+		UserRulesDirs:  []string{"~/.codebuddy/rules", "~/.workbuddy/rules"},
 		// 2026-10-08 起钩子落点为 user 级 host 配置（不再是每工作区的 .codebuddy/settings.json），
 		// 与 Hindsight 的做法一致，避免 hook 配置散落在各工作区、易被误改。
 		HookFile: "~/.codebuddy/settings.json",
@@ -133,6 +153,11 @@ var registry = []Agent{
 		ID:       "workbuddy",
 		Tier:     Tier1,
 		RulesDir: ".codebuddy/rules", // 与 codebuddy 共享；2026-10-09 探针实测坐实，非推断
+		// 与 codebuddy 同值：工作区 skills 共享 .codebuddy/skills；用户级双写两家目录
+		//（2026-10-12 bundle 代码级，见 external/agent-rules-dirs.md §5.5）。
+		SkillsDir:      ".codebuddy/skills",
+		UserSkillsDirs: []string{"~/.codebuddy/skills", "~/.workbuddy/skills"},
+		UserRulesDirs:  []string{"~/.codebuddy/rules", "~/.workbuddy/rules"},
 		HookFile: "~/.workbuddy/settings.json",
 		HookAbs:  true,
 		// WORKBUDDY_CONFIG_DIR 仅出现在 safe-delete 日志白名单（见 external/agent-rules-dirs.md §五），
@@ -274,6 +299,90 @@ func (a Agent) RulesDirAbs(workspace string) string {
 		return a.RulesDir
 	}
 	return filepath.Join(workspace, a.RulesDir)
+}
+
+// SkillsDirAbs 返回该 agent 工作区 skills 目录的绝对路径；未声明（空）返回空串。
+func (a Agent) SkillsDirAbs(workspace string) string {
+	if a.SkillsDir == "" {
+		return ""
+	}
+	if filepath.IsAbs(a.SkillsDir) {
+		return a.SkillsDir
+	}
+	return filepath.Join(workspace, a.SkillsDir)
+}
+
+// UserSkillsDirsAbs 返回用户级 skills 目录的绝对路径列表（~ 经 ExpandHome 展开）。
+func (a Agent) UserSkillsDirsAbs() []string {
+	return expandHomesAll(a.UserSkillsDirs)
+}
+
+// UserRulesDirsAbs 返回用户级 rules 目录的绝对路径列表（~ 经 ExpandHome 展开）。
+func (a Agent) UserRulesDirsAbs() []string {
+	return expandHomesAll(a.UserRulesDirs)
+}
+
+// expandHomesAll 把一组路径里的 "~" / "~/" 展开为 HOME（复用 ExpandHome 单一真源）。
+func expandHomesAll(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	for i, p := range in {
+		out[i] = ExpandHome(p)
+	}
+	return out
+}
+
+// equalStrings 报告两个字符串切片是否等长且逐项相等。
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// SharingSkillsDir 返回「与 a 落进同一个工作区 skills 目录」的 agent 列表（含 a 自己）。
+// 与 SharingRulesDir 同规律：目录共享 ⇒ 同步必须按并集，否则删残留会互删对方文件。
+func SharingSkillsDir(a Agent) []Agent {
+	if a.SkillsDir == "" {
+		return []Agent{a}
+	}
+	out := []Agent{a}
+	for _, b := range All() {
+		if b.ID == a.ID || b.SkillsDir == "" {
+			continue
+		}
+		if b.SkillsDir == a.SkillsDir {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// SharingUserDirs 返回「与 a 用户级目录完全相同」的 agent 列表（含 a 自己）。
+// 用户级目录（rules + skills 两组）都相同的 agent 互为共享者 ⇒ 用户级同步同样按并集，
+// 否则一家的 hook 会把另一家投的文件当残留删掉。未声明用户级目录的 agent 只会匹配到自己。
+func SharingUserDirs(a Agent) []Agent {
+	if len(a.UserSkillsDirs) == 0 && len(a.UserRulesDirs) == 0 {
+		return []Agent{a}
+	}
+	out := []Agent{a}
+	for _, b := range All() {
+		if b.ID == a.ID {
+			continue
+		}
+		if equalStrings(a.UserSkillsDirsAbs(), b.UserSkillsDirsAbs()) &&
+			equalStrings(a.UserRulesDirsAbs(), b.UserRulesDirsAbs()) {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // SharingRulesDir 返回「与 a 落进同一个工作区规则目录」的 agent 列表（含 a 自己）。

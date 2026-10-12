@@ -28,16 +28,19 @@ const Prefix = "__rulemux__"
 const AutoApplyFrontmatter = "---\nalwaysApply: true\n---\n"
 
 // PlanItem 是一条「源文件 → 目标文件」的映射。
+// skill 同步复用同一结构：Src 是 skill 源目录，DstName 是带前缀的目标目录名。
 type PlanItem struct {
-	Src     string // 源文件路径
-	DstName string // 目标文件名
-	DstPath string // 目标文件完整路径
+	Src     string // 源文件路径（skill 同步时为 skill 源目录）
+	DstName string // 目标文件名 / 目标目录名
+	DstPath string // 目标完整路径
 }
 
 // Plan 是某次同步的完整计划。
 type Plan struct {
 	Dir   string
 	Items []PlanItem
+	// Missing 记录不可用的源（skill 同步：源根目录不存在或读不了）。
+	Missing []string
 }
 
 // BuildPlan 计算目标文件名：前缀 + 源 basename；同名 basename 冲突时追加源路径短 hash。

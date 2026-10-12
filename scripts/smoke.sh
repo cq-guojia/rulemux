@@ -244,5 +244,66 @@ HOME="$HOOKHOME" "$BIN" sync --agent "$AGENT" --config "$CFG" --workspace "$WS" 
 [ ! -e "$HOOKHOME/.codebuddy" ] || fail "self-heal created a host config out of nowhere"
 ok "self-heal never creates host config"
 
+# 17. Skills: [[skill_source]] syncs whole skill trees into .codebuddy/skills
+mkdir -p "$TMP/skills/demo-skill/references"
+printf 'name: demo\n'   > "$TMP/skills/demo-skill/SKILL.md"
+printf 'reference\n'    > "$TMP/skills/demo-skill/references/ref.md"
+mkdir -p "$TMP/skills/not-a-skill"   # no SKILL.md => not a skill, must be ignored
+cat > "$TMP/skills.toml" <<EOF
+[[source]]
+path = ["$TMP/src/a.md"]
+
+[[skill_source]]
+path = ["$TMP/skills"]
+EOF
+"$BIN" sync --hook --agent "$AGENT" --config "$TMP/skills.toml" --workspace "$WS" >"$TMP/skill1.log" 2>&1 || fail "skill sync exited non-zero"
+[ -f "$WS/$RULES_REL/__rulemux__a.md" ] || fail "rules missing after skill sync"
+[ -f "$WS/.codebuddy/skills/__rulemux__demo-skill/SKILL.md" ] || fail "skill tree not synced"
+[ -f "$WS/.codebuddy/skills/__rulemux__demo-skill/references/ref.md" ] || fail "skill附属文件未同步"
+[ ! -e "$WS/.codebuddy/skills/__rulemux__not-a-skill" ] || fail "a subdir without SKILL.md was synced"
+ok "[[skill_source]] syncs skill trees into .codebuddy/skills"
+
+# 18. Skills: content updates propagate, residue is cleaned, the user's own skills stay
+echo "mine" > "$WS/.codebuddy/skills/my-own.md"
+"$BIN" sync --hook --agent "$AGENT" --config "$TMP/skills.toml" --workspace "$WS" >/dev/null 2>&1
+printf 'name: demo v2\n' > "$TMP/skills/demo-skill/SKILL.md"
+"$BIN" sync --hook --agent "$AGENT" --config "$TMP/skills.toml" --workspace "$WS" >/dev/null 2>&1
+grep -q "demo v2" "$WS/.codebuddy/skills/__rulemux__demo-skill/SKILL.md" || fail "skill content was not updated"
+rm -rf "$TMP/skills/demo-skill"
+"$BIN" sync --hook --agent "$AGENT" --config "$TMP/skills.toml" --workspace "$WS" >/dev/null 2>&1
+[ ! -e "$WS/.codebuddy/skills/__rulemux__demo-skill" ] || fail "skill residue was not cleaned"
+[ -f "$WS/.codebuddy/skills/my-own.md" ] || fail "the user's own skill file was deleted"
+ok "skills: updates propagate, residue is cleaned, user files are kept"
+
+# 19. scope=user: rules AND skills land in BOTH user-level dirs (~/.codebuddy + ~/.workbuddy)
+mkdir -p "$HOME/.codebuddy/rules" "$HOME/.codebuddy/skills" "$HOME/.workbuddy/rules" "$HOME/.workbuddy/skills"
+mkdir -p "$TMP/skills2/global-skill"
+printf 'name: global\n' > "$TMP/skills2/global-skill/SKILL.md"
+cat > "$TMP/user.toml" <<EOF
+[[source]]
+path = ["$TMP/src/a.md"]
+scope = "user"
+
+[[skill_source]]
+path = ["$TMP/skills2"]
+scope = "user"
+EOF
+"$BIN" sync --agent "$AGENT" --config "$TMP/user.toml" --workspace "$WS" >"$TMP/user.log" 2>&1 || fail "user-scope sync exited non-zero"
+for base in .codebuddy .workbuddy; do
+  [ -f "$HOME/$base/rules/__rulemux__a.md" ] || fail "user-level rules missing in $HOME/$base"
+  [ -f "$HOME/$base/skills/__rulemux__global-skill/SKILL.md" ] || fail "user-level skills missing in $HOME/$base"
+done
+ok "scope=user double-writes rules and skills to both user-level dirs"
+
+# 20. Uninstall converges the user-level dirs (prefix content only; the dirs stay)
+echo "keepme" > "$HOME/.codebuddy/rules/my-own.md"
+"$BIN" uninstall --agent "$AGENT" --config "$TMP/user.toml" --workspace "$WS" --yes >"$TMP/uninstall2.log" 2>&1 || fail "uninstall exited non-zero"
+for base in .codebuddy .workbuddy; do
+  [ ! -e "$HOME/$base/rules/__rulemux__a.md" ] || fail "user-level rules residue survived uninstall ($base)"
+  [ ! -e "$HOME/$base/skills/__rulemux__global-skill" ] || fail "user-level skills residue survived uninstall ($base)"
+done
+[ -f "$HOME/.codebuddy/rules/my-own.md" ] || fail "uninstall deleted the user's own user-level file"
+ok "uninstall converges the user-level dirs"
+
 echo
 echo "ALL SMOKE TESTS PASSED"

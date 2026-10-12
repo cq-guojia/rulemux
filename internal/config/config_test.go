@@ -523,3 +523,170 @@ groups = ["work"]
 		}
 	}
 }
+
+// writeCfg 把内容写进临时目录并 Load，返回配置。
+func writeCfg(t *testing.T, content string) *Config {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// TestSkillSourceParsing 校验 [[skill_source]] 解析：path 单值/数组、agents、workspace、scope。
+func TestSkillSourceParsing(t *testing.T) {
+	c := writeCfg(t, `[[skill_source]]
+path = ["/s/skills-a", "/s/skills-b"]
+agents = ["codebuddy"]
+workspace = ["/w/one", "/w/two"]
+scope = "user"
+
+[[skill_source]]
+path = "/s/other"
+`)
+	if len(c.SkillSources) != 2 {
+		t.Fatalf("期望 2 条 skill_source，实得 %d", len(c.SkillSources))
+	}
+	s := c.SkillSources[0]
+	if len(s.Paths) != 2 || s.Paths[0] != "/s/skills-a" {
+		t.Fatalf("skill path 数组解析错误：%v", s.Paths)
+	}
+	if len(s.Agents) != 1 || s.Agents[0] != "codebuddy" {
+		t.Fatalf("skill agents 解析错误：%v", s.Agents)
+	}
+	if len(s.Workspaces) != 2 || s.Workspaces[1] != "/w/two" {
+		t.Fatalf("skill workspace 解析错误：%v", s.Workspaces)
+	}
+	if s.Scope != ScopeUser {
+		t.Fatalf("scope 应归一为 %q，实得 %q", ScopeUser, s.Scope)
+	}
+	if !s.IsUserScope() {
+		t.Fatal("IsUserScope 应为 true")
+	}
+	// 省略 scope ⇒ 默认 workspace
+	if c.SkillSources[1].Scope != ScopeWorkspace || c.SkillSources[1].IsUserScope() {
+		t.Fatalf("省略 scope 应默认 %q，实得 %q", ScopeWorkspace, c.SkillSources[1].Scope)
+	}
+	if len(c.SkillSources[1].Paths) != 1 || c.SkillSources[1].Paths[0] != "/s/other" {
+		t.Fatalf("单字符串 skill path 解析错误：%v", c.SkillSources[1].Paths)
+	}
+}
+
+// TestScopeDomainSplit 校验四个域的查询互不串门：
+// workspace 查询只见 workspace 域，user 查询只见 user 域。
+func TestScopeDomainSplit(t *testing.T) {
+	c := writeCfg(t, `[[source]]
+path = ["/r/ws.md"]
+
+[[source]]
+path = ["/r/user.md"]
+scope = "user"
+
+[[skill_source]]
+path = ["/s/ws-skills"]
+
+[[skill_source]]
+path = ["/s/user-skills"]
+scope = "user"
+`)
+	// 规则：workspace 域
+	wsSrcs := c.SourcesForAny([]string{"codebuddy"}, "/w")
+	if len(wsSrcs) != 1 || wsSrcs[0].Paths[0] != "/r/ws.md" {
+		t.Fatalf("workspace 规则域应只有 ws.md，实得 %+v", wsSrcs)
+	}
+	// 规则：user 域（忽略 workspace）
+	userSrcs := c.UserSourcesForAny([]string{"codebuddy"})
+	if len(userSrcs) != 1 || userSrcs[0].Paths[0] != "/r/user.md" {
+		t.Fatalf("user 规则域应只有 user.md，实得 %+v", userSrcs)
+	}
+	// skill：workspace 域
+	wsSkills := c.SkillSourcesForAny([]string{"codebuddy"}, "/w")
+	if len(wsSkills) != 1 || wsSkills[0].Paths[0] != "/s/ws-skills" {
+		t.Fatalf("workspace skill 域应只有 ws-skills，实得 %+v", wsSkills)
+	}
+	// skill：user 域
+	userSkills := c.UserSkillSourcesForAny([]string{"codebuddy"})
+	if len(userSkills) != 1 || userSkills[0].Paths[0] != "/s/user-skills" {
+		t.Fatalf("user skill 域应只有 user-skills，实得 %+v", userSkills)
+	}
+	// 空 agentIDs ⇒ 一律空（卸载收敛的「无人使用」场景不能被 agents 为空的源命中）
+	if got := c.UserSourcesForAny(nil); got != nil {
+		t.Fatalf("空 agentIDs 的 user 规则查询应为 nil，实得 %+v", got)
+	}
+	if got := c.SkillSourcesForAny(nil, "/w"); got != nil {
+		t.Fatalf("空 agentIDs 的 workspace skill 查询应为 nil，实得 %+v", got)
+	}
+}
+
+// TestValidateSkillOnly 校验：只有 [[skill_source]] 的配置合法；
+// skill_source 缺 path / scope 非法都要报错。
+func TestValidateSkillOnly(t *testing.T) {
+	ok := writeCfg(t, `[[skill_source]]
+path = ["/s/skills"]
+`)
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("只有 skill_source 的配置应合法：%v", err)
+	}
+	if got := ok.HasAnyFor([]string{"codebuddy"}, "/w"); !got {
+		t.Fatal("HasAnyFor 应报告有源")
+	}
+
+	noPath := writeCfg(t, `[[skill_source]]
+agents = ["codebuddy"]
+`)
+	if err := noPath.Validate(); err == nil {
+		t.Fatal("skill_source 缺 path 应报错")
+	}
+
+	badScope := writeCfg(t, `[[skill_source]]
+path = ["/s/skills"]
+scope = "galaxy"
+`)
+	if err := badScope.Validate(); err == nil {
+		t.Fatal("非法 scope 应报错")
+	}
+
+	badScopeSrc := writeCfg(t, `[[source]]
+path = ["/r/a.md"]
+scope = "galaxy"
+`)
+	if err := badScopeSrc.Validate(); err == nil {
+		t.Fatal("source 的非法 scope 应报错")
+	}
+}
+
+// TestDeclaresWorkspaceUserScope 校验：任一 user 域条目 ⇒ 任意工作区都算「已声明」
+// （用户级目录本就与工作区无关）；纯 workspace 域条目仍按原语义。
+func TestDeclaresWorkspaceUserScope(t *testing.T) {
+	c := writeCfg(t, `[[source]]
+path = ["/r/a.md"]
+scope = "user"
+`)
+	if !c.DeclaresWorkspace("/any/where") {
+		t.Fatal("含 user 域 source 时任意工作区都应判为已声明")
+	}
+
+	c2 := writeCfg(t, `[[skill_source]]
+path = ["/s/skills"]
+scope = "user"
+`)
+	if !c2.DeclaresWorkspace("/any/where") {
+		t.Fatal("含 user 域 skill_source 时任意工作区都应判为已声明")
+	}
+
+	c3 := writeCfg(t, `[[skill_source]]
+path = ["/s/skills"]
+workspace = ["/w/only"]
+`)
+	if c3.DeclaresWorkspace("/w/other") {
+		t.Fatal("未声明的工作区不应被 workspace 域 skill_source 判为已声明")
+	}
+	if !c3.DeclaresWorkspace("/w/only") {
+		t.Fatal("声明过的工作区应判为已声明")
+	}
+}

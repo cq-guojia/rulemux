@@ -101,18 +101,22 @@ workspace = ["/work/proj-x"]
 rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点」经真实 canary 实测坐实的 agent
 才允许安装。当前：
 
-| Agent | 层级 | 规则目录 | 状态 |
-|---|---|---|---|
-| **codebuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/` | ✅ **已验证，可安装**（`codebuddy-cn` 是它的别名） |
-| **workbuddy** | Tier-1（真实拷贝） | `.workbuddy/rules/` | ✅ **已验证，可安装**（独立应用：自有 `~/.workbuddy/settings.json` 钩子，不再是 codebuddy 的别名） |
-| claude（Claude Code） | Tier-1 | `.claude/rules/` | ⚠️ 已注册，**尚未验证**，不可安装 |
-| **trae**（Trae CN） | Tier-1（真实拷贝） | `.trae/rules/` | ✅ **已验证，可安装**（2026-10-09 canary 坐实：用户级钩子 `~/.trae-cn/hooks.json`；国际版目录 `~/.trae` 尚未接入） |
-| codex | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |
-| opencode | Tier-2（注入） | 无 —— 注入上下文 | ⚠️ 已注册，**尚未验证** |
-| **dsh**（DeepSeek Harness） | Tier-1（真实拷贝） | `.dsh/rules/` | ✅ **已验证，可安装**；读取那半由**独立的 dsh 插件**做 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责同步，不替你装插件） |
+| Agent | 层级 | 规则目录 | skills 目录 | 状态 |
+|---|---|---|---|---|
+| **codebuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/`；用户级 `~/.codebuddy/rules/` | `.codebuddy/skills/`；用户级 `~/.codebuddy/skills/` + `~/.workbuddy/skills/`（双写） | ✅ **已验证，可安装**（`codebuddy-cn` 是它的别名） |
+| **workbuddy** | Tier-1（真实拷贝） | `.codebuddy/rules/`（与 codebuddy **共享**，2026-10-09 实测坐实） | `.codebuddy/skills/`（与 codebuddy 共享）；用户级同样双写两家 | ✅ **已验证，可安装**（独立应用：自有 `~/.workbuddy/settings.json` 钩子，不再是 codebuddy 的别名） |
+| claude（Claude Code） | Tier-1 | `.claude/rules/` | 暂不支持 | ⚠️ 已注册，**尚未验证**，不可安装 |
+| **trae**（Trae CN） | Tier-1（真实拷贝） | `.trae/rules/` | 暂不支持 | ✅ **已验证，可安装**（2026-10-09 canary 坐实：用户级钩子 `~/.trae-cn/hooks.json`；国际版目录 `~/.trae` 尚未接入） |
+| codex | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
+| opencode | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
+| **dsh**（DeepSeek Harness） | Tier-1（真实拷贝） | `.dsh/rules/` | 暂不支持 | ✅ **已验证，可安装**；读取那半由**独立的 dsh 插件**做 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责同步，不替你装插件） |
 
 - `rulemux init` **会拒绝**未验证的 agent —— 不会给你装一个行为未经验证的半成品。
   `rulemux doctor` 会给未验证的 agent 标 ⚠。
+- **skill 注入（2026-10-12 上线，仅 codebuddy / workbuddy）**：用 `[[skill_source]]` 声明本地 skill 目录，
+  真实拷贝进 `.codebuddy/skills/`（`__rulemux__<skill名>/` 前缀，你自己的 skill 一律不碰）；
+  `scope = "user"` 时落到**用户级（全局）**目录，规则与 skill 通用，详见 §5.4。
+  规则与 skill 都支持双域（工作区 / 用户级）；trae / dsh / claude / codex / opencode 的 skills 暂不支持。
 - **Tier-2 是刻意的降级**：面向没有规则目录、只认单个 `AGENTS.md` 的 agent，走会话钩子注入，
   且绝不碰你自己的 `AGENTS.md`；但它满足不了「永不淡出」。见
   [`docs/design/features/hook-injection.md`](docs/design/features/hook-injection.md)。
@@ -287,6 +291,32 @@ workspace        = ["/path/to/standalone"] # 也可与 workspace_groups 同时�
 > 每个工作区重新同步。它**绝不创建**规则目录（只有该 agent 自己的会话钩子才会创建），并顺手清掉账本里
 > 「目录已经不存在」的条目。
 
+### 5.4 skill 注入（`[[skill_source]]`，2026-10-12 上线）
+
+skill 是**目录**（`SKILL.md` + 可选的 `references/` / `scripts/`），宿主按「渐进式披露」加载
+（会话开始只载 name+description，按名调用才读全文）—— 所以它和规则一样只能**真实拷贝**进原生 skills 目录，
+不能靠钩子注入全文。在 `~/.rulemux/config.toml` 里加 `[[skill_source]]`：
+
+```toml
+[[skill_source]]
+path = ["~/my-skills"]              # skill 根目录：每个含 SKILL.md 的子目录就是一个 skill
+agents = ["codebuddy"]              # 省略 = 全部支持的 agent
+workspace = "*"                     # 省略 = 全部工作区（仅 workspace 域生效）
+
+[[skill_source]]
+path = ["~/global-skills"]
+scope = "user"                      # 用户级（全局）：与工作区无关，每个工作区都生效
+```
+
+- **落到哪**（仅 codebuddy / workbuddy）：工作区级 → `<工作区>/.codebuddy/skills/`（两家共享）；
+  用户级 → `~/.codebuddy/skills/` **和** `~/.workbuddy/skills/`（都写，两家才都看得到）。
+  规则侧同理：`[[source]]` 也支持 `scope = "user"`，落到 `~/.codebuddy/rules/` + `~/.workbuddy/rules/`。
+- **纪律与规则完全相同**：目标名 `__rulemux__<skill名>/`；你自己的 skill（无前缀）一律不碰；
+  配置里删掉源，下一轮同步清掉对应副本；源目录只读。
+- **第一版只支持本地目录源**；远程 / git 源（跟进上游更新）在后续版本。
+- trae / dsh / claude / codex / opencode 的 skills 暂不支持（它们的 skills 目录尚未实测坐实）。
+- skill 的增改**不会**触发「请新开会话」提示（是否热重载待实测）；规则的提示行为不变。
+
 ---
 
 ## 6. 卸载
@@ -300,6 +330,8 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 它会移除 rulemux 自己的钩子条目（同一文件里其它工具的钩子会保留），并删掉此前投递的 `__rulemux__*` 文件。
 由于钩子在 user 级配置里，rulemux 还会**按账本（~/.rulemux/workspaces.json）回访所有记录过的工作区**
 一并清理 —— 否则钩子一去，那些残留就再没机会被删掉了。删除前会把要回访的工作区列表给你确认。
+`scope = "user"` 投递到**用户级（全局）**目录的规则与 skill 也会按「卸载后还有谁在用」收敛
+（只删 `__rulemux__` 前缀内容，目录本身保留）。
 
 ---
 
@@ -327,9 +359,14 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 `rulemux init` 会拒绝它们 —— **没有补齐它们的计划**。（接入新 agent 的清单留作参考：
 [`docs/design/features/agent-onboarding.md`](docs/design/features/agent-onboarding.md)。）
 
+- **skill 注入的支持范围**（2026-10-12）：**只有 codebuddy / workbuddy** —— 两家的 skills 目录
+  （工作区 `.codebuddy/skills`、用户级 `~/.codebuddy/skills` + `~/.workbuddy/skills`）已经
+  bundle 代码级 + 本机实测坐实；trae / dsh / claude / codex / opencode 的 skills 目录尚未实测，
+  **暂不支持**，坐实一家开一家。
 - **分发** —— 已完成：GitHub Actions 交叉编译二进制并挂到 GitHub Release；npm 包**手动发布**（见 §9）。
 - 规则内容改写 / 模板渲染、以及自动自我更新，**明确不做**
   （[`docs/design/requirements.md`](docs/design/requirements.md) §五）。
+- skill 的远程 / git 源（跟进上游更新）、`rulemux skill` 子命令 —— **后续版本**，第一版只做本地源。
 
 ---
 

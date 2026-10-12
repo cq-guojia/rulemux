@@ -117,3 +117,75 @@ func contains(ss []string, s string) bool {
 	}
 	return false
 }
+
+// TestSkillsDirAbs 校验 skills 目录解析：相对拼工作区、绝对原样、空返回空。
+func TestSkillsDirAbs(t *testing.T) {
+	cb, _ := Get("codebuddy")
+	if got := cb.SkillsDirAbs("/w"); got != "/w/.codebuddy/skills" {
+		t.Fatalf("SkillsDirAbs 应拼工作区，实得 %q", got)
+	}
+	trae, _ := Get("trae")
+	if got := trae.SkillsDirAbs("/w"); got != "" {
+		t.Fatalf("未声明 SkillsDir 的 agent 应返回空，实得 %q", got)
+	}
+}
+
+// TestUserDirsAbs 校验用户级目录 ~ 展开：codebuddy 家族双目录且以 HOME 开头。
+func TestUserDirsAbs(t *testing.T) {
+	cb, _ := Get("codebuddy")
+	home := expandHomeForTest(t)
+	skills := cb.UserSkillsDirsAbs()
+	wantSkills := []string{home + "/.codebuddy/skills", home + "/.workbuddy/skills"}
+	if !equalStrings(skills, wantSkills) {
+		t.Fatalf("用户级 skills 目录展开错误：%v", skills)
+	}
+	rules := cb.UserRulesDirsAbs()
+	wantRules := []string{home + "/.codebuddy/rules", home + "/.workbuddy/rules"}
+	if !equalStrings(rules, wantRules) {
+		t.Fatalf("用户级 rules 目录展开错误：%v", rules)
+	}
+	wb, _ := Get("workbuddy")
+	if !equalStrings(wb.UserSkillsDirsAbs(), skills) {
+		t.Fatalf("workbuddy 与 codebuddy 的用户级 skills 目录应相同：%v vs %v", wb.UserSkillsDirsAbs(), skills)
+	}
+}
+
+// TestSharingSkillsAndUserDirs 校验共享判定：
+// codebuddy 与 workbuddy 共享 skills 目录与用户级目录；trae 谁都不共享。
+func TestSharingSkillsAndUserDirs(t *testing.T) {
+	cb, _ := Get("codebuddy")
+	group := SharingSkillsDir(cb)
+	if len(group) != 2 || group[1].ID != "workbuddy" {
+		t.Fatalf("skills 共享组应含 workbuddy，实得 %v", ids(group))
+	}
+	ug := SharingUserDirs(cb)
+	if len(ug) != 2 || ug[1].ID != "workbuddy" {
+		t.Fatalf("用户级共享组应含 workbuddy，实得 %v", ids(ug))
+	}
+
+	trae, _ := Get("trae")
+	if g := SharingSkillsDir(trae); len(g) != 1 || g[0].ID != "trae" {
+		t.Fatalf("trae 的 skills 共享组应只有自己，实得 %v", ids(g))
+	}
+	if g := SharingUserDirs(trae); len(g) != 1 || g[0].ID != "trae" {
+		t.Fatalf("trae 的用户级共享组应只有自己，实得 %v", ids(g))
+	}
+}
+
+func ids(as []Agent) []string {
+	out := make([]string, len(as))
+	for i, a := range as {
+		out[i] = a.ID
+	}
+	return out
+}
+
+// expandHomeForTest 取当前 HOME（与 ExpandHome 同源），供测试断言绝对路径。
+func expandHomeForTest(t *testing.T) string {
+	t.Helper()
+	got := ExpandHome("~")
+	if got == "~" {
+		t.Fatal("ExpandHome(\"~\") 应展开为 HOME")
+	}
+	return got
+}

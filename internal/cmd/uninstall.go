@@ -106,6 +106,16 @@ func Uninstall(args []string) int {
 			}
 		}
 
+		// 用户级（全局）目录收敛：用户级目录与工作区无关，按「卸载后还有谁在用」
+		// （SharingUserDirs 里还装着钩子的）收敛；只删 __rulemux__ 前缀内容，目录本身保留。
+		if len(a.UserRulesDirs)+len(a.UserSkillsDirs) > 0 {
+			userKeep := remainingUserPeers(a, ws)
+			if n := pruneUserDirs(cfg, a, userKeep); n > 0 {
+				fmt.Printf("  ✓ %-10s removed %d user-level item(s) no longer needed (kept %d still in use)\n",
+					a.ID, n, len(userKeep))
+			}
+		}
+
 		// Revisit the other workspaces recorded in the ledger: the hook is now gone,
 		// so without this sweep their residue would never be removed.
 		if cleaned, skipped := sweepRecordedWorkspaces(a, ws, cfg, keep); cleaned > 0 || skipped > 0 {
@@ -160,7 +170,7 @@ func confirmUninstall(targets []agents.Agent, ws string) bool {
 // 说明：即便路径已不存在也不从账本剔除——万一该工作区日后重现（如重新 clone），
 // 下一次卸载仍会回访并清理它。
 func sweepRecordedWorkspaces(a agents.Agent, current string, cfg *config.Config, keep []agents.Agent) (cleaned, skipped int) {
-	if a.RulesDir == "" {
+	if a.RulesDir == "" && a.SkillsDir == "" {
 		return 0, 0 // Tier-2 磁盘上不留任何文件，无需回访
 	}
 	for _, ws := range state.Others(current) {
@@ -168,10 +178,81 @@ func sweepRecordedWorkspaces(a agents.Agent, current string, cfg *config.Config,
 			skipped++
 			continue // 工作区已被删除，本次无从清理
 		}
-		deleted, _ := pruneRulesDir(cfg, a.RulesDirAbs(ws), keep, ws, a.NeedsFrontmatter)
-		cleaned += deleted
+		if a.RulesDir != "" {
+			d, _ := pruneRulesDir(cfg, a.RulesDirAbs(ws), keep, ws, a.NeedsFrontmatter)
+			cleaned += d
+		}
+		if a.SkillsDir != "" {
+			d, _ := pruneSkillsDir(cfg, a.SkillsDirAbs(ws), keep, ws)
+			cleaned += d
+		}
 	}
 	return cleaned, skipped
+}
+
+// remainingUserPeers 返回「卸载 a 之后，仍在使用同一**用户级**目录」的 agent。
+// 同 remainingPeers 的判据（还装着钩子），也必须在 hooks.Uninstall 之前调用。
+func remainingUserPeers(a agents.Agent, ws string) []agents.Agent {
+	var out []agents.Agent
+	for _, b := range agents.SharingUserDirs(a) {
+		if b.ID == a.ID {
+			continue
+		}
+		if hookInstalled(b, ws) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// pruneUserDirs 把 a 的用户级（全局）目录收敛到 keep 中那些 agent 应有的集合：
+// 用户级 rules 走 engine.Sync、用户级 skills 走 engine.SyncSkills（create=false
+// ⇒ 目录不存在就跳过）。keep 为空 ⇒ want 为空 ⇒ 前缀内容全清（--all 的全清语义）。
+// 目录本身始终保留（那是 agent 的原生目录，不该由 rulemux 删）。
+// 返回删掉的条目数（文件 + skill 目录）。
+func pruneUserDirs(cfg *config.Config, a agents.Agent, keep []agents.Agent) int {
+	if cfg == nil {
+		return 0 // 配置不可读 ⇒ 不动文件，宁可留残留也不误删
+	}
+	ids := peerIDs(keep)
+	deleted := 0
+	for _, dir := range a.UserRulesDirsAbs() {
+		res, err := engine.Sync(dir, cfg.UserSourcesForAny(ids), a.NeedsFrontmatter, false)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ⚠ failed to prune %s: %v\n", dir, err)
+			continue
+		}
+		deleted += len(res.Deleted)
+	}
+	for _, dir := range a.UserSkillsDirsAbs() {
+		res, err := engine.SyncSkills(dir, cfg.UserSkillSourcesForAny(ids), false)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ⚠ failed to prune %s: %v\n", dir, err)
+			continue
+		}
+		deleted += len(res.Deleted)
+	}
+	return deleted
+}
+
+// pruneSkillsDir 把 skills 目录收敛到 keep 中那些 agent 应有的 skill 集合
+// （同 pruneRulesDir 套路：create=false、只认 __rulemux__ 前缀、目录不存在即跳过）。
+func pruneSkillsDir(cfg *config.Config, dir string, keep []agents.Agent, ws string) (deleted int, untouched bool) {
+	if cfg == nil {
+		return 0, true // 配置不可读 ⇒ 不动文件，宁可留残留也不误删
+	}
+	if !cfg.DeclaresWorkspace(ws) {
+		return 0, true // 未声明的工作区 ⇒ 与 sync 同一条防线，不碰
+	}
+	res, err := engine.SyncSkills(dir, cfg.SkillSourcesForAny(peerIDs(keep), ws), false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ failed to prune %s: %v\n", dir, err)
+		return 0, true
+	}
+	if res.SkippedNoDir {
+		return 0, true
+	}
+	return len(res.Deleted), false
 }
 
 // remainingPeers 返回「卸载 a 之后，仍在使用同一规则目录」的 agent。

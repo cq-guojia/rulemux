@@ -60,6 +60,36 @@ const exampleConfig = `# rulemux configuration file
 #             and still works with globs:
 #               workspace = "~/Agent.Workspace/*"
 #
+#   scope     Where this batch lands (optional, default "workspace"):
+#               scope = "workspace"  # each workspace's agent dir (e.g. <ws>/.codebuddy/rules)
+#               scope = "user"       # the agent's USER-LEVEL (global) dir, shared by every
+#                                   # workspace — e.g. ~/.codebuddy/rules and ~/.workbuddy/rules
+#                                   # for the CodeBuddy family (both are written so both apps
+#                                   # see it). Ignored for workspace matching: a global rule
+#                                   # is global by definition.
+#
+# --- Skills ([[skill_source]]) ---------------------------------------------------
+# Besides rule files, rulemux can sync SKILL directories into the agents' native
+# skills directories. A skill is a DIRECTORY containing SKILL.md (plus optional
+# references/scripts); it is loaded progressively (name+description at session
+# start, full text on demand), so it can only be delivered by a real copy into
+# the native skills dir — never by hook injection.
+#
+#   [[skill_source]] fields:
+#     path       Skill root directory(ies) — every child directory that contains a
+#                SKILL.md is one skill (a path that itself contains SKILL.md is
+#                treated as a single skill). Local paths only in this version.
+#     agents     Same as [[source]]: omitted = every supported agent.
+#     workspace  Same as [[source]] (workspace scope only; ignored when scope="user").
+#     scope      Same as [[source]]: "workspace" (default) or "user".
+#
+#   Where they land (2026-10-12, verified against the CodeBuddy bundle):
+#     workspace scope → <ws>/.codebuddy/skills   (shared by codebuddy + workbuddy)
+#     user scope      → ~/.codebuddy/skills AND ~/.workbuddy/skills (both written)
+#   Skills land as __rulemux__<skill-name>/ directories; your own skills are never
+#   touched, and removing a source removes its copies on the next sync.
+#   Other agents (trae / dsh / claude / codex / opencode) do not take skills yet.
+#
 # --- Advanced: bundle things into "groups" to avoid repetition -------------------
 # Once you have many files, bundle your common files / workspaces into groups and
 # reference them by name from [[source]].
@@ -119,6 +149,18 @@ const exampleConfig = `# rulemux configuration file
 # agents = ["codebuddy"]
 # workspace_groups = ["dev"]          # workspace groups (list, may be multiple; expands to their workspaces)
 # workspace = ["/abs/path/to/standalone"]   # plus a standalone workspace
+
+# --- skill examples (same fields, but the source is a DIRECTORY of skills) ----------
+
+# [[skill_source]]
+# path = ["/abs/path/to/my-skills"]    # each child dir containing SKILL.md is one skill
+# agents = ["codebuddy", "workbuddy"]  # omitted = every supported agent
+# workspace = "*"                      # every workspace (default when omitted)
+
+# [[skill_source]]
+# path = ["/abs/path/to/global-skills"]
+# scope = "user"                       # user-level (global): lands in ~/.codebuddy/skills
+#                                       # and ~/.workbuddy/skills, in every workspace
 `
 
 // Init 有两个模式：
