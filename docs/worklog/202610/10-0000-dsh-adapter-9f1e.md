@@ -1,7 +1,7 @@
 # 20261010-0000-dsh-adapter-9f1e：DeepSeek Harness（dsh）适配器 canary 坐实 + 插件就绪收口
 
-> **✅ 完成封卷**（2026-10-10 00:00，GuoJia-Agent）
-> **创建**：2026-10-10 00:00（GuoJia-Agent）
+> **✅ 完成封卷**（2026-10-10 00:00:00，GuoJia-Agent）
+> **创建**：2026-10-10 00:00:00（GuoJia-Agent）
 
 ## 背景
 新增 dsh（DeepSeek Harness）适配器。dsh 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook binary**，也**不原生扫描规则目录**。需与已实现的 Go 同步引擎配合。

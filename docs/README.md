@@ -10,7 +10,7 @@
 | 文档规范 | `docs/README.md` | 本文件 |
 | 状态表 | `docs/progress.json` | 2026-10-11 由旧 `PROGRESS.md` 迁入 |
 | 已结案 | `docs/PROGRESS-HISTORY.md` | — |
-| 过程叙事 | `docs/worklog/<年月>/` | 按月归档（<年月> 取任务创建月份）；文件名由 koc-code-doc-progress skill 生成，实际路径以状态表 `worklog` 字段为准，命名规则不在此复制 |
+| 过程叙事 | `docs/worklog/<年月>/` | 按月归档（<年月> 取任务创建月份）；文件名由过程文档建档机制生成，实际路径以状态表 `worklog` 字段为准，命名规则不在此复制 |
 | 运行逻辑 | `docs/design/architecture.md` | — |
 | 功能总索引 | `docs/design/features.md` | — |
 | 各功能 | `docs/design/features/` | 含 `config-groups.md` 等 |
@@ -27,7 +27,3 @@
 1. **需求类（追加槽位）**：`docs/design/requirements.md` —— 需求变了改这里、方案变了改架构。
 2. **实现期调研归档（特例）**：`docs/design/implementation.md` 是项目启动前的调研与跨工作包决策记录，体量跨整个实现期、不是单个工作包，故独立成文；搬入时同步更新过时内容。
 3. **状态表已迁 `progress.json`**：2026-10-11 由旧 `PROGRESS.md`（Markdown）迁入。
-
-## 三、rulemux 特有硬约束
-
-涉及各家 agent 规则目录 / hooks 配置的特有硬约束，全文见 [`AGENTS.md`](../AGENTS.md) 项目段第 4 条，本文件不转述。

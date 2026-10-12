@@ -1,7 +1,7 @@
 # 20261008-0000-hook-command-c3d4：修复 hook 命令格式（`args` 被宿主丢弃）
 
-> **✅ 完成封卷**（2026-10-08 00:00，GuoJia-Agent）
-> **创建**：2026-10-08 00:00（GuoJia-Agent）
+> **✅ 完成封卷**（2026-10-08 00:00:00，GuoJia-Agent）
+> **创建**：2026-10-08 00:00:00（GuoJia-Agent）
 
 ## 背景
 本机已装 rulemux、CodeBuddy 也显示钩子已装，但新会话里规则**从不生效**：`.codebuddy/rules` 一直是空目录。

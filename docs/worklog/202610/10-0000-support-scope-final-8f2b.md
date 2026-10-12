@@ -1,7 +1,7 @@
 # 20261010-0000-support-scope-final-8f2b：支持范围定稿：就这四家（codebuddy / workbuddy / trae / dsh），到此结束
 
-> **✅ 完成封卷**（2026-10-10 00:00，GuoJia-Agent）
-> **创建**：2026-10-10 00:00（GuoJia-Agent）
+> **✅ 完成封卷**（2026-10-10 00:00:00，GuoJia-Agent）
+> **创建**：2026-10-10 00:00:00（GuoJia-Agent）
 
 ## 背景
 本工作包背景见历史索引摘要（原过程文档未单列背景）。
