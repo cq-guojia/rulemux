@@ -98,8 +98,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+
+      # OIDC trusted publishing (no token) requires npm >= 11.5.0; older npm
+      # falls back to an unauthenticated PUT which the registry answers E404.
+      - name: Ensure npm supports OIDC trusted publishing
+        run: npm install -g npm@^11
 
       - name: Build bundled binaries (version taken from the tag)
         run: bash scripts/build-dist.sh "${GITHUB_REF_NAME#v}"
