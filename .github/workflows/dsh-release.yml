@@ -1,0 +1,51 @@
+# DSH plugin release pipeline: push a tag `dsh-vX.Y.Z` -> publish the
+# `rulemux-dsh` npm package via GitHub OIDC trusted publishing (no NPM_TOKEN).
+#
+# The plugin's build artifacts (index.mjs, lib/, locale/) are committed to the
+# repo, so no build step is needed before publish.
+#
+# Setup (one time, on npmjs.com -> rulemux-dsh -> Settings -> Trusted Publishers):
+#   Publisher:          GitHub Actions
+#   Organization or user: cq-guojia
+#   Repository:         rulemux
+#   Workflow filename:  dsh-release.yml
+#   Allow publishing directly: yes
+#
+# Usage:
+#   bump dsh-plugin/package.json version -> commit -> git tag dsh-vX.Y.Z -> git push --follow-tags
+name: dsh-release
+
+on:
+  push:
+    tags:
+      - "dsh-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # id-token: write lets the workflow request a short-lived OIDC token from
+    # GitHub; npm exchanges it for a publish grant. No NPM_TOKEN secret needed.
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # OIDC trusted publishing (no token) requires npm >= 11.5.0.
+      - name: Ensure npm supports OIDC trusted publishing
+        run: npm install -g npm@^11
+
+      - name: Sync package.json version to the tag (dsh-vX.Y.Z -> X.Y.Z)
+        working-directory: dsh-plugin
+        run: npm version "${GITHUB_REF_NAME#dsh-v}" --no-git-tag-version --allow-same-version
+
+      - name: Publish rulemux-dsh to npm via OIDC (no token)
+        working-directory: dsh-plugin
+        run: npm publish --provenance --access public
