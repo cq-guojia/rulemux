@@ -49,7 +49,7 @@ codelint：golangci-lint v2.14.0 在配置加载阶段即失败（`unsupported v
 
 ## 结论
 
-已完成并提交推送（未打 tag，用户未要求发布）：
+已完成并以 v0.4.4 发布（2026-10-13，用户验收通过后指令发版）：
 
 - sync 结尾总计 = 空一行 + `Summary` 小表，替代原四行连排；
 - doctor = 青色段标题；Config 只答「配置文件在哪、管哪些文件」（rules/skills 分组，无过滤标注）；Agents 每个已初始化 agent 只报钩子是否正常；未初始化一行暗色。
