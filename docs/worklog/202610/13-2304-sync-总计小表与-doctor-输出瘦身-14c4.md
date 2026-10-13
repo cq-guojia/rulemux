@@ -47,11 +47,13 @@ Install 段用户认可（「install那个还行」），不动。
 
 codelint：golangci-lint v2.14.0 在配置加载阶段即失败（`unsupported version of the configuration: ""`，仓库无 .golangci 配置），对任意文件复现，属工具侧版本兼容问题；本仓自身门（build/vet/test/smoke）全绿，按 B 类记账。
 
+追加修复（用户实测 v0.4.4 后指令「按你的方法改」，随 v0.4.5 发布）：`printConfig` 的 rules/skills 清单按路径去重保序（新增 `dedupePaths`），计数同步按唯一文件算。根因：用户配置用 file_group 继承（base → code → code.dsh-plugins / code.open-lab），三个 [[source]] 展开后 100.BASE 出现 3 次、300.CODE 出现 2 次；v0.4.3 及以前每行带工作区范围标注、能看出是不同投递目标，v0.4.4 删标注后重复裸露。用户本机实测去重后：7 rule files · 2 skill dirs，各文件只列一次。测试：TestPrintConfig 加「同文件被多个 source 声明只列一次」用例。
+
 ## 结论
 
-已完成并以 v0.4.4 发布（2026-10-13，用户验收通过后指令发版）：
+已以 v0.4.4 发布，随后追一去重修复随 v0.4.5 发布（均为 2026-10-13）：
 
 - sync 结尾总计 = 空一行 + `Summary` 小表，替代原四行连排；
-- doctor = 青色段标题；Config 只答「配置文件在哪、管哪些文件」（rules/skills 分组，无过滤标注）；Agents 每个已初始化 agent 只报钩子是否正常；未初始化一行暗色。
+- doctor = 青色段标题；Config 只答「配置文件在哪、管哪些文件」（rules/skills 分组、无过滤标注、按路径去重）；Agents 每个已初始化 agent 只报钩子是否正常；未初始化一行暗色。
 
-待用户验收：按上面「临时环境实跑」同款场景在自己的机器上看一眼 doctor 与 sync --all。
+待用户结案指令（任务仍在 doing）。

@@ -103,9 +103,12 @@ func TestPrintConfig(t *testing.T) {
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// 规则源限定在 other 工作区 ⇒ 当前 ws 下应被记为 skipped
+	// 规则源限定在 other 工作区 ⇒ 当前 ws 下应被记为 skipped；
+	// 第二个 source 重复声明 rule1（file_group 继承的常态）⇒ 去重后只列一次
 	cfgPath := writeConfig(t, tmp,
-		"[[source]]\npath = [\""+rule1+"\", \""+rule2+"\"]\nworkspace = [\""+other+"\"]\n\n[[skill_source]]\npath = [\""+skillDir+"\"]\n")
+		"[[source]]\npath = [\""+rule1+"\", \""+rule2+"\"]\nworkspace = [\""+other+"\"]\n\n"+
+			"[[source]]\npath = [\""+rule1+"\"]\nworkspace = [\""+other+"\"]\n\n"+
+			"[[skill_source]]\npath = [\""+skillDir+"\"]\n")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
@@ -120,6 +123,9 @@ func TestPrintConfig(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("Config 输出应包含 %q，实得:\n%s", want, out)
 		}
+	}
+	if n := strings.Count(out, rule1); n != 1 {
+		t.Errorf("被多个 source 声明的文件应只出现一次，实得 %d 次:\n%s", n, out)
 	}
 	for _, bad := range []string{"all agents", "[skills]", "→"} {
 		if strings.Contains(out, bad) {

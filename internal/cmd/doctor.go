@@ -127,6 +127,8 @@ func printInstall(in installInfo) {
 // rules（规则文件）/ skills（skill 目录）分组罗列，只报路径与存在性——投给哪些
 // agent、在哪些 workspace 生效这类过滤条件不在这里展开（health check 不承担
 // 配置教程）；被 workspace 范围跳过的源折叠成一行暗色说明。
+// 同一文件可能被多个 source 声明（file_group 继承，如 base 被三层继承），清单
+// 按路径去重保序——这里只回答「管哪些文件」，不问声明次数。
 // 返回配置是否可用（合法）。
 func printConfig(cfgPath string, cfg *config.Config, cfgErr error, ws string) bool {
 	fmt.Println(ui.Header("Config"))
@@ -139,36 +141,35 @@ func printConfig(cfgPath string, cfg *config.Config, cfgErr error, ws string) bo
 	if verr := cfg.Validate(); verr != nil {
 		mark, note = ui.Yellow(ui.GlyphWarn), verr.Error()
 	}
-	var ruleFiles, skillDirs, skipped int
+	var ruleLists, skillLists [][]string
+	var skipped int
 	for _, s := range cfg.Sources {
-		ruleFiles += len(s.Paths)
+		ruleLists = append(ruleLists, s.Paths)
 		if !s.MatchesWorkspace(ws) {
 			skipped++
 		}
 	}
 	for _, s := range cfg.SkillSources {
-		skillDirs += len(s.Paths)
+		skillLists = append(skillLists, s.Paths)
 		if !s.MatchesWorkspace(ws) {
 			skipped++
 		}
 	}
+	ruleFiles := dedupePaths(ruleLists...)
+	skillDirs := dedupePaths(skillLists...)
 	fmt.Printf("  %s %s — %s · %s · %s\n",
 		mark, ui.HomeRel(cfgPath), note,
-		ui.Plural(ruleFiles, "rule file"), ui.Plural(skillDirs, "skill dir"))
-	if ruleFiles > 0 {
+		ui.Plural(len(ruleFiles), "rule file"), ui.Plural(len(skillDirs), "skill dir"))
+	if len(ruleFiles) > 0 {
 		fmt.Println("    rules")
-		for _, s := range cfg.Sources {
-			for _, p := range s.Paths {
-				fmt.Printf("      %s %s\n", pathMark(p, false), ui.HomeRel(p))
-			}
+		for _, p := range ruleFiles {
+			fmt.Printf("      %s %s\n", pathMark(p, false), ui.HomeRel(p))
 		}
 	}
-	if skillDirs > 0 {
+	if len(skillDirs) > 0 {
 		fmt.Println("    skills")
-		for _, s := range cfg.SkillSources {
-			for _, p := range s.Paths {
-				fmt.Printf("      %s %s\n", pathMark(p, true), ui.HomeRel(p))
-			}
+		for _, p := range skillDirs {
+			fmt.Printf("      %s %s\n", pathMark(p, true), ui.HomeRel(p))
 		}
 	}
 	if skipped > 0 {
@@ -176,6 +177,22 @@ func printConfig(cfgPath string, cfg *config.Config, cfgErr error, ws string) bo
 			ui.Dim(ui.GlyphSkip), ui.Plural(skipped, "source"))
 	}
 	return true
+}
+
+// dedupePaths 拉平多组路径并按路径去重（保序）：同一文件被多个 source 声明时
+// （file_group 继承的常态），doctor 清单只列一次。
+func dedupePaths(lists ...[]string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, list := range lists {
+		for _, p := range list {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }
 
 // pathMark 存在性标记：规则文件 / skill 目录在盘上 ⇒ 绿 ✔，否则黄 ⚠。
