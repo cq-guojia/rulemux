@@ -77,10 +77,16 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           chmod +x dist/rulemux-* 2>/dev/null || true
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            dist/*
+          # Idempotent: a previous run may have already created the release
+          # (e.g. an old npm job failure); upload/clobber its assets instead.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              dist/*
+          fi
 
   npm:
     needs: release
