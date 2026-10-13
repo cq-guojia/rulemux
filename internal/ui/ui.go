@@ -26,6 +26,7 @@ const (
 	ansiGreen  = "\x1b[32m"
 	ansiYellow = "\x1b[33m"
 	ansiRed    = "\x1b[31m"
+	ansiCyan   = "\x1b[36m"
 	ansiDim    = "\x1b[2m"
 	ansiBold   = "\x1b[1m"
 )
@@ -73,6 +74,12 @@ func Dim(s string) string { return paint(ansiDim, s) }
 
 // Bold 加粗：标题与总计。
 func Bold(s string) string { return paint(ansiBold, s) }
+
+// Cyan 青：段标题基色（doctor 的 Install / Config / Agents）。
+func Cyan(s string) string { return paint(ansiCyan, s) }
+
+// Header 段标题：粗体 + 青。与状态色（绿/黄/红）区分，无色终端下降级为纯文本。
+func Header(s string) string { return paint(ansiBold+ansiCyan, s) }
 
 // HomeRel 把路径压缩成 ~ 开头的显示形式（HOME 前缀替换），
 // 取不到 HOME 或路径不在其下时原样返回。

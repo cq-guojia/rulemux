@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -620,7 +621,7 @@ func (r *syncRun) line(a agents.Agent, userLevel bool) *syncLine {
 //   - agent 行只报数：rules N · skills M；无增减即 ✔ 原封不动，不出任何明细
 //   - 有变化的块，标题行尾挂当轮增量（rules −6 · skills −1，只列非零；各块按
 //     最长标题对齐成一列）
-//   - 结尾总计：工作区/agent 数 + rules 与 skills 各自的 +加 −删 ~改
+//   - 结尾总计：空一行后的 Summary 小表（files / +added / −removed / ~updated）
 //   - 未初始化 agent 只在总计出现一次；缺失源 / 写失败进警告区（真信号不省略）
 //
 // 颜色由 internal/ui 按 TTY 自适应；非 TTY 下 glyph 独立承载语义。
@@ -729,8 +730,10 @@ func (r *syncRun) printBlock(w io.Writer, header string, lines []*syncLine, maxW
 	fmt.Fprintln(w)
 }
 
-// printTotals 打结尾总计：工作区/agent 数、rules 与 skills 的现有数与增减改、
-// 未初始化 agent 名单（只在这里出现一次）。
+// printTotals 打结尾总计（2026-10-13 用户拍版二版）：正文之后空一行，汇总排成
+// 一张对齐小表（type | files | +added | −removed | ~updated；+/−/~ 前缀让无色
+// 终端也能读懂列义，三列各按语义着色）；未初始化 agent 名单只在这里出现一次
+// （暗色，不打叉）。
 func (r *syncRun) printTotals(w io.Writer) {
 	var rules, skills, ra, rd, ru, sa, sd, su int
 	seen := map[string]bool{}
@@ -748,10 +751,49 @@ func (r *syncRun) printTotals(w io.Writer) {
 		sd += l.skillsDel
 		su += l.skillsUpd
 	}
-	fmt.Fprintln(w, ui.Bold(fmt.Sprintf("%s · %s initialized",
+	fmt.Fprintln(w) // 与上方正文空一行
+	fmt.Fprintln(w, ui.Bold(fmt.Sprintf("Summary — %s · %s initialized",
 		ui.Plural(len(r.wsList), "workspace"), ui.Plural(len(seen), "agent"))))
-	fmt.Fprintf(w, "rules %s · +%d added · −%d removed · %d updated\n", ui.Plural(rules, "file"), ra, rd, ru)
-	fmt.Fprintf(w, "skills %s · +%d added · −%d removed · %d updated\n", ui.Plural(skills, "file"), sa, sd, su)
+	fmt.Fprintln(w)
+
+	head := []string{"", "files", "+added", "−removed", "~updated"}
+	rows := [][]string{
+		{"rules", strconv.Itoa(rules), strconv.Itoa(ra), strconv.Itoa(rd), strconv.Itoa(ru)},
+		{"skills", strconv.Itoa(skills), strconv.Itoa(sa), strconv.Itoa(sd), strconv.Itoa(su)},
+	}
+	// 列宽 = max(表头, 各行该列)；标签列左对齐，数字列右对齐。
+	width := make([]int, len(head))
+	for i, h := range head {
+		width[i] = utf8.RuneCountInString(h)
+	}
+	for _, row := range rows {
+		for i, c := range row {
+			if n := utf8.RuneCountInString(c); n > width[i] {
+				width[i] = n
+			}
+		}
+	}
+	colColor := []func(string) string{nil, nil, ui.Green, ui.Red, ui.Yellow}
+	render := func(cells []string) string {
+		parts := make([]string, len(cells))
+		for i, c := range cells {
+			pad := strings.Repeat(" ", width[i]-utf8.RuneCountInString(c))
+			if i == 0 {
+				parts[i] = c + pad
+			} else {
+				parts[i] = pad + c
+			}
+			if f := colColor[i]; f != nil {
+				parts[i] = f(parts[i])
+			}
+		}
+		return "  " + strings.TrimRight(strings.Join(parts, "  "), " ")
+	}
+	fmt.Fprintln(w, render(head))
+	for _, row := range rows {
+		fmt.Fprintln(w, render(row))
+	}
+
 	// 未初始化 = 本轮没有任何落盘的 Tier-1 agent（点名但不打叉）
 	var uninit []string
 	for _, a := range targetAgents("") {
@@ -760,7 +802,8 @@ func (r *syncRun) printTotals(w io.Writer) {
 		}
 	}
 	if len(uninit) > 0 {
-		fmt.Fprintf(w, "%s not initialized: %s — rulemux init --agent <id>\n",
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "  %s not initialized: %s — rulemux init --agent <id>\n",
 			ui.Dim(ui.GlyphSkip), strings.Join(uninit, ", "))
 	}
 }

@@ -45,7 +45,7 @@ func TestPaintSwitch(t *testing.T) {
 	defer func() { enabled = old }()
 
 	enabled = false
-	for _, fn := range []func(string) string{Green, Yellow, Red, Dim, Bold} {
+	for _, fn := range []func(string) string{Green, Yellow, Red, Dim, Bold, Cyan, Header} {
 		if got := fn("x"); got != "x" {
 			t.Errorf("关色时应原样返回，实得 %q", got)
 		}
@@ -59,6 +59,9 @@ func TestPaintSwitch(t *testing.T) {
 	}
 	if got := Bold("z"); got != "\x1b[1mz\x1b[0m" {
 		t.Errorf("Bold 开色时转义错误：%q", got)
+	}
+	if got := Header("h"); got != "\x1b[1m\x1b[36mh\x1b[0m" {
+		t.Errorf("Header 开色时应为粗体+青，实得 %q", got)
 	}
 }
 

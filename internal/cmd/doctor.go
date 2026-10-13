@@ -31,7 +31,7 @@ func Doctor(args []string) int {
 	cfg, cfgErr := config.Load(cfgPath)
 
 	fmt.Println(ui.Bold("rulemux doctor — environment check"))
-	fmt.Println(ui.Dim("workspace: " + ws))
+	fmt.Println(ui.Dim("workspace: " + ui.HomeRel(ws)))
 	fmt.Println()
 
 	// 1. Install：怎么装的、装在哪、在不在 PATH
@@ -106,7 +106,7 @@ func installMethod(bin string) (method, pkgDir string) {
 }
 
 func printInstall(in installInfo) {
-	fmt.Println(ui.Bold("Install"))
+	fmt.Println(ui.Header("Install"))
 	mark := ui.Green(ui.GlyphOK)
 	if !in.OnPATH {
 		mark = ui.Red(ui.GlyphFail) // exec 式钩子要求 rulemux 在 PATH 上，这是真错误
@@ -123,10 +123,13 @@ func printInstall(in installInfo) {
 	}
 }
 
-// printConfig 打 Config 段：路径 + 计数 + 校验结论 + 源清单（每源一行）。
+// printConfig 打 Config 段：配置文件在哪、合法性、它管理哪些文件。受管文件按
+// rules（规则文件）/ skills（skill 目录）分组罗列，只报路径与存在性——投给哪些
+// agent、在哪些 workspace 生效这类过滤条件不在这里展开（health check 不承担
+// 配置教程）；被 workspace 范围跳过的源折叠成一行暗色说明。
 // 返回配置是否可用（合法）。
 func printConfig(cfgPath string, cfg *config.Config, cfgErr error, ws string) bool {
-	fmt.Println(ui.Bold("Config"))
+	fmt.Println(ui.Header("Config"))
 	if cfgErr != nil {
 		fmt.Printf("  %s %v\n", ui.Red(ui.GlyphFail), cfgErr)
 		fmt.Println("    Hint: run rulemux init first")
@@ -136,43 +139,52 @@ func printConfig(cfgPath string, cfg *config.Config, cfgErr error, ws string) bo
 	if verr := cfg.Validate(); verr != nil {
 		mark, note = ui.Yellow(ui.GlyphWarn), verr.Error()
 	}
-	fmt.Printf("  %s %s — %s · %s · %s\n",
-		mark, cfgPath, ui.Plural(len(cfg.Sources), "source"), ui.Plural(len(cfg.SkillSources), "skill source"), note)
+	var ruleFiles, skillDirs, skipped int
 	for _, s := range cfg.Sources {
-		target := "all agents"
-		if len(s.Agents) > 0 {
-			target = strings.Join(s.Agents, ", ")
-		}
-		scope := "all workspaces"
-		if len(s.Workspaces) > 0 {
-			scope = strings.Join(s.Workspaces, ", ")
-		}
-		skip := ""
+		ruleFiles += len(s.Paths)
 		if !s.MatchesWorkspace(ws) {
-			skip = " ← skipped: not the current workspace"
-		}
-		for _, p := range s.Paths {
-			fileMark := ui.Green(ui.GlyphOK)
-			if _, err := os.Stat(p); err != nil {
-				fileMark = ui.Yellow(ui.GlyphWarn)
-			}
-			fmt.Printf("    %s %s → %s [%s]%s\n", fileMark, ui.HomeRel(p), target, scope, skip)
+			skipped++
 		}
 	}
 	for _, s := range cfg.SkillSources {
-		target := "all agents"
-		if len(s.Agents) > 0 {
-			target = strings.Join(s.Agents, ", ")
-		}
-		for _, p := range s.Paths {
-			dirMark := ui.Green(ui.GlyphOK)
-			if st, err := os.Stat(p); err != nil || !st.IsDir() {
-				dirMark = ui.Yellow(ui.GlyphWarn)
-			}
-			fmt.Printf("    %s %s → %s [skills]\n", dirMark, ui.HomeRel(p), target)
+		skillDirs += len(s.Paths)
+		if !s.MatchesWorkspace(ws) {
+			skipped++
 		}
 	}
+	fmt.Printf("  %s %s — %s · %s · %s\n",
+		mark, ui.HomeRel(cfgPath), note,
+		ui.Plural(ruleFiles, "rule file"), ui.Plural(skillDirs, "skill dir"))
+	if ruleFiles > 0 {
+		fmt.Println("    rules")
+		for _, s := range cfg.Sources {
+			for _, p := range s.Paths {
+				fmt.Printf("      %s %s\n", pathMark(p, false), ui.HomeRel(p))
+			}
+		}
+	}
+	if skillDirs > 0 {
+		fmt.Println("    skills")
+		for _, s := range cfg.SkillSources {
+			for _, p := range s.Paths {
+				fmt.Printf("      %s %s\n", pathMark(p, true), ui.HomeRel(p))
+			}
+		}
+	}
+	if skipped > 0 {
+		fmt.Printf("    %s %s scoped to other workspaces — skipped in this workspace\n",
+			ui.Dim(ui.GlyphSkip), ui.Plural(skipped, "source"))
+	}
 	return true
+}
+
+// pathMark 存在性标记：规则文件 / skill 目录在盘上 ⇒ 绿 ✔，否则黄 ⚠。
+// wantDir 为 true 时还要求是目录（skill 源指向文件属配置错误）。
+func pathMark(p string, wantDir bool) string {
+	if st, err := os.Stat(p); err == nil && (!wantDir || st.IsDir()) {
+		return ui.Green(ui.GlyphOK)
+	}
+	return ui.Yellow(ui.GlyphWarn)
 }
 
 // agentInitialized 报告该 agent 是否已初始化：钩子已装（latest 与否另见
@@ -201,7 +213,7 @@ func printAgents(ws string) {
 			unined = append(unined, a)
 		}
 	}
-	fmt.Println(ui.Bold(fmt.Sprintf("Agents — %d of %d initialized", len(inited), len(all))))
+	fmt.Println(ui.Header(fmt.Sprintf("Agents — %d of %d initialized", len(inited), len(all))))
 	for _, a := range inited {
 		fmt.Printf("  %s %-10s %s\n", ui.Green(ui.GlyphOK), a.ID, agentStateLine(a, ws))
 	}
@@ -215,60 +227,33 @@ func printAgents(ws string) {
 	}
 }
 
-// agentStateLine 生成已初始化 agent 的行内状态：钩子状态 + 各目录存在性
-// （存在的照常，缺失的暗色 (missing)）——一行一个 agent，杜绝 6-8 行刷屏。
+// agentStateLine 只报已初始化 agent 的钩子健康度（2026-10-13 用户拍版二版：
+// 「我理解你下面的 Agent 就是做判断对吧？……判断它的钩子正不正常，不就行了吗？
+// 搞这么多干嘛呢？」）。规则/skill 目录的存在性不再罗列——sync 已经报过，doctor
+// 不重复刷屏。external 样式（如 dsh）没有 rulemux 可装的钩子——插件由宿主装、
+// rulemux 探测不到，以其规则目录存在为据（见 agentInitialized）。
 func agentStateLine(a agents.Agent, ws string) string {
-	var parts []string
 	if a.Style == "external" {
-		parts = append(parts, "plugin (external)")
-	} else {
-		hookPath, envUsed := a.HookFileAbsWithSource(ws)
-		srcNote := ""
-		if envUsed != "" {
-			srcNote = fmt.Sprintf(" [dir from $%s]", envUsed)
-		}
-		installed, cmdStr, err := hooks.Inspect(hookPath, a)
-		switch {
-		case errors.Is(err, hooks.ErrRefreshUnsupported):
-			parts = append(parts, "hook unchecked (format not verified yet)"+srcNote)
-		case err != nil:
-			parts = append(parts, fmt.Sprintf("hook unreadable → %s: %v", hookPath, err))
-		case !installed:
-			parts = append(parts, "hook not installed → rulemux init --agent "+a.ID)
-		case cmdStr == hooks.ExpectedCommand(a, cmdStr):
-			parts = append(parts, "hook up to date")
-		default:
-			parts = append(parts, "hook OUTDATED → rulemux init --refresh")
-		}
+		return "plugin (external)"
 	}
-	if dir := a.RulesDirAbs(ws); dir != "" {
-		parts = append(parts, "rules "+dirMark(dir, ws))
+	hookPath, envUsed := a.HookFileAbsWithSource(ws)
+	srcNote := ""
+	if envUsed != "" {
+		srcNote = fmt.Sprintf(" [dir from $%s]", envUsed)
 	}
-	if dir := a.SkillsDirAbs(ws); dir != "" {
-		parts = append(parts, "skills "+dirMark(dir, ws))
+	installed, cmdStr, err := hooks.Inspect(hookPath, a)
+	switch {
+	case errors.Is(err, hooks.ErrRefreshUnsupported):
+		return "hook unchecked (format not verified yet)" + srcNote
+	case err != nil:
+		return fmt.Sprintf("hook unreadable → %s: %v", hookPath, err)
+	case !installed:
+		return "hook not installed → rulemux init --agent " + a.ID
+	case cmdStr == hooks.ExpectedCommand(a, cmdStr):
+		return "hook up to date" + srcNote
+	default:
+		return ui.Yellow("hook OUTDATED → rulemux init --refresh")
 	}
-	for _, dir := range a.UserRulesDirsAbs() {
-		parts = append(parts, "user rules "+dirMark(dir, ws))
-	}
-	for _, dir := range a.UserSkillsDirsAbs() {
-		parts = append(parts, "user skills "+dirMark(dir, ws))
-	}
-	return strings.Join(parts, " · ")
-}
-
-// dirMark 目录存在性标记：存在 ⇒ "路径 ✓"；缺失 ⇒ "路径 (missing)"。
-// 路径显示口径：工作区下的目录相对 ws（.codebuddy/rules），用户级 ~ 压缩。
-func dirMark(dir, ws string) string {
-	shown := dir
-	if rel, err := filepath.Rel(ws, dir); err == nil && !strings.HasPrefix(rel, "..") {
-		shown = rel
-	} else {
-		shown = ui.HomeRel(dir)
-	}
-	if st, err := os.Stat(dir); err == nil && st.IsDir() {
-		return shown + " ✓"
-	}
-	return shown + " (missing)"
 }
 
 func printDoctorSummary(cfgOK, onPATH bool) {
