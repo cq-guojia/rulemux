@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/engine"
 	"github.com/cq-guojia/rulemux/internal/hooks"
 	"github.com/cq-guojia/rulemux/internal/state"
+	"github.com/cq-guojia/rulemux/internal/ui"
 )
 
 // Sync 把配置所列源文件真实拷贝进各 agent 的原生规则目录（Tier-1）。
@@ -127,6 +129,7 @@ func Sync(args []string) int {
 	}
 
 	run := newSyncRun(cfg, ws, createAgent)
+	run.wsList = append(run.wsList, ws)
 	for _, a := range targets {
 		if a.Tier == agents.Tier2 {
 			// Tier-2 没有规则目录可丢文件，由 inject 子命令负责注入
@@ -163,6 +166,7 @@ func Sync(args []string) int {
 			emitChangeNotice(os.Stdout, a.HintProtocol)
 		}
 	}
+	run.printSyncReport(os.Stderr, "rulemux sync")
 	if run.failed {
 		return 1
 	}
@@ -184,6 +188,9 @@ type syncRun struct {
 	changed     bool            // rules 变化（含用户级 rules；skills 不计入）
 	failed      bool            // 任一路径出错（抬退出码）
 	landed      []landedEntry   // 落过盘的（工作区, agent），供账本记账
+	lines       []*syncLine     // 报告行（按出现顺序）
+	lineIdx     map[string]*syncLine
+	wsList      []string // 本轮处理过的工作区（按顺序，含无落盘的）
 }
 
 // landedEntry 是一条「在某个工作区落过盘」的记录（账本 key）。
@@ -199,6 +206,7 @@ func newSyncRun(cfg *config.Config, ws, createAgent string) *syncRun {
 		createAgent: createAgent,
 		doneDirs:    map[string]bool{},
 		doneUser:    map[string]bool{},
+		lineIdx:     map[string]*syncLine{},
 	}
 }
 
@@ -213,7 +221,7 @@ func (r *syncRun) agent(a agents.Agent) {
 		dir := a.RulesDirAbs(r.ws)
 		if !r.doneDirs[dir] {
 			r.doneDirs[dir] = true
-			r.syncFiles(a, dir, r.cfg.SourcesForAny(unionAgentIDs(a, r.ws), r.ws), a.NeedsFrontmatter, create)
+			r.syncFiles(a, dir, r.cfg.SourcesForAny(unionAgentIDs(a, r.ws), r.ws), a.NeedsFrontmatter, create, false)
 		}
 	}
 
@@ -222,7 +230,7 @@ func (r *syncRun) agent(a agents.Agent) {
 		dir := a.SkillsDirAbs(r.ws)
 		if !r.doneDirs[dir] {
 			r.doneDirs[dir] = true
-			r.syncSkillDirs(a, dir, r.cfg.SkillSourcesForAny(unionSkillIDs(a, r.ws), r.ws), create)
+			r.syncSkillDirs(a, dir, r.cfg.SkillSourcesForAny(unionSkillIDs(a, r.ws), r.ws), create, false)
 		}
 	}
 
@@ -235,48 +243,66 @@ func (r *syncRun) agent(a agents.Agent) {
 			continue
 		}
 		r.doneUser[dir] = true
-		r.syncFiles(a, dir, r.cfg.UserSourcesForAny(userIDs), a.NeedsFrontmatter, create)
+		r.syncFiles(a, dir, r.cfg.UserSourcesForAny(userIDs), a.NeedsFrontmatter, create, true)
 	}
 	for _, dir := range a.UserSkillsDirsAbs() {
 		if r.doneUser[dir] {
 			continue
 		}
 		r.doneUser[dir] = true
-		r.syncSkillDirs(a, dir, r.cfg.UserSkillSourcesForAny(userIDs), create)
+		r.syncSkillDirs(a, dir, r.cfg.UserSkillSourcesForAny(userIDs), create, true)
 	}
 }
 
-// syncFiles 同步一个规则目录（工作区或用户级）。
-func (r *syncRun) syncFiles(a agents.Agent, dir string, srcs []config.Source, frontmatter, create bool) {
+// syncFiles 同步一个规则目录（工作区或用户级）。结果按 (agent × 作用域) 累进
+// syncLine 供报告汇总，不再逐目录打印。
+func (r *syncRun) syncFiles(a agents.Agent, dir string, srcs []config.Source, frontmatter, create, userLevel bool) {
 	res, err := engine.Sync(dir, srcs, frontmatter, create)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
 		r.failed = true
 		return
 	}
-	printSyncResult(os.Stderr, a, dir, res)
+	l := r.line(a, userLevel)
+	if res.SkippedNoDir {
+		return // 目录不存在且不允许创建：不建、不读、不删，报告里也不出行
+	}
+	l.dirs = append(l.dirs, dir)
+	l.rules += len(res.Copied) + len(res.Updated) + len(res.Skipped)
+	l.rulesAdd += len(res.Copied)
+	l.rulesDel += len(res.Deleted)
+	l.rulesUpd += len(res.Updated)
+	l.missing = append(l.missing, res.Missing...)
+	l.errs = append(l.errs, res.Errors...)
 	if res.HasChanges() {
 		r.changed = true
 	}
-	if !res.SkippedNoDir {
-		r.landed = append(r.landed, landedEntry{ws: r.ws, id: a.ID})
-	}
+	r.landed = append(r.landed, landedEntry{ws: r.ws, id: a.ID})
 }
 
-// syncSkillDirs 同步一个 skills 目录（工作区或用户级）。
-func (r *syncRun) syncSkillDirs(a agents.Agent, dir string, srcs []config.SkillSource, create bool) {
+// syncSkillDirs 同步一个 skills 目录（工作区或用户级）。与 syncFiles 同构：
+// 一个 skill 树算一个单位（与旧输出 "1 file(s)" 同口径）。
+func (r *syncRun) syncSkillDirs(a agents.Agent, dir string, srcs []config.SkillSource, create, userLevel bool) {
 	res, err := engine.SyncSkills(dir, srcs, create)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
 		r.failed = true
 		return
 	}
-	printSyncResult(os.Stderr, a, dir, res)
+	l := r.line(a, userLevel)
+	if res.SkippedNoDir {
+		return
+	}
+	l.dirs = append(l.dirs, dir)
+	l.skills += len(res.Copied) + len(res.Updated) + len(res.Skipped)
+	l.skillsAdd += len(res.Copied)
+	l.skillsDel += len(res.Deleted)
+	l.skillsUpd += len(res.Updated)
+	l.missing = append(l.missing, res.Missing...)
+	l.errs = append(l.errs, res.Errors...)
 	// shortcut: skills 变化不计入 changed（不触发「新开会话」提示）——skills 是否热重载
 	// 待 canary（docs/design/external/skill-ecosystem.md §六-4）；坐实后再按 per-agent 判据补。
-	if !res.SkippedNoDir {
-		r.landed = append(r.landed, landedEntry{ws: r.ws, id: a.ID})
-	}
+	r.landed = append(r.landed, landedEntry{ws: r.ws, id: a.ID})
 }
 
 // cascade 顺手同步该工作区历史上用过的**其它** Tier-1 agent。
@@ -385,6 +411,7 @@ func syncAll(cfg *config.Config) int {
 			continue
 		}
 		run.ws = ws
+		run.wsList = append(run.wsList, ws)
 		for _, a := range agentsFromLedger(l.AgentsFor(ws)) {
 			run.agent(a)
 		}
@@ -405,6 +432,7 @@ func syncAll(cfg *config.Config) int {
 			fmt.Fprintf(os.Stderr, "rulemux: pruned %d ledger entr(ies) whose directory no longer exists\n", len(gone))
 		}
 	}
+	run.printSyncReport(os.Stderr, "rulemux sync --all")
 	if run.failed {
 		exit = 1
 	}
@@ -548,32 +576,259 @@ func targetAgents(id string) []agents.Agent {
 	return out
 }
 
-// printSyncResult 把单个 agent 的同步结果打到 w（人类可读文本，调用方统一传 os.Stderr）。
-func printSyncResult(w io.Writer, a agents.Agent, dir string, r *engine.SyncResult) {
-	fmt.Fprintf(w, "rulemux: %s → %s\n", a.ID, dir)
-	if r.SkippedNoDir {
-		fmt.Fprintln(w, "  skipped: rules dir does not exist (only the agent's own hook may create it)")
-		return
+// syncLine 是报告里的一行：某个作用域（工作区或用户级）下某个 agent 的同步结果。
+// 计数全部取自 engine.SyncResult 各切片的长度，零额外 I/O。
+type syncLine struct {
+	ws        string // 工作区路径（userLevel 时无意义）
+	agentID   string
+	userLevel bool
+	dirs      []string // 该作用域下实际同步过的目录（global 块显示用）
+
+	rules, skills                   int // 同步后仍在盘上的数量
+	rulesAdd, rulesDel, rulesUpd    int
+	skillsAdd, skillsDel, skillsUpd int
+
+	missing []string // 缺失的源路径
+	errs    []string // 单文件写/删失败
+}
+
+// empty 报告这一行是否什么都没同步（目录全被跳过）——空行不进报告。
+func (l *syncLine) empty() bool { return len(l.dirs) == 0 }
+
+func (l *syncLine) changed() bool {
+	return l.rulesAdd+l.rulesDel+l.rulesUpd+l.skillsAdd+l.skillsDel+l.skillsUpd > 0
+}
+
+// line 取（或建）某个 agent 在某个作用域下的报告行。userLevel 行与工作区无关，
+// 整个进程只此一份（global 块）。
+func (r *syncRun) line(a agents.Agent, userLevel bool) *syncLine {
+	key := a.ID
+	if !userLevel {
+		key += "\x00" + r.ws
 	}
-	if len(r.Copied) > 0 {
-		fmt.Fprintln(w, "  Added:", strings.Join(r.Copied, ", "))
+	if l, ok := r.lineIdx[key]; ok {
+		return l
 	}
-	if len(r.Updated) > 0 {
-		fmt.Fprintln(w, "  Updated:", strings.Join(r.Updated, ", "))
+	l := &syncLine{ws: r.ws, agentID: a.ID, userLevel: userLevel}
+	r.lineIdx[key] = l
+	r.lines = append(r.lines, l)
+	return l
+}
+
+// printSyncReport 打印人类可读同步报告（stderr）。版式 2026-10-13 用户拍版：
+//   - global（用户级）块在前，各工作区块随后；每块 = 标题行（glyph + 路径）+ 每 agent 一行
+//   - agent 行只报数：rules N · skills M；无增减即 ✔ 原封不动，不出任何明细
+//   - 有变化的块，标题行尾挂当轮增量（rules −6 · skills −1，只列非零；各块按
+//     最长标题对齐成一列）
+//   - 结尾总计：工作区/agent 数 + rules 与 skills 各自的 +加 −删 ~改
+//   - 未初始化 agent 只在总计出现一次；缺失源 / 写失败进警告区（真信号不省略）
+//
+// 颜色由 internal/ui 按 TTY 自适应；非 TTY 下 glyph 独立承载语义。
+func (r *syncRun) printSyncReport(w io.Writer, title string) {
+	fmt.Fprintf(w, "%s\n\n", ui.Bold(title))
+
+	var glob, wsLines []*syncLine
+	for _, l := range r.lines {
+		if l.empty() {
+			continue
+		}
+		if l.userLevel {
+			glob = append(glob, l)
+		} else {
+			wsLines = append(wsLines, l)
+		}
 	}
-	if len(r.Deleted) > 0 {
-		fmt.Fprintln(w, "  Removed residue:", strings.Join(r.Deleted, ", "))
+
+	// 先汇总所有块，再统一渲染——增量后缀按最长标题对齐成一列。
+	type block struct {
+		header string
+		lines  []*syncLine
 	}
-	if len(r.Skipped) > 0 {
-		fmt.Fprintf(w, "  Unchanged, skipped: %d file(s)\n", len(r.Skipped))
+	var blocks []block
+	if len(glob) > 0 {
+		blocks = append(blocks, block{header: "~ user-level (every workspace)", lines: glob})
 	}
-	for _, m := range r.Missing {
-		fmt.Fprintf(w, "  ⚠ source file missing: %s\n", m)
+	for _, ws := range r.wsList {
+		var lines []*syncLine
+		for _, l := range wsLines {
+			if l.ws == ws {
+				lines = append(lines, l)
+			}
+		}
+		if len(lines) == 0 {
+			// 没有任何 agent 落盘的工作区：一行暗色说明，不参与对齐
+			fmt.Fprintf(w, "%s %s\n", ui.Dim(ui.GlyphSkip), ws)
+			fmt.Fprintf(w, "  %s\n", ui.Dim("not initialized — no rule/skill dirs yet"))
+			continue
+		}
+		blocks = append(blocks, block{header: ws, lines: lines})
 	}
-	for _, e := range r.Errors {
-		fmt.Fprintf(w, "  ⚠ %s\n", e)
+
+	maxW := 0
+	for _, b := range blocks {
+		if n := utf8.RuneCountInString(b.header) + 2; n > maxW { // +2 = glyph + 空格
+			maxW = n
+		}
 	}
-	if len(r.Skipped) == 0 && r.IsEmpty() {
-		fmt.Fprintln(w, "  Nothing to do (no source files listed for this agent)")
+	for _, b := range blocks {
+		r.printBlock(w, b.header, b.lines, maxW)
 	}
+
+	// 警告区：缺失源 / 写失败（省略它们等于隐瞒故障）
+	warns := 0
+	for _, l := range r.lines {
+		for _, m := range l.missing {
+			fmt.Fprintf(w, "%s %s: source file missing: %s\n", ui.Yellow(ui.GlyphWarn), l.agentID, m)
+			warns++
+		}
+		for _, e := range l.errs {
+			fmt.Fprintf(w, "%s %s: %s\n", ui.Red(ui.GlyphFail), l.agentID, e)
+			warns++
+		}
+	}
+	if warns > 0 {
+		fmt.Fprintln(w)
+	}
+
+	r.printTotals(w)
+}
+
+// printBlock 打一个作用域块：标题行（glyph + 名称，按 maxW 对齐）+ 增量后缀
+// + 每 agent 一行。
+func (r *syncRun) printBlock(w io.Writer, header string, lines []*syncLine, maxW int) {
+	changed := false
+	for _, l := range lines {
+		if l.changed() {
+			changed = true
+			break
+		}
+	}
+	head := ui.GlyphOK + " " + header
+	if changed {
+		head = ui.Yellow(ui.GlyphChanged + " " + header)
+	} else {
+		head = ui.Green(head)
+	}
+	if suffix := blockDelta(lines); suffix != "" {
+		// 按最长标题补齐，增量对齐成一列（display 宽度按 rune 计）
+		if pad := maxW - utf8.RuneCountInString(header) - 2; pad > 0 {
+			head += strings.Repeat(" ", pad)
+		}
+		head += "  " + suffix
+	}
+	fmt.Fprintln(w, head)
+	for _, l := range lines {
+		line := fmt.Sprintf("  %-10s rules %s · skills %s", l.agentID, numOrDash(l.rules), numOrDash(l.skills))
+		if l.userLevel && len(l.dirs) > 0 {
+			// global 块的目录提示（暗色，~ 压缩，按 agent 根目录去重——
+			// ~/.codebuddy/rules 与 ~/.codebuddy/skills 合成 ~/.codebuddy）
+			line += "    " + ui.Dim(ui.TruncateJoin(agentRoots(l.dirs), 4))
+		}
+		fmt.Fprintln(w, line)
+	}
+	fmt.Fprintln(w)
+}
+
+// printTotals 打结尾总计：工作区/agent 数、rules 与 skills 的现有数与增减改、
+// 未初始化 agent 名单（只在这里出现一次）。
+func (r *syncRun) printTotals(w io.Writer) {
+	var rules, skills, ra, rd, ru, sa, sd, su int
+	seen := map[string]bool{}
+	for _, l := range r.lines {
+		if l.empty() {
+			continue
+		}
+		seen[l.agentID] = true
+		rules += l.rules
+		skills += l.skills
+		ra += l.rulesAdd
+		rd += l.rulesDel
+		ru += l.rulesUpd
+		sa += l.skillsAdd
+		sd += l.skillsDel
+		su += l.skillsUpd
+	}
+	fmt.Fprintln(w, ui.Bold(fmt.Sprintf("%s · %s initialized",
+		ui.Plural(len(r.wsList), "workspace"), ui.Plural(len(seen), "agent"))))
+	fmt.Fprintf(w, "rules %s · +%d added · −%d removed · %d updated\n", ui.Plural(rules, "file"), ra, rd, ru)
+	fmt.Fprintf(w, "skills %s · +%d added · −%d removed · %d updated\n", ui.Plural(skills, "file"), sa, sd, su)
+	// 未初始化 = 本轮没有任何落盘的 Tier-1 agent（点名但不打叉）
+	var uninit []string
+	for _, a := range targetAgents("") {
+		if !seen[a.ID] {
+			uninit = append(uninit, a.ID)
+		}
+	}
+	if len(uninit) > 0 {
+		fmt.Fprintf(w, "%s not initialized: %s — rulemux init --agent <id>\n",
+			ui.Dim(ui.GlyphSkip), strings.Join(uninit, ", "))
+	}
+}
+
+// blockDelta 汇总一个块内当轮的非零增量，如 "rules −6 · skills −1" / "rules ~1"。
+func blockDelta(lines []*syncLine) string {
+	var ra, rd, ru, sa, sd, su int
+	for _, l := range lines {
+		ra += l.rulesAdd
+		rd += l.rulesDel
+		ru += l.rulesUpd
+		sa += l.skillsAdd
+		sd += l.skillsDel
+		su += l.skillsUpd
+	}
+	var parts []string
+	if s := deltaPart("rules", ra, rd, ru); s != "" {
+		parts = append(parts, s)
+	}
+	if s := deltaPart("skills", sa, sd, su); s != "" {
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// deltaPart 拼 "rules +2 −3 ~1"（只列非零操作；全零返回空串）。
+func deltaPart(name string, add, del, upd int) string {
+	var ops []string
+	if add > 0 {
+		ops = append(ops, fmt.Sprintf("+%d", add))
+	}
+	if del > 0 {
+		ops = append(ops, fmt.Sprintf("−%d", del)) // U+2212 减号，与版式一致
+	}
+	if upd > 0 {
+		ops = append(ops, fmt.Sprintf("~%d", upd))
+	}
+	if len(ops) == 0 {
+		return ""
+	}
+	return name + " " + strings.Join(ops, " ")
+}
+
+// numOrDash 把 0 显示成 –（en-dash），非零原样——"rules – · skills 2" 比 "rules 0" 安静。
+func numOrDash(n int) string {
+	if n == 0 {
+		return "–"
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// agentRoots 把一组目录压缩成 agent 根目录（~ 形式，去重保序）：
+// ~/.codebuddy/rules 与 ~/.codebuddy/skills ⇒ ~/.codebuddy。
+// 非 ~ 开头的目录原样保留（去重）。
+func agentRoots(dirs []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		root := ui.HomeRel(d)
+		if strings.HasPrefix(root, "~/") {
+			if segs := strings.SplitN(root, "/", 3); len(segs) >= 2 {
+				root = segs[0] + "/" + segs[1] // ~/.codebuddy
+			}
+		}
+		if !seen[root] {
+			seen[root] = true
+			out = append(out, root)
+		}
+	}
+	return out
 }

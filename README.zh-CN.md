@@ -515,7 +515,7 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2：把规则输出到 stdout 供钩子注入 |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | 生成示例配置并安装 SessionStart 钩子 |
 | `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | **只刷新** rulemux 自己装过的钩子（升级后首次 `sync` 会自动做一次，这条用于手动强制）：不新增、不创建任何文件或目录、文件里其它条目与其它键一律原样保留 |
-| `rulemux doctor [--config <path>] [--workspace <dir>]` | 环境自检 |
+| `rulemux doctor [--config <path>] [--workspace <dir>]` | 环境自检：安装方式与路径、配置文件、哪些 agent 已初始化（TTY 自适应颜色） |
 | `rulemux verify --agent <id> [--clean] [--workspace <dir>]` | canary 验收 |
 | `rulemux uninstall --agent <id[,id...]> \| --off \| --all [--yes]` | 移除钩子与已投递文件 |
 

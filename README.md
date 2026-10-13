@@ -563,7 +563,7 @@ shown the list of workspaces before anything is deleted.
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2: print rules to stdout for hook injection |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | Write a sample config and install the SessionStart hook |
 | `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | Refresh **only** the hooks rulemux already installed. This also happens by itself on the first sync after an upgrade; use this to force it. Never adds a hook, never creates a file or directory, preserves every other entry and key in the host config |
-| `rulemux doctor [--config <path>] [--workspace <dir>]` | Environment self-check |
+| `rulemux doctor [--config <path>] [--workspace <dir>]` | Environment self-check: how/where rulemux is installed, config file, which agents are initialized (TTY-aware colours) |
 | `rulemux verify --agent <id> [--clean] [--workspace <dir>]` | Canary acceptance test |
 | `rulemux uninstall --agent <id[,id...]> \| --off \| --all [--yes]` | Remove hooks and delivered files |
 

@@ -63,6 +63,7 @@ OTHER:
 }
 
 func main() {
+	cmd.Version = version // main.version 是 -ldflags 注入的唯一真源，同步给 cmd 展示
 	args := os.Args[1:]
 	if len(args) == 0 {
 		usage()

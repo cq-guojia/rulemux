@@ -57,7 +57,7 @@
 **顺手同步 / 手动 `sync --all` / `sync` 未点名的目标**：**只能写已存在的目录** —— 可新增/修改/删除其中的文件，但**目录不存在就跳过，绝不创建**。
 
 **目录是否存在，只认 `os.Stat`，不认账本**（账本只回答"历史用过哪些 agent"，目录可能已被手工删除）。
-不存在 ⇒ 跳过 + stderr 一行日志（默认安静）。
+不存在 ⇒ 跳过 + 报告里该 agent 不出行（2026-10-13 起：整个工作区无落盘时出一行暗色「not initialized — no rule/skill dirs yet」）。
 
 ### ✅ 清空的正确姿势（v3 的"保守处置"已废弃）
 
@@ -142,7 +142,7 @@
 
 > **hook 绝不注入任何未经用户同意的内容**。⇒ 给人、给日志看的一律走 **stderr**；**stdout 只在「hook 路径 且 有变化」时输出恰好那一条用户已同意的提示**；**无变化 ⇒ stdout 为空**。
 
-- `printSyncResult`（`cmd/sync.go:143-163`）现**无条件**把人类文本打到 **stdout** ⇒ 全部改走 stderr，并重构为接收 `io.Writer` 以便单测。
+- 人类可读报告一律走 **stderr**（2026-10-13 输出重做，`syncRun.printSyncReport`）：**global（用户级）块在前、各工作区块随后**，每块 = 标题行（glyph + 路径，增量按最长标题对齐成一列）+ 每 agent 一行（只报 `rules N · skills M`，不出任何文件明细）；结尾总计（工作区/agent 数 + rules 与 skills 各自的 `+加 −删 ~改`）；未初始化 agent 只在总计点名一次（不打叉）；缺失源 / 写失败进警告区。颜色由 `internal/ui` 按 TTY 自适应（`NO_COLOR` / `TERM=dumb` / 非字符设备全量无色，glyph 独立承载语义）。
 - `--hook` 才允许写 stdout 协议；手动跑 `sync`/`--all` **绝不**吐协议。
 - `Missing` 告警保持 stderr，且**不抬退出码**（避免 host 因非零退出丢弃 stdout）。
 - 协议形态（**已实证**，2026-10-09）：stdout 输出 `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"…"}}`。

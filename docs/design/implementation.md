@@ -27,7 +27,7 @@
 - **结论**：**`rulemux`** 单二进制 + 子命令：
   - `rulemux sync`：主命令，被各 agent 的 SessionStart hook 调起，按配置把源文件复制进对应 agent 规则目录（带前缀 + 比对 + 删残留）。
   - `rulemux init`：生成示例 `config.toml` 并为已装 agent 安装 SessionStart hook（幂等）。
-  - `rulemux doctor`：环境自检（PATH、各 agent 是否装 hook、配置是否合法）。
+  - `rulemux doctor`：环境自检，四段式输出——安装方式与路径、配置文件、各 agent 初始化情况（未初始化的折叠一行点名，不打叉）、汇总与下一步（2026-10-13 输出重做）。
   - `rulemux verify`：canary 验收（第 13 条）。
 - **默认**：子命令集合如上；`init` 生成示例配置并装 hook。如需增减子命令再调。
 
@@ -166,7 +166,7 @@
 
 ### 14. 测试与冒烟 ✅ 已定（已完成）
 - **结论**：用 **Go 标准库 `go test`** + 一个 shell 冒烟脚本，不引第三方测试框架。
-- **单测**：`internal/config/config_test.go`（TOML 子集解析 / SourcesFor / Validate）、`internal/engine/sync_test.go`（前缀命名 / 同名去重 / 复制 / 跳过 / 覆盖 / 删残留 / 不碰用户文件 / 缺失源）。
+- **单测**：`internal/config/config_test.go`（TOML 解析 / SourcesFor / Validate）、`internal/engine/sync_test.go`（前缀命名 / 同名去重 / 复制 / 跳过 / 覆盖 / 删残留 / 不碰用户文件 / 缺失源）、`internal/ui/ui_test.go`（颜色开关 / 截断 / ~ 压缩）、`internal/cmd/doctor_test.go`（安装方式判定表驱动 / doctor 四段式结构）、`internal/cmd/sync_report_test.go`（聚合报告版式与幂等）。
 - **冒烟**：`scripts/smoke.sh` —— 端到端 10 项：init 装钩子 + 幂等、sync 落地三目录 + 幂等、不碰用户文件、源变更覆盖、删残留、inject、doctor、verify canary。
 - **实测结果**：Go 1.27.1 下 `go build` / `go vet` 全绿，`go test ./...` 通过，冒烟 10/10 通过。
 - **待定**：CI（GitHub Actions 交叉编译 + Release）。
