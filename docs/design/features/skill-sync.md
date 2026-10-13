@@ -33,8 +33,9 @@
 3. **共享目录**：工作区级 skills 与 rules 同规律——两家共用 `.codebuddy/skills`，同步按并集
    （`unionSkillIDs`），谁跑都不删别人的。用户级不共享且方向不对称 ⇒ 按品牌各写各的，
    双写重叠由宿主重名去重（无害）；卸载时两个目录都登记清理。
-4. **配置（`~/.rulemux/config.toml`）**：新增 `[[skill_source]]`（`path`/`agents`/`workspace`/`scope`，
-   v1 不支持 groups——shortcut：源是目录不是文件）；`[[source]]` 增加同一 `scope` 字段实现 S2 双域。
+4. **配置（`~/.rulemux/config.toml`）**：新增 `[[skill_source]]`（`path`/`agents`/`workspace`/`scope`
+   + 分组键 `groups`（引用新增的 `[[skill_group]]`）/ `workspace_groups`（复用 `[[workspace_group]]`，
+   2026-10-13 补齐，见 §六）；`[[source]]` 增加同一 `scope` 字段实现 S2 双域。
    查询分层：`SourcesFor(Any)` / `SkillSourcesFor(Any)` 只返 workspace 域，`UserSourcesFor(Any)` /
    `UserSkillSourcesForAny` 返 user 域（忽略 workspace 匹配）。`scope=user` 的条目让
    `DeclaresWorkspace` 恒真（全局目录本就与工作区无关）。
@@ -76,8 +77,28 @@
 **shortcut 清单**（已知限制，升级时机）：
 
 - skill 源**仅本地目录**；git/远程源 = v2（S3）。
-- `[[skill_source]]` 不支持 groups / workspace_groups = 需要分组时再扩（源布局用目录本身表达）。
 - skills 变化**不触发**「新开会话」提示 = 待 §四-4 热重载 canary 后按 per-agent 判据补。
 - 符号链接不同步（只同步真实文件）= 有需求再处理。
 - 用户级目录只在 hook 路径创建（被 `--agent` 点名时）；手动 sync / `--all` 只写已存在目录 = 与 rules 同一条铁律。
 - WorkBuddy 用户级落点（`~/.workbuddy/{rules,skills}`）为**代码级推断**，双写策略对两家均安全，装载待 Mac canary（§四-1）。
+
+## 六、skill 分组与配置语义定稿（2026-10-13 补齐）
+
+`[[skill_source]]` 原先不支持分组（原 §五 shortcut「源是目录不是文件」）；用户要求「skills 也要支持
+分组」，并借此把配置语义在 README 讲清。落地：
+
+- **新增 `[[skill_group]]`**：`name` / `path`（skill 根目录，单个或数组）/ `use`（嵌套其它 skill 组）——
+  与 `[[file_group]]` 同构，但装的是**目录**而非文件。
+- **`[[skill_source]]` 新增两个键**：`groups`（引用 `[[skill_group]]`）、`workspace_groups`
+  （引用现有 `[[workspace_group]]`，工作区在规则 / skill 间共用）。都可与自身 `path` / `workspace`
+  混写，按值去重（组展开在前、显式在后）。
+- **展开与校验复用文件组同一套**：`~` 先展开再展开组、环检测、未定义 / 重名 / 未命名报错
+  （`internal/config/config.go` 的 `SkillGroup` + `resolveGroups`）。
+- **配置语义定稿（用户 2026-10-13 拍板）**：域由**显式 `scope`** 决定（`workspace` 默认 / `user`），
+  `agents` 与 `workspace` 是**正交过滤器**。**不采用**「写了 `agents` 即 = 用户级通用」的隐式模型 ——
+  它会丢掉「只给某 agent、只在该工作区」的组合，且与 `[[source]]` 语义分叉。
+  （注意：`workspace = "*"` ≠ 全局；真·全局只有 `scope = "user"`。）
+- **落点**：`internal/config/config.go`（`SkillGroup` 结构 + 解析 + `resolveGroups` 展开）；
+  `internal/config/config_test.go`（组展开 / 工作数组 / `~` 展开 / 三类错误）；
+  `internal/cmd/init.go`（示例配置补 `[[skill_group]]` 与字段说明）；README 中英双份 §5.1 / §5.4 / §5.5
+  （§5.5 收录完整带注释的默认配置）。

@@ -690,3 +690,113 @@ workspace = ["/w/only"]
 		t.Fatal("声明过的工作区应判为已声明")
 	}
 }
+
+// TestSkillGroupExpand 校验 skill 组展开：嵌套引用把组内所有 skill 根目录合并进
+// SkillSource.Paths，且可同时混列自身 path（组在前、显式 path 在后）。
+func TestSkillGroupExpand(t *testing.T) {
+	c := writeCfg(t, `
+[[skill_group]]
+name = "base"
+path = ["/s/react", "/s/css"]
+
+[[skill_group]]
+name = "all"
+use = ["base"]
+path = ["/s/backend"]
+
+[[skill_source]]
+groups = ["all"]
+path = ["/s/extra"]
+agents = ["codebuddy"]
+`)
+	if len(c.SkillSources) != 1 {
+		t.Fatalf("期望 1 条 skill_source，实得 %d", len(c.SkillSources))
+	}
+	got := c.SkillSources[0].Paths
+	want := []string{"/s/react", "/s/css", "/s/backend", "/s/extra"}
+	if !equalSlice(got, want) {
+		t.Fatalf("展开后 Paths 应为 %v，实得 %v", want, got)
+	}
+}
+
+// TestSkillSourceWorkspaceGroups 校验 skill_source 可引用 [[workspace_group]] 展开工作区，
+// 且与自身显式 workspace 混合（组在前）。
+func TestSkillSourceWorkspaceGroups(t *testing.T) {
+	c := writeCfg(t, `
+[[workspace_group]]
+name = "dev"
+workspace = ["/proj/1", "/proj/2"]
+
+[[skill_source]]
+path = ["/s/skills"]
+workspace_groups = ["dev"]
+workspace = ["/standalone"]
+`)
+	got := c.SkillSources[0].Workspaces
+	want := []string{"/proj/1", "/proj/2", "/standalone"}
+	if !equalSlice(got, want) {
+		t.Fatalf("工作区展开后应为 %v，实得 %v", want, got)
+	}
+}
+
+// TestSkillGroupErrors 校验 skill 组三类错误：引用未定义 / 循环引用 / 同类重名。
+func TestSkillGroupErrors(t *testing.T) {
+	undefined := `[[skill_source]]
+groups = ["nope"]
+path = ["/s/a"]
+`
+	if _, err := Load(writeConfig(t, undefined)); err == nil {
+		t.Fatal("引用未定义 skill 组应报错")
+	}
+
+	cycle := `
+[[skill_group]]
+name = "A"
+use = ["B"]
+
+[[skill_group]]
+name = "B"
+use = ["A"]
+
+[[skill_source]]
+groups = ["A"]
+path = ["/s/a"]
+`
+	if _, err := Load(writeConfig(t, cycle)); err == nil {
+		t.Fatal("skill 组循环引用应报错")
+	}
+
+	dup := `
+[[skill_group]]
+name = "x"
+path = ["/s/a"]
+
+[[skill_group]]
+name = "x"
+path = ["/s/b"]
+
+[[skill_source]]
+groups = ["x"]
+`
+	if _, err := Load(writeConfig(t, dup)); err == nil {
+		t.Fatal("skill 组重名应报错")
+	}
+}
+
+// TestExpandHomes_SkillGroup 校验 skill_group.path 里的 "~" 在组展开前已被展开
+// （否则组内根目录会残留 ~ 而永远匹配不到）。
+func TestExpandHomes_SkillGroup(t *testing.T) {
+	home := tildeHome(t)
+	c := writeCfg(t, `[[skill_group]]
+name = "g"
+path = ["~/skills/a"]
+
+[[skill_source]]
+groups = ["g"]
+`)
+	got := c.SkillSources[0].Paths[0]
+	want := filepath.Join(home, "skills", "a")
+	if got != want {
+		t.Fatalf("skill_group.path 未展开: got %q, want %q", got, want)
+	}
+}

@@ -76,12 +76,15 @@ const exampleConfig = `# rulemux configuration file
 # the native skills dir — never by hook injection.
 #
 #   [[skill_source]] fields:
-#     path       Skill root directory(ies) — every child directory that contains a
-#                SKILL.md is one skill (a path that itself contains SKILL.md is
-#                treated as a single skill). Local paths only in this version.
-#     agents     Same as [[source]]: omitted = every supported agent.
-#     workspace  Same as [[source]] (workspace scope only; ignored when scope="user").
-#     scope      Same as [[source]]: "workspace" (default) or "user".
+#     path              Skill root directory(ies) — every child directory that contains a
+#                       SKILL.md is one skill (a path that itself contains SKILL.md is
+#                       treated as a single skill). Local paths only in this version.
+#     agents            Same as [[source]]: omitted = every supported agent.
+#     workspace         Same as [[source]] (workspace scope only; ignored when scope="user").
+#     groups            Reference [[skill_group]] bundles (same idea as [[source]].groups):
+#                       each group bundles several skill root directories.
+#     workspace_groups  Reference [[workspace_group]] bundles (workspaces are shared with rules).
+#     scope             Same as [[source]]: "workspace" (default) or "user".
 #
 #   Where they land (2026-10-12, verified against the CodeBuddy bundle):
 #     workspace scope → <ws>/.codebuddy/skills   (shared by codebuddy + workbuddy)
@@ -161,6 +164,16 @@ const exampleConfig = `# rulemux configuration file
 # path = ["/abs/path/to/global-skills"]
 # scope = "user"                       # user-level (global): lands in ~/.codebuddy/skills
 #                                       # and ~/.workbuddy/skills, in every workspace
+
+# [[skill_group]]                      # bundle skill roots so several sources can reuse them
+# name = "frontend"
+# path = ["/abs/path/to/react-skills", "/abs/path/to/css-skills"]
+# # use = ["base"]                     # nest another skill group (list, may be multiple)
+
+# [[skill_source]]
+# groups = ["frontend"]                # reuse the bundle instead of repeating its paths
+# agents = ["codebuddy"]
+# scope = "user"
 `
 
 // Init 有两个模式：

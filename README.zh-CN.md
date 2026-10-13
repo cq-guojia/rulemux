@@ -221,6 +221,7 @@ rulemux uninstall --agent codebuddy   # 卸载（--yes 跳过确认）
 | `path` | 源文件，磁盘任意位置；单个值或数组。数组内文件共享下面的 `agents` / `workspace` |
 | `agents` | 投递给哪些 agent；省略 = 全部已支持的 agent |
 | `workspace` | 适用哪些工作区；省略 / `"*"` / `"**"` / `"all"` = 所有工作区；单个值、数组或 glob |
+| `scope` | 落到哪个域：`"workspace"`（默认）= 各工作区的 agent 目录；`"user"` = 该 agent 的**用户级（全局）**目录，所有工作区共享。`scope = "user"` 时 `workspace` 被忽略 |
 
 glob 沿用业界惯例：`*` 匹配单个路径段，`**` 跨段递归且可出现在中间 ——
 例如 `workspace = "/abs/**/B"` 匹配任意深度下名为 `B` 的目录。
@@ -232,6 +233,7 @@ agents = ["codebuddy"]              # 省略则投递给全部已支持 agent
 # workspace 省略 => 所有工作区
 # workspace = ["/path/to/proj-a", "/path/to/proj-b"]
 # workspace = "/abs/**/B"           # glob：任意深度、名为 B
+# scope = "user"                    # 改投到该 agent 的用户级（全局）目录
 ```
 
 ### 5.2 用「组」打包（可选）
@@ -302,12 +304,23 @@ skill 是**目录**（`SKILL.md` + 可选的 `references/` / `scripts/`），宿
 path = ["~/my-skills"]              # skill 根目录：每个含 SKILL.md 的子目录就是一个 skill
 agents = ["codebuddy"]              # 省略 = 全部支持的 agent
 workspace = "*"                     # 省略 = 全部工作区（仅 workspace 域生效）
+# groups = ["frontend"]             # 改用 [[skill_group]] 组，省得重复写 path
+# workspace_groups = ["dev"]        # 引用 [[workspace_group]] 组（与规则共用）
 
 [[skill_source]]
-path = ["~/global-skills"]
+groups = ["frontend"]               # 把多个 skill 根目录打包成一个名字来引用
+agents = ["codebuddy"]
 scope = "user"                      # 用户级（全局）：与工作区无关，每个工作区都生效
+
+[[skill_group]]                     # 打包 skill 根目录，供多条 [[skill_source]] 复用
+name = "frontend"
+path = ["~/react-skills", "~/css-skills"]
+# use = ["base"]                    # 嵌套引用另一个 skill 组（数组，可多个）
 ```
 
+- **skill 源字段与规则一致**：`path`、`agents`、`workspace`、`scope`，外加两个打包键
+  `groups`（引用 `[[skill_group]]`）与 `workspace_groups`（引用 `[[workspace_group]]`）。
+  `[[skill_group]]` 打包多个 skill 根目录（`name` / `path` / `use`），嵌套与成环检测与文件组完全相同。
 - **落到哪**（仅 codebuddy / workbuddy）：工作区级 → `<工作区>/.codebuddy/skills/`（两家共享）；
   用户级 → `~/.codebuddy/skills/` **和** `~/.workbuddy/skills/`（都写，两家才都看得到）。
   规则侧同理：`[[source]]` 也支持 `scope = "user"`，落到 `~/.codebuddy/rules/` + `~/.workbuddy/rules/`。
@@ -316,6 +329,164 @@ scope = "user"                      # 用户级（全局）：与工作区无关
 - **第一版只支持本地目录源**；远程 / git 源（跟进上游更新）在后续版本。
 - trae / dsh / claude / codex / opencode 的 skills 暂不支持（它们的 skills 目录尚未实测坐实）。
 - skill 的增改**不会**触发「请新开会话」提示（是否热重载待实测）；规则的提示行为不变。
+
+### 5.5 完整的默认配置（带注释）
+
+`rulemux init` 首次运行会把这份文件写到 `~/.rulemux/config.toml`。**全部是注释掉的** —— 在你取消
+注释、或加入自己带真实路径的配置之前，什么都不会同步。这里与生成的文件一一对应地列出，方便你在
+动手改自己的那份之前先通读一遍。
+
+```toml
+# rulemux 配置文件
+#
+# 默认位置：~/.rulemux/config.toml（任何命令都可用 --config <path> 指定别的路径）
+#
+# 每次 agent 会话开始时，rulemux 会把下面每条 [[source]] 描述的「源规则文件」拷贝进该
+# agent 的原生规则目录，文件名带 __rulemux__ 前缀：它只清理自己的残留，绝不碰你自己的文件。
+#
+# 每条 [[source]] 接受以下字段（都可选，各有默认值）：
+#
+#   path      源文件，可放在磁盘任意位置。两种写法都行：
+#               path = "/abs/path/to/your-rules.md"          # 单个文件
+#               path = ["/abs/path/a.md", "/abs/path/b.md"]  # 数组（共享下面的 agents/workspace）
+#             开头的 "~" 或 "~/" 会展开成你的用户目录，因此同一份配置
+#             在每台机器上都可用，不必硬编码用户名：
+#               path = "~/Agent.Workspace/00.RULES/base.md"
+#
+#   agents    这批规则投给哪些 agent；省略 = 全部「已支持」的 agent。
+#             当前已验证（可安装）的取值：
+#               workbuddy   Tier-1（自有目录 .workbuddy/rules；自有钩子 ~/.workbuddy/settings.json）—— WorkBuddy 用这个
+#               codebuddy   Tier-1（.codebuddy/rules；~/.codebuddy/settings.json）
+#               trae        Tier-1（.trae/rules；CN ~/.trae-cn/hooks.json，国际版 ~/.trae）—— 2026-10-09 验证
+#             它们是各自独立的 agent，各有自己的配置目录与钩子文件；
+#             你实际用哪个就装哪个（也可都装）。rulemux 会记住你选的名字，之后每次刷新都沿用。
+#             其它 agent（claude / codex / opencode）尚未通过 canary 验证，暂时不能安装或指定；
+#             等它们的适配器被证明后会自动开放 —— 这里无需改动。
+#             示例：agents = ["workbuddy", "trae"]
+#
+#   workspace 这些规则适用于哪些工作区。写法：
+#               workspace = "/abs/path/to/proj"          # 单个工作区（精确匹配）
+#               workspace = ["/abs/path/proj-a", "/b"]   # 数组：命中任一个即可
+#               workspace = "*"  /  "**"  /  "all"       # 所有工作区（全局通配）
+#             支持标准 glob："*" 匹配单段，"**" 跨段递归且可出现在中间，如：
+#               workspace = "/abs/**/B"                 # /abs 下任意深度、名为 B
+#               workspace = "**/B"                      # 任意位置或层级的 B
+#             这里的开头 "~" / "~/" 同样展开成用户目录，且与 glob 兼容：
+#               workspace = "~/Agent.Workspace/*"
+#
+#   scope     这批规则落到哪（可选，默认 "workspace"）：
+#               scope = "workspace"  # 各工作区的 agent 目录（如 <ws>/.codebuddy/rules）
+#               scope = "user"       # 该 agent 的「用户级（全局）」目录，所有工作区共享 ——
+#                                   # 例如 CodeBuddy 家族的 ~/.codebuddy/rules 与
+#                                   # ~/.workbuddy/rules（两个都写，两家应用才都看得到）；
+#                                   # 用户级条目忽略 workspace 匹配：全局规则本就与工作区无关。
+#
+# --- Skills（[[skill_source]]）----------------------------------------------------
+# 除了规则文件，rulemux 还能把 SKILL 目录同步进各 agent 的原生 skills 目录。一个 skill 是一个
+# 「目录」（含 SKILL.md，外加可选的 references/scripts）；宿主按渐进式披露加载
+# （会话开始只载 name+description，按需才读全文），所以它只能靠真实拷贝进原生 skills 目录送达
+# —— 不能靠钩子注入。
+#
+#   [[skill_source]] 字段：
+#     path              skill 根目录（单个或多个）—— 其下每个含 SKILL.md 的子目录算一个 skill
+#                       （若根本身含 SKILL.md，则根本身也算一个 skill）。本版仅本地路径。
+#     agents            同 [[source]]：省略 = 全部已支持 agent。
+#     workspace         同 [[source]]（仅 workspace 域生效；scope="user" 时忽略）。
+#     groups            引用 [[skill_group]] 组（与 [[source]].groups 同义）：
+#                       每个组打包多个 skill 根目录。
+#     workspace_groups  引用 [[workspace_group]] 组（工作区在规则与 skill 间共用）。
+#     scope             同 [[source]]："workspace"（默认）或 "user"。
+#
+#   落到哪（2026-10-12，对照 CodeBuddy bundle 核实）：
+#     workspace 域 → <ws>/.codebuddy/skills   （codebuddy + workbuddy 共享）
+#     user 域      → ~/.codebuddy/skills 与 ~/.workbuddy/skills（两个都写）
+#   skill 以 __rulemux__<skill名>/ 目录落地；你自己的 skill 一律不碰，
+#   删掉源则下次同步移除其副本。
+#   其它 agent（trae / dsh / claude / codex / opencode）暂不支持 skill。
+#
+# --- 进阶：用「组」打包，避免重复 -------------------------------------------------
+# 文件多了以后，把常用文件 / 工作区打包成组，在 [[source]] 里按名引用。
+#
+# 文件组 [[file_group]]：打包规则文件，通过 groups 引用。
+#   name  组名（必填）
+#   path  组内文件；单个值或数组
+#   use   引用其它文件组 —— [数组，可多个，可嵌套]：
+#           use = ["dev"]            # 一个组
+#           use = ["dev", "qa"]      # 多个：一次全部复用
+#           # A 组引入 B 组再加自己的文件 => A == B 的文件 + A 的文件
+#
+# 工作区分组 [[workspace_group]]：打包工作区，通过 workspace_groups 引用。
+#   name       组名（必填）
+#   workspace  组内工作区；单个值或数组，允许 glob
+#   use        引用其它工作区分组 —— [数组，可多个，可嵌套]：
+#           use = ["dev"]            # 一个组
+#           use = ["dev", "qa"]      # 多个：一次全部复用
+#
+# skill 组 [[skill_group]]：打包 skill 根目录，通过 [[skill_source]] 的 groups 引用。
+#   name  组名（必填）
+#   path  组内 skill 根目录；单个值或数组
+#   use   引用其它 skill 组 —— [数组，可多个，可嵌套]
+#
+# 在 [[source]] 里：
+#   groups            = ["gA", "gB"]     # 文件组（数组，可多个；展开成它们的文件）
+#   workspace_groups  = ["gX", "gY"]     # 工作区分组（数组，可多个）
+#   [允许混写] groups 可与 path 并存，workspace_groups 可与 workspace 并存：
+#       groups = ["base", "proj"]            # 用 base 与 proj 两个组的全部文件
+#       path   = ["/abs/path/extra.md"]      # ……再加这一个文件
+#     => 这条 source 投递 base 的文件 + proj 的文件 + extra.md，按值去重。
+#   （workspace_groups / workspace 同理：既引用组、又列一个单独的工作区。）
+#   组间重复无害 —— 最后按值去重，每个文件只处理一次。
+#   文件组与工作区分组是两套独立命名空间，允许同名。
+#
+# 下面全部注释掉、不生效。按需取消注释，把占位符换成你的真实值。
+
+# [[file_group]]
+# name = "base"
+# path = ["/abs/path/to/team-conventions.md", "/abs/path/to/style.md"]
+
+# [[file_group]]
+# name = "proj"
+# use = ["base"]                       # 嵌套 base 组（数组，可多个：use = ["base", "dev"]）
+# path = ["/abs/path/to/project-a.md"]
+
+# [[workspace_group]]
+# name = "dev"
+# workspace = ["/abs/path/to/proj-1", "/abs/path/to/proj-2"]
+
+# [[workspace_group]]
+# name = "qa"
+# use = ["dev"]                        # 复用 dev 组（数组，可多个）
+# workspace = ["/abs/path/to/proj-3"]
+
+# [[source]]
+# groups = ["base", "proj"]            # 文件组（数组，可多个；展开成它们的文件）
+# path = ["/abs/path/to/extra.md"]     # 再加一个单独文件：这条 = base + proj + 此文件
+# agents = ["codebuddy"]
+# workspace_groups = ["dev"]          # 工作区分组（数组，可多个；展开成它们的工作区）
+# workspace = ["/abs/path/to/standalone"]   # 再加一个单独工作区
+
+# --- skill 示例（字段与规则相同，但源是一个「skill 目录」）------------------------
+
+# [[skill_source]]
+# path = ["/abs/path/to/my-skills"]    # 每个含 SKILL.md 的子目录就是一个 skill
+# agents = ["codebuddy", "workbuddy"]  # 省略 = 全部已支持 agent
+# workspace = "*"                      # 所有工作区（省略即默认）
+
+# [[skill_source]]
+# path = ["/abs/path/to/global-skills"]
+# scope = "user"                       # 用户级（全局）：落到 ~/.codebuddy/skills
+#                                       # 与 ~/.workbuddy/skills，每个工作区都生效
+
+# [[skill_group]]                      # 打包 skill 根目录，供多条 source 复用
+# name = "frontend"
+# path = ["/abs/path/to/react-skills", "/abs/path/to/css-skills"]
+# # use = ["base"]                     # 嵌套另一个 skill 组（数组，可多个）
+
+# [[skill_source]]
+# groups = ["frontend"]                # 复用该组，省得重复写 path
+# agents = ["codebuddy"]
+# scope = "user"
+```
 
 ---
 

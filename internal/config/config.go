@@ -69,6 +69,12 @@ type SkillSource struct {
 	Agents []string
 	// Workspaces 适用工作区（仅 workspace 域生效；user 域忽略）。
 	Workspaces []string
+	// Groups 引用哪些 skill 组（按 [[skill_group]].name），解析阶段展开成具体
+	// skill 根目录并入 Paths —— 与 [[source]].Groups 同构，只是装的是目录。
+	Groups []string
+	// WorkspaceGroups 引用哪些工作区分组（按 [[workspace_group]].name），解析阶段
+	// 展开成具体路径并入 Workspaces（工作区在两个载体间共用，不分规则 / skill）。
+	WorkspaceGroups []string
 	// Scope 投放域："" / "workspace"（默认）| "user"。
 	Scope string
 }
@@ -92,12 +98,21 @@ type WorkspaceGroup struct {
 	Uses       []string // 引用的其它 workspace_group 名称（可多个，支持嵌套）
 }
 
+// SkillGroup 是配置中的一个“skill 组”，把若干 skill 根目录打包，供 [[skill_source]] 用 groups 引用。
+// 与 FileGroup 同构，但装的是“目录”（skill 根）而非文件：展开后并入 SkillSource.Paths。
+type SkillGroup struct {
+	Name  string   // 组名，供 groups 按名引用
+	Paths []string // 组内 skill 根目录；单个或数组写法均可
+	Uses  []string // 引用的其它 skill_group 名称（可多个，支持嵌套）
+}
+
 // Config 是 rulemux 的完整配置。
 type Config struct {
 	Sources         []Source
 	SkillSources    []SkillSource
 	FileGroups      []FileGroup
 	WorkspaceGroups []WorkspaceGroup
+	SkillGroups     []SkillGroup
 	// File 是本次实际读取的配置文件路径。
 	File string
 }
@@ -129,9 +144,10 @@ func Load(path string) (*Config, error) {
 		curSkillSource
 		curFileGroup
 		curWSGroup
+		curSkillGroup
 	)
 	cur := curNone
-	srcIdx, skillIdx, fgIdx, wgIdx := -1, -1, -1, -1
+	srcIdx, skillIdx, fgIdx, wgIdx, sgIdx := -1, -1, -1, -1, -1
 
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -159,6 +175,10 @@ func Load(path string) (*Config, error) {
 				c.WorkspaceGroups = append(c.WorkspaceGroups, WorkspaceGroup{})
 				wgIdx = len(c.WorkspaceGroups) - 1
 				cur = curWSGroup
+			case "skill_group":
+				c.SkillGroups = append(c.SkillGroups, SkillGroup{})
+				sgIdx = len(c.SkillGroups) - 1
+				cur = curSkillGroup
 			default:
 				cur = curNone
 			}
@@ -195,8 +215,8 @@ func Load(path string) (*Config, error) {
 				c.Sources[srcIdx].Scope = normalizeScope(unquote(val))
 			}
 		case curSkillSource:
-			// v1 不支持 groups：skill 源是目录不是文件，没有「文件组」可引用
-			//（shortcut：源布局用目录本身表达，见 SkillSource 注释）。
+			// groups / workspace_groups 与 [[source]] 同义：分别是 [[skill_group]] /
+			// [[workspace_group]] 的按名引用，解析阶段展开进 Paths / Workspaces。
 			switch key {
 			case "path":
 				c.SkillSources[skillIdx].Paths = parsePaths(val)
@@ -204,6 +224,10 @@ func Load(path string) (*Config, error) {
 				c.SkillSources[skillIdx].Agents = parseArray(val)
 			case "workspace":
 				c.SkillSources[skillIdx].Workspaces = parsePaths(val)
+			case "groups":
+				c.SkillSources[skillIdx].Groups = parseArray(val)
+			case "workspace_groups":
+				c.SkillSources[skillIdx].WorkspaceGroups = parseArray(val)
 			case "scope":
 				c.SkillSources[skillIdx].Scope = normalizeScope(unquote(val))
 			}
@@ -224,6 +248,15 @@ func Load(path string) (*Config, error) {
 				c.WorkspaceGroups[wgIdx].Workspaces = parsePaths(val)
 			case "use":
 				c.WorkspaceGroups[wgIdx].Uses = parseArray(val)
+			}
+		case curSkillGroup:
+			switch key {
+			case "name":
+				c.SkillGroups[sgIdx].Name = unquote(val)
+			case "path":
+				c.SkillGroups[sgIdx].Paths = parsePaths(val)
+			case "use":
+				c.SkillGroups[sgIdx].Uses = parseArray(val)
 			}
 		}
 	}
@@ -246,8 +279,8 @@ func Load(path string) (*Config, error) {
 // expandHomes 把配置里所有路径值中的 "~" / "~/" 展开为当前用户的 HOME，
 // 使同一份配置能跨机器、跨用户复用（不必硬编码 /Users/xxx 这类前缀）。
 //
-// 覆盖五处：Source.Paths、Source.Workspaces、FileGroup.Paths、WorkspaceGroup.Workspaces、
-// SkillSource.Paths、SkillSource.Workspaces。
+// 覆盖七处：Source.Paths、Source.Workspaces、SkillSource.Paths、SkillSource.Workspaces、
+// FileGroup.Paths、WorkspaceGroup.Workspaces、SkillGroup.Paths。
 // 含 glob 的值（如 "~/proj/*"）同样先展开再匹配，单段 "*" / 跨段 "**" 的语义不变。
 //
 // 展开逻辑复用 agents.ExpandHome（全项目 "~" 展开的单一真源），此处不做第二份实现；
@@ -266,6 +299,9 @@ func (c *Config) expandHomes() {
 	}
 	for i := range c.WorkspaceGroups {
 		c.WorkspaceGroups[i].Workspaces = expandHomesAll(c.WorkspaceGroups[i].Workspaces)
+	}
+	for i := range c.SkillGroups {
+		c.SkillGroups[i].Paths = expandHomesAll(c.SkillGroups[i].Paths)
 	}
 }
 
@@ -303,7 +339,7 @@ func (c *Config) SourcesFor(agentID, workspace string) []Source {
 }
 
 // SourcesForAny 返回在指定工作区下、应投递给 agentIDs 中**任一** agent 的源规则的**并集**
-//（**仅 workspace 域**）。
+// （**仅 workspace 域**）。
 //
 // 与 SourcesFor 的差别只在 agent 那一维：命中任一 id 即收录（agents 为空视为命中全部），
 // 且每条 source 只收录一次、保持 c.Sources 原序 —— 所以对共享规则目录的多个 agent
@@ -659,9 +695,9 @@ func containsFold(list []string, v string) bool {
 	return false
 }
 
-// resolveGroups 把配置中的“组”引用展开成具体的文件 / 工作区，
-// 并写回每条 Source 的 Paths / Workspaces。展开过程做环检测与按源路径去重，
-// 因此组间重复文件最终只出现一次（满足“每个文件只做一次”）。
+// resolveGroups 把配置中的“组”引用展开成具体的文件 / 工作区 / skill 根目录，
+// 并写回每条 Source / SkillSource 的 Paths / Workspaces。展开过程做环检测与按值去重，
+// 因此组间重复项最终只出现一次（满足“每个条目只处理一次”）。
 func (c *Config) resolveGroups() error {
 	fgMap := make(map[string]*FileGroup, len(c.FileGroups))
 	for i := range c.FileGroups {
@@ -684,6 +720,17 @@ func (c *Config) resolveGroups() error {
 			return fmt.Errorf("config %s: duplicate [[workspace_group]] name %q", c.File, g.Name)
 		}
 		wgMap[g.Name] = g
+	}
+	sgMap := make(map[string]*SkillGroup, len(c.SkillGroups))
+	for i := range c.SkillGroups {
+		g := &c.SkillGroups[i]
+		if g.Name == "" {
+			return fmt.Errorf("config %s has an unnamed [[skill_group]]", c.File)
+		}
+		if _, dup := sgMap[g.Name]; dup {
+			return fmt.Errorf("config %s: duplicate [[skill_group]] name %q", c.File, g.Name)
+		}
+		sgMap[g.Name] = g
 	}
 
 	// 递归展开文件组，visiting 用于环检测。
@@ -728,6 +775,27 @@ func (c *Config) resolveGroups() error {
 		return nil
 	}
 
+	// 递归展开 skill 组（与文件组同构：嵌套 + 环检测；值是 skill 根目录）。
+	var expandSG func(name string, visiting map[string]bool, out *[]string) error
+	expandSG = func(name string, visiting map[string]bool, out *[]string) error {
+		g, ok := sgMap[name]
+		if !ok {
+			return fmt.Errorf("config %s references undefined skill group %q", c.File, name)
+		}
+		if visiting[name] {
+			return fmt.Errorf("config %s has a circular reference in skill groups: %s", c.File, name)
+		}
+		visiting[name] = true
+		defer delete(visiting, name)
+		for _, u := range g.Uses {
+			if err := expandSG(u, visiting, out); err != nil {
+				return err
+			}
+		}
+		appendUnique(out, g.Paths)
+		return nil
+	}
+
 	for i := range c.Sources {
 		s := &c.Sources[i]
 		var files []string
@@ -746,6 +814,26 @@ func (c *Config) resolveGroups() error {
 			}
 		}
 		// 工作区分组展开在前，source 自身显式 workspace 在后。
+		s.Workspaces = mergeUnique(wss, s.Workspaces)
+	}
+
+	for i := range c.SkillSources {
+		s := &c.SkillSources[i]
+		var roots []string
+		for _, gname := range s.Groups {
+			if err := expandSG(gname, map[string]bool{}, &roots); err != nil {
+				return err
+			}
+		}
+		// skill 组展开的根在前，skill_source 自身显式 path 在后（同 [[source]] 口径）。
+		s.Paths = mergeUnique(roots, s.Paths)
+
+		var wss []string
+		for _, gname := range s.WorkspaceGroups {
+			if err := expandWG(gname, map[string]bool{}, &wss); err != nil {
+				return err
+			}
+		}
 		s.Workspaces = mergeUnique(wss, s.Workspaces)
 	}
 	return nil

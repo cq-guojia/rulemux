@@ -158,8 +158,8 @@ var registry = []Agent{
 		SkillsDir:      ".codebuddy/skills",
 		UserSkillsDirs: []string{"~/.codebuddy/skills", "~/.workbuddy/skills"},
 		UserRulesDirs:  []string{"~/.codebuddy/rules", "~/.workbuddy/rules"},
-		HookFile: "~/.workbuddy/settings.json",
-		HookAbs:  true,
+		HookFile:       "~/.workbuddy/settings.json",
+		HookAbs:        true,
 		// WORKBUDDY_CONFIG_DIR 仅出现在 safe-delete 日志白名单（见 external/agent-rules-dirs.md §五），
 		// 未坐实是配置目录 ⇒ 不采用；本机 env 实测该变量为空，按 ~/.workbuddy 是稳的。
 		HookDirEnv:       "",

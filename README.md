@@ -247,6 +247,7 @@ Config file: `~/.rulemux/config.toml` (override with `--config <path>` on any co
 | `path` | Source file(s), anywhere on disk. Single value or a list. A list shares the `agents`/`workspace` below. |
 | `agents` | Which agents receive this batch. Omitted = all supported agents. |
 | `workspace` | Which workspaces these rules apply to. Omitted / `"*"` / `"**"` / `"all"` = every workspace. Single value, a list, or a glob. |
+| `scope` | Where the batch lands: `"workspace"` (default) = each workspace's agent dir; `"user"` = the agent's **user-level (global)** dir, shared by every workspace. With `scope = "user"`, `workspace` is ignored. |
 
 Globbing follows the usual rules: `*` is one path segment, `**` spans segments and may appear in
 the middle — e.g. `workspace = "/abs/**/B"` matches a directory named `B` at any depth.
@@ -258,6 +259,7 @@ agents = ["codebuddy"]              # omit to target every supported agent
 # workspace is omitted => every workspace
 # workspace = ["/path/to/proj-a", "/path/to/proj-b"]
 # workspace = "/abs/**/B"           # glob: any depth, named B
+# scope = "user"                    # land in the agent's user-level (global) dir instead
 ```
 
 ### 5.2 Bundling with "groups" (optional)
@@ -334,12 +336,24 @@ injection. Add `[[skill_source]]` to `~/.rulemux/config.toml`:
 path = ["~/my-skills"]              # skill root: every child dir containing SKILL.md is one skill
 agents = ["codebuddy"]              # omitted = every supported agent
 workspace = "*"                     # omitted = every workspace (workspace scope only)
+# groups = ["frontend"]             # reuse a [[skill_group]] bundle instead of repeating path
+# workspace_groups = ["dev"]        # reference a [[workspace_group]] bundle (shared with rules)
 
 [[skill_source]]
-path = ["~/global-skills"]
+groups = ["frontend"]               # bundle several skill roots under one name
+agents = ["codebuddy"]
 scope = "user"                      # user-level (global): workspace-independent, every workspace
+
+[[skill_group]]                     # bundle skill roots so several sources can reuse them
+name = "frontend"
+path = ["~/react-skills", "~/css-skills"]
+# use = ["base"]                    # nest another skill group (list, may be multiple)
 ```
 
+- **Skill sources take the same fields as rules**: `path`, `agents`, `workspace`, `scope`, plus the
+  bundling keys `groups` (→ `[[skill_group]]`) and `workspace_groups` (→ `[[workspace_group]]`).
+  `[[skill_group]]` bundles several skill root directories (`name` / `path` / `use`); nesting and
+  cycle detection work exactly like file groups.
 - **Where they land (codebuddy / workbuddy only)**: workspace scope → `<workspace>/.codebuddy/skills/`
   (shared by both apps); user scope → `~/.codebuddy/skills/` **and** `~/.workbuddy/skills/`
   (both written, so both apps see it). Rules work the same way: `[[source]]` also accepts
@@ -351,6 +365,176 @@ scope = "user"                      # user-level (global): workspace-independent
 - trae / dsh / claude / codex / opencode do not take skills yet.
 - Skill add/change does **not** trigger the "start a new session" notice (hot-reload is still
   being verified); rule behaviour is unchanged.
+
+### 5.5 The complete default config (annotated)
+
+`rulemux init` writes this file to `~/.rulemux/config.toml` on first run. **Everything is commented
+out** — nothing is synced until you uncomment an example or add your own with real paths. It is
+reproduced here one-to-one so you can read the whole thing before editing your copy.
+
+```toml
+# rulemux configuration file
+#
+# Default location: ~/.rulemux/config.toml (or pass --config <path> to any command)
+#
+# At the start of every agent session, rulemux copies the "source rule files" described
+# by each [[source]] below into that agent's native rules directory, using a __rulemux__
+# prefix: it cleans up its own residue and never touches your own files.
+#
+# Each [[source]] accepts these fields (all optional, each has a default):
+#
+#   path      Source file(s); may live anywhere on disk. Both forms work:
+#               path = "/abs/path/to/your-rules.md"          # a single file
+#               path = ["/abs/path/a.md", "/abs/path/b.md"]  # a list (shares agents/workspace below)
+#             A leading "~" or "~/" is expanded to your home directory, so the same
+#             config works on every machine without hardcoding a username:
+#               path = "~/Agent.Workspace/00.RULES/base.md"
+#
+#   agents    Which agents receive this batch; omitted = every *supported* agent.
+#             Current verified values (installable):
+#               workbuddy   Tier-1 (own dir .workbuddy/rules; own hook ~/.workbuddy/settings.json) — use this for WorkBuddy
+#               codebuddy   Tier-1 (.codebuddy/rules; ~/.codebuddy/settings.json)
+#               trae        Tier-1 (.trae/rules; CN ~/.trae-cn/hooks.json, intl ~/.trae) — verified 2026-10-09
+#             These are SEPARATE agents, each with its own config dir and hook file;
+#             install whichever you actually use (or all). rulemux remembers the name
+#             you chose and keeps it on every later refresh.
+#             Other agents (claude / codex / opencode) have not passed canary
+#             verification yet, so they cannot be installed or targeted for now;
+#             once their adapters are proven they open up automatically — no edit needed here.
+#             Example: agents = ["workbuddy", "trae"]
+#
+#   workspace Which workspaces these rules apply to. Forms:
+#               workspace = "/abs/path/to/proj"          # single workspace (exact match)
+#               workspace = ["/abs/path/proj-a", "/b"]   # list: matching any one is enough
+#               workspace = "*"  /  "**"  /  "all"       # every workspace (global wildcard)
+#             Standard globbing is supported: "*" is one segment, "**" recurses across
+#             segments and may appear in the middle, e.g.:
+#               workspace = "/abs/**/B"                 # any depth under /abs named B
+#               workspace = "**/B"                      # B at any location or nesting level
+#             A leading "~" / "~/" is expanded to your home directory here as well,
+#             and still works with globs:
+#               workspace = "~/Agent.Workspace/*"
+#
+#   scope     Where this batch lands (optional, default "workspace"):
+#               scope = "workspace"  # each workspace's agent dir (e.g. <ws>/.codebuddy/rules)
+#               scope = "user"       # the agent's USER-LEVEL (global) dir, shared by every
+#                                   # workspace — e.g. ~/.codebuddy/rules and ~/.workbuddy/rules
+#                                   # for the CodeBuddy family (both are written so both apps
+#                                   # see it). Ignored for workspace matching: a global rule
+#                                   # is global by definition.
+#
+# --- Skills ([[skill_source]]) ---------------------------------------------------
+# Besides rule files, rulemux can sync SKILL directories into the agents' native
+# skills directories. A skill is a DIRECTORY containing SKILL.md (plus optional
+# references/scripts); it is loaded progressively (name+description at session
+# start, full text on demand), so it can only be delivered by a real copy into
+# the native skills dir — never by hook injection.
+#
+#   [[skill_source]] fields:
+#     path              Skill root directory(ies) — every child directory that contains a
+#                       SKILL.md is one skill (a path that itself contains SKILL.md is
+#                       treated as a single skill). Local paths only in this version.
+#     agents            Same as [[source]]: omitted = every supported agent.
+#     workspace         Same as [[source]] (workspace scope only; ignored when scope="user").
+#     groups            Reference [[skill_group]] bundles (same idea as [[source]].groups):
+#                       each group bundles several skill root directories.
+#     workspace_groups  Reference [[workspace_group]] bundles (workspaces are shared with rules).
+#     scope             Same as [[source]]: "workspace" (default) or "user".
+#
+#   Where they land (2026-10-12, verified against the CodeBuddy bundle):
+#     workspace scope → <ws>/.codebuddy/skills   (shared by codebuddy + workbuddy)
+#     user scope      → ~/.codebuddy/skills AND ~/.workbuddy/skills (both written)
+#   Skills land as __rulemux__<skill-name>/ directories; your own skills are never
+#   touched, and removing a source removes its copies on the next sync.
+#   Other agents (trae / dsh / claude / codex / opencode) do not take skills yet.
+#
+# --- Advanced: bundle things into "groups" to avoid repetition -------------------
+# Once you have many files, bundle your common files / workspaces into groups and
+# reference them by name from [[source]].
+#
+# File group [[file_group]]: bundles rule files, referenced via groups.
+#   name  Group name (required)
+#   path  Files inside the group; single value or list
+#   use   Reference other file groups -- [LIST, MAY BE MULTIPLE, NESTS]:
+#           use = ["dev"]            # one group
+#           use = ["dev", "qa"]      # several: reuse all of them at once
+#           # group A pulls in group B plus its own files => A == B's files + A's files
+#
+# Workspace group [[workspace_group]]: bundles workspaces, referenced via workspace_groups.
+#   name       Group name (required)
+#   workspace  Workspaces inside the group; single value or list, globs allowed
+#   use        Reference other workspace groups -- [LIST, MAY BE MULTIPLE, NESTS]:
+#           use = ["dev"]            # one group
+#           use = ["dev", "qa"]      # several: reuse all of them at once
+#
+# Skill group [[skill_group]]: bundles skill roots, referenced via groups on [[skill_source]].
+#   name  Group name (required)
+#   path  Skill root directories inside the group; single value or list
+#   use   Reference other skill groups -- [LIST, MAY BE MULTIPLE, NESTS]
+#
+# Inside a [[source]]:
+#   groups            = ["gA", "gB"]     # file groups (list, may be multiple; expands to their files)
+#   workspace_groups  = ["gX", "gY"]     # workspace groups (list, may be multiple)
+#   [MIXING IS ALLOWED] groups can be combined with path, and workspace_groups with workspace:
+#       groups = ["base", "proj"]            # use every file in the base and proj groups
+#       path   = ["/abs/path/extra.md"]      # ...and additionally this one file
+#     => this source ships files of base + files of proj + extra.md, deduplicated by value.
+#   (workspace_groups / workspace work the same way: reference a group and also list a
+#    standalone workspace at the same time.)
+#   Duplicates across groups are harmless -- everything is deduplicated by value at the end,
+#   so each file is processed exactly once.
+#   File groups and workspace groups are separate namespaces; identical names are allowed.
+#
+# Everything below is commented out and inactive. Uncomment what you need and replace
+# the placeholders with your real values.
+
+# [[file_group]]
+# name = "base"
+# path = ["/abs/path/to/team-conventions.md", "/abs/path/to/style.md"]
+
+# [[file_group]]
+# name = "proj"
+# use = ["base"]                       # nests the base group (list, may be multiple: use = ["base", "dev"])
+# path = ["/abs/path/to/project-a.md"]
+
+# [[workspace_group]]
+# name = "dev"
+# workspace = ["/abs/path/to/proj-1", "/abs/path/to/proj-2"]
+
+# [[workspace_group]]
+# name = "qa"
+# use = ["dev"]                        # reuses the dev group (list, may be multiple)
+# workspace = ["/abs/path/to/proj-3"]
+
+# [[source]]
+# groups = ["base", "proj"]            # file groups (list, may be multiple; expands to their files)
+# path = ["/abs/path/to/extra.md"]     # plus a standalone file: this source = base + proj + this file
+# agents = ["codebuddy"]
+# workspace_groups = ["dev"]          # workspace groups (list, may be multiple; expands to their workspaces)
+# workspace = ["/abs/path/to/standalone"]   # plus a standalone workspace
+
+# --- skill examples (same fields, but the source is a DIRECTORY of skills) ----------
+
+# [[skill_source]]
+# path = ["/abs/path/to/my-skills"]    # each child dir containing SKILL.md is one skill
+# agents = ["codebuddy", "workbuddy"]  # omitted = every supported agent
+# workspace = "*"                      # every workspace (default when omitted)
+
+# [[skill_source]]
+# path = ["/abs/path/to/global-skills"]
+# scope = "user"                       # user-level (global): lands in ~/.codebuddy/skills
+#                                       # and ~/.workbuddy/skills, in every workspace
+
+# [[skill_group]]                      # bundle skill roots so several sources can reuse them
+# name = "frontend"
+# path = ["/abs/path/to/react-skills", "/abs/path/to/css-skills"]
+# # use = ["base"]                     # nest another skill group (list, may be multiple)
+
+# [[skill_source]]
+# groups = ["frontend"]                # reuse the bundle instead of repeating its paths
+# agents = ["codebuddy"]
+# scope = "user"
+```
 
 ---
 

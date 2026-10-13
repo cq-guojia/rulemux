@@ -179,17 +179,17 @@ type syncRun struct {
 	// createAgent 是「允许创建目录」的 agent（只有 hook 路径被 --agent 点名的那一个）；
 	// 空 = 谁都不建（手动 sync / cascade / sync --all 一律只写已存在目录）。
 	createAgent string
-	doneDirs    map[string]bool       // 工作区目录（rules + skills）去重
-	doneUser    map[string]bool       // 用户级目录去重（全局，跨工作区只跑一次）
-	changed     bool                  // rules 变化（含用户级 rules；skills 不计入）
-	failed      bool                  // 任一路径出错（抬退出码）
-	landed      []landedEntry         // 落过盘的（工作区, agent），供账本记账
+	doneDirs    map[string]bool // 工作区目录（rules + skills）去重
+	doneUser    map[string]bool // 用户级目录去重（全局，跨工作区只跑一次）
+	changed     bool            // rules 变化（含用户级 rules；skills 不计入）
+	failed      bool            // 任一路径出错（抬退出码）
+	landed      []landedEntry   // 落过盘的（工作区, agent），供账本记账
 }
 
 // landedEntry 是一条「在某个工作区落过盘」的记录（账本 key）。
 type landedEntry struct {
-	ws  string
-	id  string
+	ws string
+	id string
 }
 
 func newSyncRun(cfg *config.Config, ws, createAgent string) *syncRun {
