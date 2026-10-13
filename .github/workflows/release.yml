@@ -1,13 +1,16 @@
 # Release pipeline: push a tag (vX.Y.Z) -> cross-compile all platform binaries ->
 # attach them to a GitHub Release -> publish the npm package.
 #
-# Required repository secrets:
-#   NPM_TOKEN  automation token for npmjs.org. If it is not set, the npm job
-#              skips publishing with a warning and only the GitHub Release happens.
+# npm publishing uses GitHub OIDC trusted publishing (no long-lived NPM_TOKEN):
+# the `npm` job gets `permissions: id-token: write` and npm exchanges the
+# short-lived GitHub OIDC token for a publish grant. Configure the Trusted
+# Publisher for `rulemux` on npmjs.com -> Settings -> Trusted Publishers,
+# pointing at this `release.yml` workflow in cq-guojia/rulemux. `--provenance`
+# attaches a signed supply-chain attestation.
 #
 # Usage (maintainers):
 #   npm version patch|minor|major     # bumps package.json + creates git tag v0.x.y
-#   git push --follow-tags
+#   git push --follow-tags            # triggers this pipeline (incl. npm publish)
 name: release
 
 on:
@@ -82,6 +85,10 @@ jobs:
   npm:
     needs: release
     runs-on: ubuntu-latest
+    # id-token: write lets the workflow request a short-lived OIDC token from
+    # GitHub; npm exchanges it for a publish grant. No NPM_TOKEN secret needed.
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -100,12 +107,5 @@ jobs:
       - name: Sync package.json version to the tag
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
-      - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "::warning::NPM_TOKEN secret is not set; skipping npm publish (set it in repo Settings > Secrets)"
-            exit 0
-          fi
-          npm publish
+      - name: Publish to npm via OIDC (no token)
+        run: npm publish --provenance --access public
