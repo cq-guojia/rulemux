@@ -84,23 +84,247 @@ scope = "user"# 无空格紧跟也要剥
 	}
 }
 
-// TestStripTrailingComment 单测剥注释的引号状态机：引号内的 # 保留、
-// 注释里的引号（don't）不误伤、无 # 原样返回。
-func TestStripTrailingComment(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{`path = ["a.md"] # 尾注释`, `path = ["a.md"]`},
-		{`path = "/rules/a#b.md"`, `path = "/rules/a#b.md"`},
-		{`path = '/a#b.md' # c`, `path = '/a#b.md'`},
-		{`[[source]] # 注释`, `[[source]]`},
-		{`# 整行注释`, ``},
-		{`path = "a.md"# 无空格`, `path = "a.md"`},
-		{`path = ["a.md"] # don't panic`, `path = ["a.md"]`},
-		{`path = "a.md"`, `path = "a.md"`},
+// TestMultiLineArray 校验多行数组（TOML 标准写法）：值可跨行、含注释、含空行、
+// 可带尾逗号。回归保护：修复前行级解析器只读到 "["，workspace 被读成空 ⇒
+// 静默变成「所有工作区」，groups 被读成空 ⇒ 白引用。
+func TestMultiLineArray(t *testing.T) {
+	c := writeCfg(t, `[[file_group]]
+name = "base"
+path = [
+	"/rules/a.md",   # 组内文件
+	"/rules/b.md",
+	# 注释与空行都合法
+]
+
+[[source]]
+groups = [
+	"base",
+]
+workspace = [
+	"/tmp/aaa/*",
+	"/tmp/bbb/*",
+]
+agents = ["codebuddy"]
+`)
+	if len(c.FileGroups) != 1 {
+		t.Fatalf("期望 1 条 file_group，实得 %d", len(c.FileGroups))
 	}
-	for _, c := range cases {
-		if got := stripTrailingComment(c.in); got != c.want {
-			t.Errorf("stripTrailingComment(%q) = %q, want %q", c.in, got, c.want)
+	if got := c.FileGroups[0].Paths; !equalSlice(got, []string{"/rules/a.md", "/rules/b.md"}) {
+		t.Fatalf("多行 path 数组解析错误：%v", got)
+	}
+	s := c.Sources[0]
+	if !equalSlice(s.Groups, []string{"base"}) {
+		t.Fatalf("多行 groups 数组解析错误：%v", s.Groups)
+	}
+	want := []string{"/tmp/aaa/*", "/tmp/bbb/*"}
+	if !equalSlice(s.Workspaces, want) {
+		t.Fatalf("多行 workspace 数组应为 %v，实得 %v", want, s.Workspaces)
+	}
+	if !s.MatchesWorkspace("/tmp/aaa/x") {
+		t.Error("多行 workspace 展开后应匹配 /tmp/aaa/x")
+	}
+	if s.MatchesWorkspace("/tmp/ccc") {
+		t.Error("多行 workspace 展开后不应匹配 /tmp/ccc（修复前这里会静默命中所有工作区）")
+	}
+}
+
+// TestArrayElementCommaAndHash 校验数组元素内的逗号与 # 受引号保护：
+// 修复前 parseArray 裸按 "," 切分，"/rules/a,b.md" 被切成两段垃圾路径。
+func TestArrayElementCommaAndHash(t *testing.T) {
+	c := writeCfg(t, `[[source]]
+path = ["/rules/a,b.md", "/rules/c#d.md"]
+`)
+	want := []string{"/rules/a,b.md", "/rules/c#d.md"}
+	if got := c.Sources[0].Paths; !equalSlice(got, want) {
+		t.Fatalf("含逗号/# 的路径应为 %v，实得 %v", want, got)
+	}
+}
+
+// TestQuotedKeys 校验引号键（TOML 标准写法）：修复前 key 带引号不匹配 switch，
+// 整条被静默忽略（agents 被忽略 ⇒ 投全部 agent）。
+func TestQuotedKeys(t *testing.T) {
+	c := writeCfg(t, `[[source]]
+"path" = ["/x.md"]
+'agents' = ["codebuddy"]
+`)
+	if got := c.Sources[0].Paths; !equalSlice(got, []string{"/x.md"}) {
+		t.Fatalf("双引号键解析错误：%v", got)
+	}
+	if got := c.Sources[0].Agents; !equalSlice(got, []string{"codebuddy"}) {
+		t.Fatalf("单引号键解析错误：%v", got)
+	}
+}
+
+// TestMultiLineStrings 校验多行字符串与转义（TOML 标准写法）。
+// 多行串语义：首个紧邻换行被修剪，收尾分隔符前的换行**保留** —— 路径场景要把
+// 收尾引号放在内容同一行，否则值尾会带一个换行。基本串按标准处理 \uXXXX 转义。
+// 修复前 unquote 只剥一层引号，多行串值变成垃圾路径。
+func TestMultiLineStrings(t *testing.T) {
+	c := writeCfg(t, `[[source]]
+path = """
+/rules/a.md
+"""
+
+[[source]]
+path = '''
+/rules/b.md
+'''
+
+[[source]]
+path = """/rules/c.md"""
+
+[[source]]
+path = "/rules/\u0061.md"
+`)
+	want := []string{"/rules/a.md\n", "/rules/b.md\n", "/rules/c.md", "/rules/a.md"}
+	if len(c.Sources) != len(want) {
+		t.Fatalf("期望 %d 条 source，实得 %d", len(want), len(c.Sources))
+	}
+	for i, w := range want {
+		if got := c.Sources[i].Paths[0]; got != w {
+			t.Errorf("source #%d path = %q, want %q", i, got, w)
 		}
+	}
+}
+
+// TestBOMAndCRLF 校验文件头 UTF-8 BOM 与 CRLF 行尾：
+// 修复前 BOM 让首行表头匹配不上，第一张表整表静默丢失。
+func TestBOMAndCRLF(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	content := "\ufeff[[source]]\r\npath = [\"/x.md\"]\r\nagents = [\"codebuddy\"]\r\n"
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Sources) != 1 {
+		t.Fatalf("带 BOM + CRLF 的配置应解析出 1 条 source，实得 %d", len(c.Sources))
+	}
+	if got := c.Sources[0].Paths; !equalSlice(got, []string{"/x.md"}) {
+		t.Fatalf("BOM + CRLF 下 path 解析错误：%v", got)
+	}
+}
+
+// TestStrictErrors 校验「宁报错不静默」：一切认不出的语法都带 文件:行号 报错，
+// 绝不静默吞掉（旧解析器的静默路径全部封死）。
+func TestStrictErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		wantSub string // 错误信息应包含的子串（行号等）
+	}{
+		{
+			"多行数组未闭合",
+			"[[source]]\npath = [\n\"/x.md\",\n",
+			":2: unterminated array",
+		},
+		{
+			"数组缺逗号",
+			"[[source]]\npath = [\"/a.md\" \"/b.md\"]\n",
+			":2: expected ',' or ']'",
+		},
+		{
+			"嵌套数组",
+			"[[source]]\npath = [[\"/a.md\"]]\n",
+			"nested arrays are not supported",
+		},
+		{
+			"整数值",
+			"[[source]]\npath = 123\n",
+			"expected a quoted string value",
+		},
+		{
+			"布尔值",
+			"[[source]]\npath = true\n",
+			"expected a quoted string value",
+		},
+		{
+			"内联表",
+			"[[source]]\npath = {a = 1}\n",
+			"expected a quoted string value",
+		},
+		{
+			"裸值（无引号）",
+			"[[source]]\npath = a.md\n",
+			"expected a quoted string value",
+		},
+		{
+			"点键",
+			"[[source]]\npath.x = [\"/a.md\"]\n",
+			"dotted keys",
+		},
+		{
+			"同表重复键",
+			"[[source]]\npath = [\"/a.md\"]\npath = [\"/b.md\"]\n",
+			":3: duplicate key \"path\"",
+		},
+		{
+			"已知表内未知键（typo：agent 漏 s）",
+			"[[source]]\npath = [\"/a.md\"]\nagent = [\"codebuddy\"]\n",
+			":3: unknown key \"agent\"",
+		},
+		{
+			"非法转义（Windows 反斜杠路径）",
+			"[[source]]\npath = \"C:\\rules\\a.md\"\n",
+			":2: invalid escape sequence",
+		},
+		{
+			"单行串未闭合",
+			"[[source]]\npath = \"/x.md\n",
+			":2: unterminated string",
+		},
+		{
+			"键后缺等号",
+			"[[source]]\npath [\"/x.md\"]\n",
+			":2: expected '='",
+		},
+		{
+			"值后有杂内容",
+			"[[source]]\npath = [\"/x.md\"] garbage\n",
+			":2: unexpected content after value",
+		},
+		{
+			"表头未闭合",
+			"[[source\npath = [\"/x.md\"]\n",
+			"expected ']]'",
+		},
+		{
+			"数组表单写成单括号（typo）",
+			"[source]\npath = [\"/x.md\"]\n",
+			":1: table [source] should be an array of tables: write [[source]]",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.content))
+			if err == nil {
+				t.Fatalf("应报错，但却解析通过了：%q", tc.content)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("错误信息应包含 %q，实得 %q", tc.wantSub, err.Error())
+			}
+		})
+	}
+}
+
+// TestUnknownTableIgnored 校验普通表 / 未知数组表的键值仍被忽略（既有行为不变）。
+func TestUnknownTableIgnored(t *testing.T) {
+	c := writeCfg(t, `[features]
+whatever = "x"
+
+[[unknown_table]]
+foo = "bar"
+
+[[source]]
+path = ["/x.md"]
+`)
+	if len(c.Sources) != 1 {
+		t.Fatalf("未知表之后应正常解析出 1 条 source，实得 %d", len(c.Sources))
+	}
+	if got := c.Sources[0].Paths; !equalSlice(got, []string{"/x.md"}) {
+		t.Fatalf("path 解析错误：%v", got)
 	}
 }
 

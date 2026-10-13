@@ -12,11 +12,12 @@
 package config
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/cq-guojia/rulemux/internal/agents"
@@ -128,15 +129,50 @@ func DefaultPath() string {
 
 // Load 读取并解析指定路径的配置文件。
 func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	// 剥 UTF-8 BOM：否则首行（常是第一张表头）匹配不上，整张表静默丢失。
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 
 	c := &Config{File: path}
-	sc := bufio.NewScanner(f)
+	p := &tomlParser{path: path, src: string(data), row: 1}
+	if err := p.parse(c); err != nil {
+		return nil, err
+	}
 
+	// 顺序要紧：先把 "~" 展开成绝对路径，再展开组引用 —— 组引用合并时按**同一形态的
+	// 绝对路径**去重，才不会出现 "/a.md" 与 "~/a.md" 被当成两个文件而重复投递。
+	c.expandHomes()
+
+	if err := c.resolveGroups(); err != nil {
+		return nil, err
+	}
+	c.canonicalizeAgents()
+	c.normalizeScopes()
+	return c, nil
+}
+
+// tomlParser 是按本配置 schema 裁剪的 TOML 递归下降解析器（零第三方依赖）。
+//
+// 覆盖标准写法：字符串（基本/字面/多行基本/多行字面）、字符串数组（可跨行、
+// 可含注释与尾逗号）、裸键与引号键、[[数组表]] 与 [普通表] 头、注释与空行。
+//
+// 原则「宁报错不静默」：旧的行级解析器把认不出的东西静默吞掉 —— 多行数组被读成
+// 空 ⇒ workspace 变成「所有工作区」；数组元素里的逗号把路径切碎；引号键不匹配
+// 被整条忽略 ⇒ agents 空 = 投全部 agent；BOM 让首张表整表丢失。本解析器对一切
+// 认不出的语法（其余值类型、裸值、点键、同表重复键、已知表内未知键）一律带
+// 文件:行号 报错。
+type tomlParser struct {
+	path string // 配置文件路径，仅用于错误信息
+	src  string
+	pos  int
+	row  int
+}
+
+// parse 遍历整份配置：表头切换当前表，键值分发进对应字段。
+func (p *tomlParser) parse(c *Config) error {
 	// curKind 跟踪当前正在填充的数组表类型；普通表（如 [features]）或未知数组表均为 none。
 	const (
 		curNone = iota
@@ -148,20 +184,32 @@ func Load(path string) (*Config, error) {
 	)
 	cur := curNone
 	srcIdx, skillIdx, fgIdx, wgIdx, sgIdx := -1, -1, -1, -1, -1
+	// seen 记录当前表内已出现的键 —— 同表重复键按 TOML 规定非法，报错而非静默覆盖。
+	seen := map[string]bool{}
 
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		// 行尾注释是 TOML 标准语法：按引号状态剥掉字符串外的 "#" 及其后内容。
-		// 必须在表头 / 空行 / 整行注释判断之前做 —— 否则 [[source]] # c 这类表头
-		// 会因 HasSuffix(line, "]]") 不命中而整张表被静默忽略。
-		line = stripTrailingComment(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	for {
+		p.skipBlank()
+		if p.eof() {
+			return nil
 		}
 
-		// 数组表 [[name]]
-		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
-			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "[["), "]]"))
+		// 表头：[[name]]（数组表）或 [name]（普通表，忽略其键值）
+		if p.peek() == '[' {
+			hdrRow := p.row
+			name, isArray, err := p.parseTableHeader()
+			if err != nil {
+				return err
+			}
+			seen = map[string]bool{}
+			// 已知数组表单写成 [name] 是常见 typo：按未知表静默丢掉整张表太危险，显式报错。
+			if !isArray {
+				switch name {
+				case "source", "skill_source", "file_group", "workspace_group", "skill_group":
+					return p.errAt(hdrRow, "table [%s] should be an array of tables: write [[%s]]", name, name)
+				}
+				cur = curNone
+				continue
+			}
 			switch name {
 			case "source":
 				c.Sources = append(c.Sources, Source{})
@@ -189,95 +237,464 @@ func Load(path string) (*Config, error) {
 			continue
 		}
 
-		// 其它普通表（如 [features]），其键值不属于任何已知数组表，忽略
-		if strings.HasPrefix(line, "[") {
-			cur = curNone
-			continue
+		// key = value
+		key, err := p.parseKey()
+		if err != nil {
+			return err
 		}
-
-		idx := strings.Index(line, "=")
-		if idx < 0 {
-			continue
+		p.skipWS()
+		if p.peek() != '=' {
+			return p.errf("expected '=' after key %q", key)
 		}
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
+		p.advance()
+		p.skipWS()
+		items, isArray, err := p.parseValue()
+		if err != nil {
+			return err
+		}
+		if err := p.expectLineEnd(); err != nil {
+			return err
+		}
+		if seen[key] {
+			return p.errf("duplicate key %q in the same table", key)
+		}
+		seen[key] = true
+		// name / scope 是单值字段，数组写法是用户错误，显式报错。
+		if isArray && (key == "name" || key == "scope") {
+			return p.errf("key %q expects a single string, not an array", key)
+		}
 
 		switch cur {
 		case curSource:
 			switch key {
 			case "path":
-				c.Sources[srcIdx].Paths = parsePaths(val)
+				c.Sources[srcIdx].Paths = items
 			case "agents":
-				c.Sources[srcIdx].Agents = parseArray(val)
+				c.Sources[srcIdx].Agents = items
 			case "workspace":
-				c.Sources[srcIdx].Workspaces = parsePaths(val)
+				c.Sources[srcIdx].Workspaces = items
 			case "groups":
-				c.Sources[srcIdx].Groups = parseArray(val)
+				c.Sources[srcIdx].Groups = items
 			case "workspace_groups":
-				c.Sources[srcIdx].WorkspaceGroups = parseArray(val)
+				c.Sources[srcIdx].WorkspaceGroups = items
 			case "scope":
-				c.Sources[srcIdx].Scope = normalizeScope(unquote(val))
+				c.Sources[srcIdx].Scope = normalizeScope(items[0])
+			default:
+				return p.errf("unknown key %q in [[source]]", key)
 			}
 		case curSkillSource:
 			// groups / workspace_groups 与 [[source]] 同义：分别是 [[skill_group]] /
 			// [[workspace_group]] 的按名引用，解析阶段展开进 Paths / Workspaces。
 			switch key {
 			case "path":
-				c.SkillSources[skillIdx].Paths = parsePaths(val)
+				c.SkillSources[skillIdx].Paths = items
 			case "agents":
-				c.SkillSources[skillIdx].Agents = parseArray(val)
+				c.SkillSources[skillIdx].Agents = items
 			case "workspace":
-				c.SkillSources[skillIdx].Workspaces = parsePaths(val)
+				c.SkillSources[skillIdx].Workspaces = items
 			case "groups":
-				c.SkillSources[skillIdx].Groups = parseArray(val)
+				c.SkillSources[skillIdx].Groups = items
 			case "workspace_groups":
-				c.SkillSources[skillIdx].WorkspaceGroups = parseArray(val)
+				c.SkillSources[skillIdx].WorkspaceGroups = items
 			case "scope":
-				c.SkillSources[skillIdx].Scope = normalizeScope(unquote(val))
+				c.SkillSources[skillIdx].Scope = normalizeScope(items[0])
+			default:
+				return p.errf("unknown key %q in [[skill_source]]", key)
 			}
 		case curFileGroup:
 			switch key {
 			case "name":
-				c.FileGroups[fgIdx].Name = unquote(val)
+				c.FileGroups[fgIdx].Name = items[0]
 			case "path":
-				c.FileGroups[fgIdx].Paths = parsePaths(val)
+				c.FileGroups[fgIdx].Paths = items
 			case "use":
-				c.FileGroups[fgIdx].Uses = parseArray(val)
+				c.FileGroups[fgIdx].Uses = items
+			default:
+				return p.errf("unknown key %q in [[file_group]]", key)
 			}
 		case curWSGroup:
 			switch key {
 			case "name":
-				c.WorkspaceGroups[wgIdx].Name = unquote(val)
+				c.WorkspaceGroups[wgIdx].Name = items[0]
 			case "workspace":
-				c.WorkspaceGroups[wgIdx].Workspaces = parsePaths(val)
+				c.WorkspaceGroups[wgIdx].Workspaces = items
 			case "use":
-				c.WorkspaceGroups[wgIdx].Uses = parseArray(val)
+				c.WorkspaceGroups[wgIdx].Uses = items
+			default:
+				return p.errf("unknown key %q in [[workspace_group]]", key)
 			}
 		case curSkillGroup:
 			switch key {
 			case "name":
-				c.SkillGroups[sgIdx].Name = unquote(val)
+				c.SkillGroups[sgIdx].Name = items[0]
 			case "path":
-				c.SkillGroups[sgIdx].Paths = parsePaths(val)
+				c.SkillGroups[sgIdx].Paths = items
 			case "use":
-				c.SkillGroups[sgIdx].Uses = parseArray(val)
+				c.SkillGroups[sgIdx].Uses = items
+			default:
+				return p.errf("unknown key %q in [[skill_group]]", key)
 			}
+			// curNone（普通表 / 未知表 / 任何表之前）的键值不属于已知数组表，忽略。
 		}
 	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
+}
 
-	// 顺序要紧：先把 "~" 展开成绝对路径，再展开组引用 —— 组引用合并时按**同一形态的
-	// 绝对路径**去重，才不会出现 "/a.md" 与 "~/a.md" 被当成两个文件而重复投递。
-	c.expandHomes()
+// ---- 字符级原语 ----
 
-	if err := c.resolveGroups(); err != nil {
-		return nil, err
+func (p *tomlParser) eof() bool { return p.pos >= len(p.src) }
+
+// peek 看当前字符；文件尾返回 0。
+func (p *tomlParser) peek() byte {
+	if p.eof() {
+		return 0
 	}
-	c.canonicalizeAgents()
-	c.normalizeScopes()
-	return c, nil
+	return p.src[p.pos]
+}
+
+// at 看当前起第 i 个字符；越界返回 0。
+func (p *tomlParser) at(i int) byte {
+	if p.pos+i >= len(p.src) {
+		return 0
+	}
+	return p.src[p.pos+i]
+}
+
+// advance 消费一个字符并维护行号。
+func (p *tomlParser) advance() byte {
+	ch := p.src[p.pos]
+	p.pos++
+	if ch == '\n' {
+		p.row++
+	}
+	return ch
+}
+
+func (p *tomlParser) hasPrefix(s string) bool {
+	return strings.HasPrefix(p.src[p.pos:], s)
+}
+
+func (p *tomlParser) errf(format string, args ...any) error {
+	return p.errAt(p.row, format, args...)
+}
+
+// errAt 在指定行报错 —— 「未闭合」类错误报构造起始行（如多行数组的 '[' 所在行），
+// 比报 EOF 行更能定位。
+func (p *tomlParser) errAt(row int, format string, args ...any) error {
+	return fmt.Errorf("config %s:%d: %s", p.path, row, fmt.Sprintf(format, args...))
+}
+
+// skipWS 跳过空格、制表符与 CR（CRLF 行尾的 \r 在此消化）。
+func (p *tomlParser) skipWS() {
+	for !p.eof() {
+		switch p.peek() {
+		case ' ', '\t', '\r':
+			p.advance()
+		default:
+			return
+		}
+	}
+}
+
+// skipBlank 跳过语句间的空白、换行与注释（数组内同样合法）。
+func (p *tomlParser) skipBlank() {
+	for {
+		p.skipWS()
+		if p.peek() == '\n' {
+			p.advance()
+			continue
+		}
+		if p.peek() == '#' {
+			for !p.eof() && p.peek() != '\n' {
+				p.advance()
+			}
+			continue
+		}
+		return
+	}
+}
+
+// expectLineEnd 值之后只允许空白与注释，然后是换行或文件尾。
+func (p *tomlParser) expectLineEnd() error {
+	p.skipWS()
+	if p.peek() == '#' {
+		for !p.eof() && p.peek() != '\n' {
+			p.advance()
+		}
+	}
+	if p.eof() || p.peek() == '\n' {
+		return nil
+	}
+	return p.errf("unexpected content after value")
+}
+
+func isBareKeyByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' ||
+		c >= '0' && c <= '9' || c == '_' || c == '-'
+}
+
+// isWSOrNL 报告是否为空白或换行（多行串行尾续行要连空行一起吞掉）。
+func isWSOrNL(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
+}
+
+// ---- 键 ----
+
+// parseKey 解析键：裸键（A-Za-z0-9_-）或引号键（"..." / '...'，单行）。
+// 点键（a.b）显式报错 —— 本配置 schema 无嵌套表，不能静默忽略。
+func (p *tomlParser) parseKey() (string, error) {
+	if ch := p.peek(); ch == '"' || ch == '\'' {
+		if p.hasPrefix(`"""`) || p.hasPrefix(`'''`) {
+			return "", p.errf("multi-line strings are not allowed in keys")
+		}
+		return p.parseSingleLineString()
+	}
+	start := p.pos
+	for !p.eof() && isBareKeyByte(p.peek()) {
+		p.advance()
+	}
+	if p.pos == start {
+		return "", p.errf("expected a key")
+	}
+	if p.peek() == '.' {
+		return "", p.errf("dotted keys (a.b) are not supported")
+	}
+	return p.src[start:p.pos], nil
+}
+
+// ---- 表头 ----
+
+// parseTableHeader 解析表头 [[name]] / [name]（当前位置在第一个 '['）。
+// name 支持裸键与引号写法；点号表名显式报错。
+func (p *tomlParser) parseTableHeader() (name string, isArray bool, err error) {
+	isArray = p.at(1) == '['
+	p.advance()
+	if isArray {
+		p.advance()
+	}
+	p.skipWS()
+	if ch := p.peek(); ch == '"' || ch == '\'' {
+		if p.hasPrefix(`"""`) || p.hasPrefix(`'''`) {
+			return "", false, p.errf("multi-line strings are not allowed in table names")
+		}
+		name, err = p.parseSingleLineString()
+		if err != nil {
+			return "", false, err
+		}
+	} else {
+		start := p.pos
+		for !p.eof() && isBareKeyByte(p.peek()) {
+			p.advance()
+		}
+		name = p.src[start:p.pos]
+		if name == "" {
+			return "", false, p.errf("expected a table name")
+		}
+	}
+	p.skipWS()
+	if p.peek() == '.' {
+		return "", false, p.errf("dotted table names (a.b) are not supported")
+	}
+	if isArray {
+		if !p.hasPrefix("]]") {
+			return "", false, p.errf("expected ']]' to close the table header")
+		}
+		p.advance()
+		p.advance()
+	} else {
+		if p.peek() != ']' {
+			return "", false, p.errf("expected ']' to close the table header")
+		}
+		p.advance()
+	}
+	return name, isArray, nil
+}
+
+// ---- 值 ----
+
+// parseValue 解析 = 右侧的值。本配置 schema 只用字符串与字符串数组：
+// 数组可跨行、可含注释与尾逗号，元素须为字符串（嵌套数组显式报错）。
+// 返回的 items 对单串是单元素切片，对数组是各元素 —— 两种写法对所有字段等价。
+func (p *tomlParser) parseValue() (items []string, isArray bool, err error) {
+	if p.peek() != '[' {
+		s, err := p.parseString()
+		if err != nil {
+			return nil, false, err
+		}
+		return []string{s}, false, nil
+	}
+	p.advance()       // '['
+	startRow := p.row // advance 单字符不跨行，p.row 即 '[' 所在行
+	for {
+		p.skipBlank() // 数组内允许换行、空行与注释
+		if p.eof() {
+			return nil, false, p.errAt(startRow, "unterminated array (missing ']')")
+		}
+		if p.peek() == ']' {
+			p.advance()
+			return items, true, nil
+		}
+		if p.peek() == '[' {
+			return nil, false, p.errf("nested arrays are not supported")
+		}
+		s, err := p.parseString()
+		if err != nil {
+			return nil, false, err
+		}
+		items = append(items, s)
+		p.skipBlank()
+		if p.peek() == ',' {
+			p.advance()
+			continue
+		}
+		if p.peek() == ']' {
+			p.advance()
+			return items, true, nil
+		}
+		if p.eof() {
+			return nil, false, p.errAt(startRow, "unterminated array (missing ']')")
+		}
+		return nil, false, p.errf("expected ',' or ']' in array")
+	}
+}
+
+// parseString 解析一个字符串值：基本串（含转义）、字面串、多行基本串、多行字面串。
+func (p *tomlParser) parseString() (string, error) {
+	if p.hasPrefix(`"""`) {
+		return p.parseMultiLine('"')
+	}
+	if p.hasPrefix(`'''`) {
+		return p.parseMultiLine('\'')
+	}
+	return p.parseSingleLineString()
+}
+
+func (p *tomlParser) parseSingleLineString() (string, error) {
+	quote := p.peek()
+	if quote != '"' && quote != '\'' {
+		if p.eof() {
+			return "", p.errf("expected a value after '='")
+		}
+		return "", p.errf("expected a quoted string value (this config only takes strings and arrays of strings)")
+	}
+	p.advance()
+	startRow := p.row
+	var b strings.Builder
+	for {
+		if p.eof() {
+			return "", p.errAt(startRow, "unterminated string")
+		}
+		ch := p.peek()
+		if ch == '\n' {
+			return "", p.errAt(startRow, "unterminated string (a string must be closed on the same line)")
+		}
+		if ch == quote {
+			p.advance()
+			return b.String(), nil
+		}
+		if quote == '"' && ch == '\\' {
+			p.advance()
+			if err := p.readEscape(&b); err != nil {
+				return "", err
+			}
+			continue
+		}
+		b.WriteByte(p.advance())
+	}
+}
+
+// parseMultiLine 解析多行字符串（三引号包裹，quote 为基本串 " 或字面串 ' 两种）：
+// 首个紧邻换行被修剪；基本多行串支持转义与行尾 \ 续行（吞掉后续所有空白与换行）；
+// 收尾分隔符前允许最多两个同引号字符（TOML："""" 表示内容以一个引号结尾）。
+func (p *tomlParser) parseMultiLine(quote byte) (string, error) {
+	startRow := p.row
+	p.advance()
+	p.advance()
+	p.advance()
+	if p.peek() == '\r' && p.at(1) == '\n' {
+		p.advance()
+		p.advance()
+	} else if p.peek() == '\n' {
+		p.advance()
+	}
+	var b strings.Builder
+	for {
+		if p.eof() {
+			return "", p.errAt(startRow, "unterminated multi-line string")
+		}
+		if p.peek() == quote && p.at(1) == quote && p.at(2) == quote {
+			p.advance()
+			p.advance()
+			p.advance()
+			for extra := 0; extra < 2 && p.peek() == quote; extra++ {
+				b.WriteByte(p.advance())
+			}
+			return b.String(), nil
+		}
+		ch := p.peek()
+		if quote == '"' && ch == '\\' {
+			// 行尾续行：\ 后仅剩空白与换行 ⇒ 全部吞掉（含后续所有空行）
+			j := p.pos + 1
+			for j < len(p.src) && (p.src[j] == ' ' || p.src[j] == '\t' || p.src[j] == '\r') {
+				j++
+			}
+			if j < len(p.src) && p.src[j] == '\n' {
+				p.pos = j
+				p.advance() // 过 '\n'（row++）
+				for !p.eof() && isWSOrNL(p.peek()) {
+					p.advance()
+				}
+				continue
+			}
+			p.advance() // 过 '\'
+			if err := p.readEscape(&b); err != nil {
+				return "", err
+			}
+			continue
+		}
+		b.WriteByte(p.advance())
+	}
+}
+
+// readEscape 读入一个转义序列（调用时已消费 '\'）并按 TOML 标准解码。
+func (p *tomlParser) readEscape(b *strings.Builder) error {
+	if p.eof() {
+		return p.errf("unterminated escape sequence")
+	}
+	ch := p.advance()
+	switch ch {
+	case 'b':
+		b.WriteByte('\b')
+	case 't':
+		b.WriteByte('\t')
+	case 'n':
+		b.WriteByte('\n')
+	case 'f':
+		b.WriteByte('\f')
+	case 'r':
+		b.WriteByte('\r')
+	case '"':
+		b.WriteByte('"')
+	case '\\':
+		b.WriteByte('\\')
+	case 'u', 'U':
+		n := 4
+		if ch == 'U' {
+			n = 8
+		}
+		if p.pos+n > len(p.src) {
+			return p.errf("invalid \\%c escape: too short", ch)
+		}
+		hex := p.src[p.pos : p.pos+n]
+		v, err := strconv.ParseUint(hex, 16, 32)
+		if err != nil {
+			return p.errf("invalid \\%c escape %q", ch, hex)
+		}
+		p.pos += n
+		b.WriteRune(rune(v))
+	default:
+		return p.errf("invalid escape sequence \\%c (Windows paths: use a literal string '...' or forward slashes)", ch)
+	}
+	return nil
 }
 
 // expandHomes 把配置里所有路径值中的 "~" / "~/" 展开为当前用户的 HOME，
@@ -544,6 +961,11 @@ func (c *Config) Validate() error {
 		if len(s.Paths) == 0 {
 			return fmt.Errorf("config %s: [[source]] #%d is missing path", c.File, i+1)
 		}
+		for _, pth := range s.Paths {
+			if strings.TrimSpace(pth) == "" {
+				return fmt.Errorf("config %s: [[source]] #%d has an empty path", c.File, i+1)
+			}
+		}
 		if !validScope(s.Scope) {
 			return fmt.Errorf("config %s: [[source]] #%d has unknown scope %q (expected \"workspace\" or \"user\")", c.File, i+1, s.Scope)
 		}
@@ -552,20 +974,14 @@ func (c *Config) Validate() error {
 		if len(s.Paths) == 0 {
 			return fmt.Errorf("config %s: [[skill_source]] #%d is missing path", c.File, i+1)
 		}
+		for _, pth := range s.Paths {
+			if strings.TrimSpace(pth) == "" {
+				return fmt.Errorf("config %s: [[skill_source]] #%d has an empty path", c.File, i+1)
+			}
+		}
 		if !validScope(s.Scope) {
 			return fmt.Errorf("config %s: [[skill_source]] #%d has unknown scope %q (expected \"workspace\" or \"user\")", c.File, i+1, s.Scope)
 		}
-	}
-	return nil
-}
-
-// parsePaths 解析 path / workspace：单个字符串或数组都支持。
-func parsePaths(val string) []string {
-	if strings.HasPrefix(strings.TrimSpace(val), "[") {
-		return parseArray(val)
-	}
-	if v := strings.TrimSpace(unquote(val)); v != "" {
-		return []string{v}
 	}
 	return nil
 }
@@ -657,62 +1073,6 @@ func segMatch(pat, name string) bool {
 		return pat == name
 	}
 	return ok
-}
-
-// stripTrailingComment 按引号状态扫描，剥掉字符串以外的第一个 "#" 及其后内容；
-// 引号内的 "#"（如 path = "/rules/a#b.md"）属于值的一部分，不剥。
-// 不含 "#" 或 "#" 全在引号内的行原样返回 —— 既有配置行为不变。
-// shortcut: 不处理 TOML 的 \" 转义（本解析器其余各处同样不处理），
-// 需要转义语义时再升级。
-func stripTrailingComment(line string) string {
-	inSingle, inDouble := false, false
-	for i, r := range line {
-		switch r {
-		case '\'':
-			if !inDouble {
-				inSingle = !inSingle
-			}
-		case '"':
-			if !inSingle {
-				inDouble = !inDouble
-			}
-		case '#':
-			if !inSingle && !inDouble {
-				return strings.TrimSpace(line[:i])
-			}
-		}
-	}
-	return line
-}
-
-// unquote 去掉字符串两侧的成对引号。
-func unquote(s string) string {
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
-}
-
-// parseArray 解析 ["a", "b"] 形式的字符串数组。
-func parseArray(s string) []string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "[")
-	s = strings.TrimSuffix(s, "]")
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		out = append(out, unquote(p))
-	}
-	return out
 }
 
 // containsFold 忽略大小写判断切片是否包含某字符串。

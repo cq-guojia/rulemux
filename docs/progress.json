@@ -9,6 +9,16 @@
       "status": "doing",
       "title": "v2：Trae/dsh skill 注入 + 剩余 canary + git skill 源",
       "worklog": "worklog/202610/13-1133-v2-trae-dsh-skill-注入-剩余-canary-git-skill-eec8.md"
+    },
+    "20261013-1752-toml-解析器补齐标准语法-多行数组-字符串-引号键-认不出即报错-da76": {
+      "created": "2026-10-13 17:52:16",
+      "creator": "GuoJia-Agent",
+      "finished": null,
+      "owner": "GuoJia-Agent",
+      "started": "2026-10-13 17:52:16",
+      "status": "doing",
+      "title": "TOML 解析器补齐标准语法：多行数组/字符串/引号键，认不出即报错",
+      "worklog": "worklog/202610/13-1752-toml-解析器补齐标准语法-多行数组-字符串-引号键-认不出即报错-da76.md"
     }
   }
 }
