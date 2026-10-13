@@ -534,7 +534,7 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
   （工作区 `.codebuddy/skills`、用户级 `~/.codebuddy/skills` + `~/.workbuddy/skills`）已经
   bundle 代码级 + 本机实测坐实；trae / dsh / claude / codex / opencode 的 skills 目录尚未实测，
   **暂不支持**，坐实一家开一家。
-- **分发** —— 已完成：GitHub Actions 交叉编译二进制并挂到 GitHub Release；npm 包**手动发布**（见 §9）。
+- **分发** —— 已完成：GitHub Actions 交叉编译二进制并挂到 GitHub Release；npm 包随 tag **自动发布**（见 §9）。
 - 规则内容改写 / 模板渲染、以及自动自我更新，**明确不做**
   （[`docs/design/requirements.md`](docs/design/requirements.md) §五）。
 - skill 的远程 / git 源（跟进上游更新）、`rulemux skill` 子命令 —— **后续版本**，第一版只做本地源。
@@ -545,18 +545,22 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 
 ```bash
 npm version patch|minor|major   # 更新 package.json 并创建 git tag v0.x.y
-git push --follow-tags          # CI：交叉编译产物挂到 GitHub Release
-npm publish                     # npm：手动，在已登录的 shell 里跑
+git push --follow-tags          # CI：编译、把二进制挂到 GitHub Release、并发布到 npm
 ```
 
-推送 tag 会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：
-自动交叉编译全部平台二进制并挂到 GitHub Release。
+推送 tag 会触发 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)：
+自动交叉编译全部平台二进制、挂到 GitHub Release，并通过 **GitHub OIDC trusted publishing** 发布
+`rulemux` npm 包——**不需要 `NPM_TOKEN`**（工作流拿一个短时 OIDC 令牌，并签署 SLSA provenance 证明）。
 
-**npm 这一步刻意不自动化**：不配 `NPM_TOKEN`（也不打算配），发布 npm 就保持在已登录的 shell 里手动
-`npm publish`（工作流会跳过该步骤并告警）。dsh 插件是独立的包，它有改动时也要单独发：
+dsh 插件是独立包（`rulemux-dsh`），由
+[`.github/workflows/dsh-publish.yml`](.github/workflows/dsh-publish.yml) 在自己的 `dsh-v*`
+tag 上发布：
 
 ```bash
-cd dsh-plugin && npm publish
+# 在 dsh-plugin/package.json 里把版本号改高（如 0.3.6）
+git commit -am "chore(rulemux-dsh): 0.3.6"
+git tag dsh-v0.3.6
+git push --follow-tags          # CI：通过 OIDC 发布 rulemux-dsh
 ```
 
 普通的 CI（[`ci.yml`](.github/workflows/ci.yml)）在每次 push 时跑 build/vet/测试/冒烟。

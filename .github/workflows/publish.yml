@@ -1,17 +1,17 @@
-# Release pipeline: push a tag (vX.Y.Z) -> cross-compile all platform binaries ->
+# Publish pipeline: push a tag (vX.Y.Z) -> cross-compile all platform binaries ->
 # attach them to a GitHub Release -> publish the npm package.
 #
 # npm publishing uses GitHub OIDC trusted publishing (no long-lived NPM_TOKEN):
 # the `npm` job gets `permissions: id-token: write` and npm exchanges the
 # short-lived GitHub OIDC token for a publish grant. Configure the Trusted
 # Publisher for `rulemux` on npmjs.com -> Settings -> Trusted Publishers,
-# pointing at this `release.yml` workflow in cq-guojia/rulemux. `--provenance`
+# pointing at this `publish.yml` workflow in cq-guojia/rulemux. `--provenance`
 # attaches a signed supply-chain attestation.
 #
 # Usage (maintainers):
 #   npm version patch|minor|major     # bumps package.json + creates git tag v0.x.y
 #   git push --follow-tags            # triggers this pipeline (incl. npm publish)
-name: release
+name: publish
 
 on:
   push:

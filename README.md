@@ -596,20 +596,23 @@ them. (The checklist for adding an agent is kept for reference:
 
 ```bash
 npm version patch|minor|major   # bumps package.json and creates the git tag v0.x.y
-git push --follow-tags          # CI: cross-compiled binaries on a GitHub Release
-npm publish                     # npm: by hand, from a logged-in shell
+git push --follow-tags          # CI: build, attach binaries to a GitHub Release, and publish to npm
 ```
 
-Pushing the tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
-cross-compile all platform binaries and attach them to a GitHub Release.
+Pushing the tag triggers [`.github/workflows/publish.yml`](.github/workflows/publish.yml):
+it cross-compiles all platform binaries, attaches them to a GitHub Release, and publishes the
+`rulemux` npm package — all via GitHub OIDC trusted publishing, **no `NPM_TOKEN` needed** (the
+workflow gets a short-lived OIDC token and signs a SLSA provenance attestation).
 
-**The npm step is deliberately not automated.** No `NPM_TOKEN` repository secret is configured and
-none is planned: publishing to npm stays a manual `npm publish` from a logged-in shell (the workflow
-skips that step with a warning). The dsh plugin is a separate package — publish it too when it
-changed:
+The dsh plugin is a separate package (`rulemux-dsh`) published by
+[`.github/workflows/dsh-publish.yml`](.github/workflows/dsh-publish.yml) on its own `dsh-v*`
+tag:
 
 ```bash
-cd dsh-plugin && npm publish
+# in dsh-plugin/package.json, bump version (e.g. 0.3.6)
+git commit -am "chore(rulemux-dsh): 0.3.6"
+git tag dsh-v0.3.6
+git push --follow-tags          # CI: publish rulemux-dsh via OIDC
 ```
 
 A plain CI run ([`ci.yml`](.github/workflows/ci.yml)) runs build/vet/tests/smoke on every push.

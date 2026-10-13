@@ -1,4 +1,4 @@
-# DSH plugin release pipeline: push a tag `dsh-vX.Y.Z` -> publish the
+# DSH plugin publish pipeline: push a tag `dsh-vX.Y.Z` -> publish the
 # `rulemux-dsh` npm package via GitHub OIDC trusted publishing (no NPM_TOKEN).
 #
 # The plugin's build artifacts (index.mjs, lib/, locale/) are committed to the
@@ -8,12 +8,12 @@
 #   Publisher:          GitHub Actions
 #   Organization or user: cq-guojia
 #   Repository:         rulemux
-#   Workflow filename:  dsh-release.yml
+#   Workflow filename:  dsh-publish.yml
 #   Allow publishing directly: yes
 #
 # Usage:
 #   bump dsh-plugin/package.json version -> commit -> git tag dsh-vX.Y.Z -> git push --follow-tags
-name: dsh-release
+name: dsh-publish
 
 on:
   push:
