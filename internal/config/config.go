@@ -151,6 +151,10 @@ func Load(path string) (*Config, error) {
 
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		// 行尾注释是 TOML 标准语法：按引号状态剥掉字符串外的 "#" 及其后内容。
+		// 必须在表头 / 空行 / 整行注释判断之前做 —— 否则 [[source]] # c 这类表头
+		// 会因 HasSuffix(line, "]]") 不命中而整张表被静默忽略。
+		line = stripTrailingComment(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -653,6 +657,32 @@ func segMatch(pat, name string) bool {
 		return pat == name
 	}
 	return ok
+}
+
+// stripTrailingComment 按引号状态扫描，剥掉字符串以外的第一个 "#" 及其后内容；
+// 引号内的 "#"（如 path = "/rules/a#b.md"）属于值的一部分，不剥。
+// 不含 "#" 或 "#" 全在引号内的行原样返回 —— 既有配置行为不变。
+// shortcut: 不处理 TOML 的 \" 转义（本解析器其余各处同样不处理），
+// 需要转义语义时再升级。
+func stripTrailingComment(line string) string {
+	inSingle, inDouble := false, false
+	for i, r := range line {
+		switch r {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case '#':
+			if !inSingle && !inDouble {
+				return strings.TrimSpace(line[:i])
+			}
+		}
+	}
+	return line
 }
 
 // unquote 去掉字符串两侧的成对引号。

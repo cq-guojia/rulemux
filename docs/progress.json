@@ -9,6 +9,16 @@
       "status": "doing",
       "title": "v2：Trae/dsh skill 注入 + 剩余 canary + git skill 源",
       "worklog": "worklog/202610/13-1133-v2-trae-dsh-skill-注入-剩余-canary-git-skill-eec8.md"
+    },
+    "20261013-1731-toml-解析支持行尾注释-60f2": {
+      "created": "2026-10-13 17:31:59",
+      "creator": "GuoJia-Agent",
+      "finished": null,
+      "owner": "GuoJia-Agent",
+      "started": "2026-10-13 17:31:59",
+      "status": "doing",
+      "title": "TOML 解析支持行尾注释",
+      "worklog": "worklog/202610/13-1731-toml-解析支持行尾注释-60f2.md"
     }
   }
 }

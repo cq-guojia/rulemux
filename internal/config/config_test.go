@@ -44,6 +44,66 @@ path = 'D:/notes/b.txt'
 	}
 }
 
+// TestTrailingComment 校验行尾注释（TOML 标准语法）：键值与表头都能带尾注释，
+// 引号内的 "#" 是值的一部分、不能被当注释剥掉；注释里的引号（don't）不误伤。
+// 回归保护：修复前 ["base"] # 尾注释 会被整体当成组名，报 undefined file group。
+func TestTrailingComment(t *testing.T) {
+	c := writeCfg(t, `[[file_group]]          # 组头也能带尾注释
+name = "base"              # 组名
+path = ["/rules/a.md", "/rules/b.md"]   # 组内文件
+
+[[source]]
+groups = ["base"]          # 尾注释
+path = '/rules/a#b.md'     # 引号内的 # 属于路径，不是注释
+agents = ["codebuddy"]     # 只投一家
+scope = "user"# 无空格紧跟也要剥
+`)
+	if len(c.FileGroups) != 1 || c.FileGroups[0].Name != "base" {
+		t.Fatalf("带尾注释的 [[file_group]] 表头/键值解析错误：%+v", c.FileGroups)
+	}
+	if got := c.FileGroups[0].Paths; !equalSlice(got, []string{"/rules/a.md", "/rules/b.md"}) {
+		t.Fatalf("file_group.path 带尾注释解析错误：%v", got)
+	}
+	if len(c.Sources) != 1 {
+		t.Fatalf("带尾注释的 [[source]] 应解析出 1 条，实得 %d", len(c.Sources))
+	}
+	s := c.Sources[0]
+	if !equalSlice(s.Groups, []string{"base"}) {
+		t.Fatalf("groups 带尾注释解析错误：%v", s.Groups)
+	}
+	// 组展开的文件在前，source 自身显式 path 在后；单引号值内的 # 必须保留
+	want := []string{"/rules/a.md", "/rules/b.md", "/rules/a#b.md"}
+	if !equalSlice(s.Paths, want) {
+		t.Fatalf("展开后 Paths 应为 %v，实得 %v", want, s.Paths)
+	}
+	if !s.IsUserScope() {
+		t.Fatalf("scope 带尾注释应归一为 user，实得 %q", s.Scope)
+	}
+	if !equalSlice(s.Agents, []string{"codebuddy"}) {
+		t.Fatalf("agents 带尾注释解析错误：%v", s.Agents)
+	}
+}
+
+// TestStripTrailingComment 单测剥注释的引号状态机：引号内的 # 保留、
+// 注释里的引号（don't）不误伤、无 # 原样返回。
+func TestStripTrailingComment(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`path = ["a.md"] # 尾注释`, `path = ["a.md"]`},
+		{`path = "/rules/a#b.md"`, `path = "/rules/a#b.md"`},
+		{`path = '/a#b.md' # c`, `path = '/a#b.md'`},
+		{`[[source]] # 注释`, `[[source]]`},
+		{`# 整行注释`, ``},
+		{`path = "a.md"# 无空格`, `path = "a.md"`},
+		{`path = ["a.md"] # don't panic`, `path = ["a.md"]`},
+		{`path = "a.md"`, `path = "a.md"`},
+	}
+	for _, c := range cases {
+		if got := stripTrailingComment(c.in); got != c.want {
+			t.Errorf("stripTrailingComment(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestSinglePath 校验 path 仍可写单个字符串（向后兼容）。
 func TestSinglePath(t *testing.T) {
 	dir := t.TempDir()
