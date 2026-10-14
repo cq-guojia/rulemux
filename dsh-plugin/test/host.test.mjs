@@ -29,7 +29,7 @@ let caseNo = 0;
  * The stub records every argv into $STUB_LOG, answers `--version` / `--help` / `init` / `inject`,
  * and can be told to fail `inject` (that failure must never fail the session).
  */
-async function world({ injectExit = 0, rules = RULES } = {}) {
+async function world({ injectExit = 0, rules = RULES, version = "0.4.7" } = {}) {
   const tmp = mkdtempSync(join(tmpdir(), "rulemux-dsh-test-"));
   const home = join(tmp, "home");
   const bin = join(tmp, "bin");
@@ -44,7 +44,7 @@ async function world({ injectExit = 0, rules = RULES } = {}) {
       "#!/bin/sh",
       'printf \'%s\\n\' "$*" >> "$STUB_LOG"',
       'case "$1" in',
-      '  --version) printf "rulemux 0.3.7\\n"; exit 0 ;;',
+      `  --version) printf "rulemux ${version}\\n"; exit 0 ;;`,
       '  --help) printf "  dsh   DeepSeek Harness (self-contained)\\n"; exit 0 ;;',
       '  init) mkdir -p "$HOME/.rulemux"; : > "$HOME/.rulemux/config.toml"; exit 0 ;;',
       '  inject) printf "%s" "$STUB_RULES"; exit "$STUB_INJECT_EXIT" ;;',
@@ -54,6 +54,15 @@ async function world({ injectExit = 0, rules = RULES } = {}) {
     ].join("\n"),
   );
   chmodSync(stub, 0o755);
+
+  // Guard rails: an unsatisfied CLI is upgraded with pnpm, then npm. Stub both as failing no-ops so a
+  // test that exercises the upgrade path can never reach the network or touch the real global install
+  // (and so "old CLI ⇒ loud failure" is deterministic).
+  for (const pm of ["pnpm", "npm"]) {
+    const shim = join(bin, pm);
+    writeFileSync(shim, ["#!/bin/sh", 'printf \'%s\\n\' "$*" >> "$STUB_LOG"', "exit 1", ""].join("\n"));
+    chmodSync(shim, 0o755);
+  }
 
   process.env.HOME = home;
   process.env.STUB_LOG = log;
@@ -129,4 +138,15 @@ test("a failing inject is logged, not fatal: the session continues without a blo
   const decision = await w.turn();
   assert.equal(decision.messages.length, 1, "no block may be injected when the CLI fails");
   assert.match(w.calls(), /inject --agent dsh/, "the CLI must still have been asked");
+});
+
+test("a dsh-aware but too-old CLI is not trusted: readiness fails loudly instead of injecting nothing", async () => {
+  // 0.3.7 lists `dsh` in --help (so a knowsDsh-only check would wave it through), but it predates the
+  // 0.4.2 config parser and mangles the config into an "undefined file group" error at inject time.
+  // The stub pnpm/npm refuse to install, so the upgrade cannot happen and readiness MUST fail — a
+  // visible session error — rather than silently accept the CLI and inject nothing on every turn.
+  const w = await world({ version: "0.3.7" });
+
+  await assert.rejects(() => w.turn(), /rulemux-dsh/);
+  assert.doesNotMatch(w.calls(), /inject --agent dsh/, "an unusable CLI must never be asked for rules");
 });

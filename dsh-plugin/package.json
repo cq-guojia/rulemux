@@ -1,6 +1,6 @@
 {
   "name": "rulemux-dsh",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "icon": "./icon.svg",
   "description": "rulemux rules inside DeepSeek Harness (dsh): asks the rulemux CLI for the rules it renders for this workspace and injects them into the session once, on the first turn. Writes nothing to the workspace.",
   "type": "module",

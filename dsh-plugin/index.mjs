@@ -71,16 +71,23 @@ const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() 
 
 // The CLI version this plugin needs. Kept here — NOT in package.json's dependencies (that would make
 // the plugin itself uninstallable when the mirror lags) and NOT in peerDependencies (pnpm may then
-// refuse to install it). `>=` means "this or newer"; an exact pin ("0.3.1" / "=0.3.1") means "exactly
+// refuse to install it). `>=` means "this or newer"; an exact pin ("0.4.2" / "=0.4.2") means "exactly
 // this". Either way an unsatisfied version is upgraded, then re-checked, and failing that we throw.
 //
-// ⚠ It must be the FIRST RELEASED version whose registry entry ships the dsh adapter: a version floor
-// only means anything if everything below it genuinely cannot do the job. We call the long-standing
-// `inject` subcommand, but with `--agent dsh` — and what makes that agent id known at all is the dsh
-// adapter, which landed after v0.3.0. npm's 0.3.0 (and anything older, e.g. 0.2.7) answers "unknown
-// agent dsh" for `--agent dsh`, hence 0.3.1. It also decides what we upgrade *to* (see
-// installTarget), so it is bumped in the same change that cuts the release, never afterwards.
-const REQUIRED_CLI = ">=0.3.1";
+// ⚠ It must be the FIRST RELEASED version that can do the WHOLE job: a version floor only means
+// anything if everything below it genuinely cannot. Two capabilities are required, and the LATER of
+// the two sets the floor:
+//   • `inject --agent dsh` — the dsh adapter, which landed AFTER v0.3.0 (npm's 0.3.0 and older, e.g.
+//     0.2.7, answer "unknown agent dsh"), so 0.3.1 is the first whose `--help` lists `dsh`.
+//   • a config parser that accepts the config we ship — line-trailing `#` comments on every
+//     assignment, which `rulemux init` writes and the docs use, landed in v0.4.2. A CLI in
+//     0.3.1–0.4.1 therefore KNOWS dsh but mangles just such a config into an "undefined file group"
+//     error at `inject` time. It must be upgraded, never accepted — exactly the trap a
+//     `knowsDsh`-only check fell into: those versions list `dsh` in --help, looked capable, were
+//     never upgraded, and then failed to inject on every turn (see cliOk).
+// Hence 0.4.2. It also decides what we upgrade *to* (see installTarget), so it is bumped in the same
+// change that cuts the release, never afterwards.
+const REQUIRED_CLI = ">=0.4.2";
 
 const INSTALL_TIMEOUT_MS = 120_000; // global install / sync: generous, but never hang forever
 const PROBE_TIMEOUT_MS = 15_000; // resolving / probing the CLI
@@ -184,16 +191,27 @@ async function probeCliVersion(cli) {
  * code it contains, so a perfectly capable CLI can look too old. `--help` lists the supported agent
  * ids straight from the registry, so that list is the honest answer. (Help text is human-facing, but
  * the id column is machine-stable, and the version check stays the fast path.)
+ *
+ * NOTE this is only a FALLBACK, consulted when the version cannot be read at all (see cliOk). It
+ * cannot be the primary check: 0.3.1–0.4.1 all list `dsh` yet cannot parse our config, so trusting
+ * `--help` alone silently accepts a CLI that then fails to inject — the bug this guards against.
  */
 async function knowsDsh(cli) {
   const r = await run(cli.cmd, [...cli.args, "--help"], { timeoutMs: PROBE_TIMEOUT_MS });
   return r.code === 0 && /^\s*dsh\s/m.test(`${r.out}${r.err}`);
 }
 
-/** Can this CLI do our job? Either its version is new enough, or it demonstrably knows `dsh`. */
+/**
+ * Can this CLI do our job? When its version can be read, that version is AUTHORITATIVE: anything
+ * below the floor — e.g. 0.3.1–0.4.1, which know `dsh` but cannot parse our own config (see
+ * REQUIRED_CLI) — is NOT accepted and gets upgraded. `knowsDsh` is consulted only when the version is
+ * unreadable, the single case it was originally meant for (a binary whose --version is absent or
+ * unparseable). This is what stops a dsh-aware-but-too-old CLI from being trusted forever.
+ */
 async function cliOk(cli) {
   if (!cli) return false;
-  if (satisfies(await probeCliVersion(cli), REQUIRED_CLI)) return true;
+  const v = await probeCliVersion(cli);
+  if (v) return satisfies(v, REQUIRED_CLI);
   return knowsDsh(cli);
 }
 
@@ -281,9 +299,10 @@ async function installCli(reasons, spec) {
 }
 
 /**
- * Readiness step ①: a CLI that can actually do the job — its version satisfies REQUIRED_CLI, or it
- * demonstrably knows the `dsh` adapter (see cliOk). A CLI that can do neither is upgraded, never
- * accepted; if the upgrade leaves an unusable one in effect we throw rather than report success.
+ * Readiness step ①: a CLI that can actually do the job (see cliOk — its version satisfies
+ * REQUIRED_CLI, or, only when the version is unreadable, it demonstrably knows the `dsh` adapter). A
+ * CLI that cannot is upgraded, never accepted; if the upgrade leaves an unusable one in effect we
+ * throw rather than report success.
  */
 async function ensureCli(reasons) {
   let cli = await resolveCli();
@@ -292,8 +311,8 @@ async function ensureCli(reasons) {
   const found = cli ? await probeCliVersion(cli) : null;
   if (cli) {
     reasons.push(
-      `found an existing rulemux ${versionText(found)} at ${cli.how}, which satisfies neither ` +
-        `${REQUIRED_CLI} nor a \`dsh\`-aware CLI`,
+      `found an existing rulemux ${versionText(found)} at ${cli.how}, which does not satisfy ` +
+        `${REQUIRED_CLI}`,
     );
   }
 
@@ -313,7 +332,7 @@ async function ensureCli(reasons) {
   if (!(await cliOk(cli))) {
     throw new Error(
       `rulemux-dsh: rulemux ${versionText(await probeCliVersion(cli))} is still the CLI in effect ` +
-        `after installing ${spec}: it satisfies neither ${REQUIRED_CLI} nor a \`dsh\`-aware CLI.\n` +
+        `after installing ${spec}: it does not satisfy ${REQUIRED_CLI}.\n` +
         `  in effect: ${cli.how} (${[cli.cmd, ...cli.args].join(" ")})\n` +
         "  An outdated copy is shadowing the upgrade — remove or upgrade that copy, then start a " +
         "new dsh session.",
