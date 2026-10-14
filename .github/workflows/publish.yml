@@ -70,6 +70,14 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Verify bundled version matches tag
+        run: |
+          chmod +x dist/rulemux-* 2>/dev/null || true
+          built="$(dist/rulemux-linux-amd64 -v | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          want="${GITHUB_REF_NAME#v}"
+          echo "release binary version: $built  (expected $want)"
+          [ "$built" = "$want" ] || { echo "::error::release binary version $built != tag $want"; exit 1; }
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -114,6 +122,13 @@ jobs:
 
       - name: Build bundled binaries (version taken from the tag)
         run: bash scripts/build-dist.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Verify baked version matches tag
+        run: |
+          built="$(./dist/rulemux-linux-amd64 -v | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          want="${GITHUB_REF_NAME#v}"
+          echo "npm binary version: $built  (expected $want)"
+          [ "$built" = "$want" ] || { echo "::error::npm binary version $built != tag $want"; exit 1; }
 
       - name: Sync package.json version to the tag
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version

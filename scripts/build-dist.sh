@@ -10,10 +10,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 # Version may be passed in (the release pipeline passes the git tag); otherwise
-# it is read from main.go so local builds stay consistent.
+# it is read from package.json — the single source of truth for the version —
+# so a bare `build-dist.sh` (e.g. via npm prepublishOnly) still bakes the right
+# version instead of falling back to a hardcoded default in main.go.
 VERSION="${1:-}"
 if [ -z "$VERSION" ]; then
-  VERSION="$(grep -m1 -E '^(const|var) version' main.go | sed -E 's/.*"([^"]+)".*/\1/')"
+  VERSION="$(grep -m1 -E '^[[:space:]]*"version"[[:space:]]*:' package.json | sed -E 's/.*"([^"]+)".*/\1/')"
 fi
 OUT="dist"
 mkdir -p "$OUT"
