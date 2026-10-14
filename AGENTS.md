@@ -36,3 +36,7 @@
    - **读到的结论必须回写**（这一步最容易被漏）：写进 [`docs/design/external/`](docs/design/external/) —— 已有文档就补充或更正，**没有**就新建一篇（头部按外部事实类规矩写：类型 / 适用版本 / 状态 / 来源 / 配套）；过程另记 `docs/worklog/`（由 koc skill 建档）。**不许只留在对话里** —— 下次没人知道，同一个点会被重复排查。
    - **每条结论都标「适用版本」**：写清是哪个 agent、哪个版本（上游升级后据此复核）。
    - **未核实的内容不得写成事实**：标注 🔴 未核实，并把核实任务挂进 [`docs/progress.json`](docs/progress.json) 未决项。
+5. **CLI 与 dsh 插件是两条独立发布线，必须配对推进**（否则用户机器上的 CLI 不会自己往前走）：
+   - 两条线**互不触发**：CLI 打 `vX.Y.Z` tag（`publish.yml` → 发 npm `rulemux`）；插件打 `dsh-vX.Y.Z` tag（`dsh-publish.yml` → 发 npm `rulemux-dsh`）。**打 `v*` tag 不会带上插件**。
+   - 插件是否把机器上的 CLI 升到最新，只由**插件内置的 `REQUIRED_CLI` 下限**决定（`dsh-plugin/index.mjs`）：CLI 低于下限 → 插件自动装 `rulemux@latest`；CLI 已达下限 → 插件不动它（**不追最新**）。这段判定写死在插件里，**CLI 侧改不了它**。
+   - 所以：**要让用户的 CLI 跟到某个新版本（即抬高过 `REQUIRED_CLI`），就必须同步发一个 `dsh-vX.Y.Z`**；只发 CLI、不发插件，已装旧插件的机器不会被推动。凡改动「CLI 获取 / 版本判定」逻辑，同样必须发插件版本。
