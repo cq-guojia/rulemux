@@ -10,15 +10,15 @@
       "title": "v2：Trae/dsh skill 注入 + 剩余 canary + git skill 源",
       "worklog": "worklog/202610/13-1133-v2-trae-dsh-skill-注入-剩余-canary-git-skill-eec8.md"
     },
-    "20261013-2304-sync-总计小表与-doctor-输出瘦身-14c4": {
-      "created": "2026-10-13 23:04:57",
+    "20261013-2349-未安装-已卸载-agent-仍被同步-dsh-规则目录定位待拍板-11fd": {
+      "created": "2026-10-13 23:49:26",
       "creator": "GuoJia-Agent",
       "finished": null,
       "owner": "GuoJia-Agent",
-      "started": "2026-10-13 23:04:57",
+      "started": "2026-10-13 23:49:26",
       "status": "doing",
-      "title": "sync 总计小表与 doctor 输出瘦身",
-      "worklog": "worklog/202610/13-2304-sync-总计小表与-doctor-输出瘦身-14c4.md"
+      "title": "未安装/已卸载 agent 仍被同步 + dsh 规则目录定位待拍板",
+      "worklog": "worklog/202610/13-2349-未安装-已卸载-agent-仍被同步-dsh-规则目录定位待拍板-11fd.md"
     }
   }
 }

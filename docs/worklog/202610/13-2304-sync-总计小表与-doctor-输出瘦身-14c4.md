@@ -1,5 +1,6 @@
 # 20261013-2304-sync-总计小表与-doctor-输出瘦身-14c4：sync 总计小表与 doctor 输出瘦身
 
+> **✅ 完成封卷**：2026-10-14 08:18:39（@GuoJia-Agent）
 > **创建**：2026-10-13 23:04:57（@GuoJia-Agent）
 
 ## 背景
@@ -56,4 +57,4 @@ codelint：golangci-lint v2.14.0 在配置加载阶段即失败（`unsupported v
 - sync 结尾总计 = 空一行 + `Summary` 小表，替代原四行连排；
 - doctor = 青色段标题；Config 只答「配置文件在哪、管哪些文件」（rules/skills 分组、无过滤标注、按路径去重）；Agents 每个已初始化 agent 只报钩子是否正常；未初始化一行暗色。
 
-待用户结案指令（任务仍在 doing）。
+2026-10-14 用户验收通过、指令结案。
