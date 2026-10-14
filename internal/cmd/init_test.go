@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cq-guojia/rulemux/internal/state"
 )
 
 // seedHostSettings 在隔离的 HOME 下写一份宿主钩子配置，返回其路径。
@@ -97,6 +99,58 @@ func TestInitRefresh_UpgradesOldHookOnly(t *testing.T) {
 	// 刷新不是安装：不得顺手生成配置样例，也不得创建 ~/.rulemux。
 	if _, err := os.Stat(filepath.Join(home, ".rulemux", "config.toml")); !os.IsNotExist(err) {
 		t.Errorf("刷新模式不该生成配置样例（stat err=%v）", err)
+	}
+}
+
+// TestInitClearsOff 校验「唯一重启用入口」：init 安装模式把 agent 从 off 移出
+// （hook 型与 external 型两条分支都要走）。
+func TestInitClearsOff(t *testing.T) {
+	for _, id := range []string{"codebuddy", "dsh"} {
+		t.Run(id, func(t *testing.T) {
+			tmp := t.TempDir()
+			ws := filepath.Join(tmp, "ws")
+			if err := os.MkdirAll(ws, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HOME", filepath.Join(tmp, "home"))
+			t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+			if err := state.UpdateLedger(func(l *state.Ledger) error { l.AddOff(id, "trae"); return nil }); err != nil {
+				t.Fatal(err)
+			}
+			src := filepath.Join(tmp, "a.md")
+			if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+			_ = captureStdout(t, func() {
+				Init([]string{"--agent", id, "--config", cfgPath, "--workspace", ws})
+			})
+
+			off := state.Load().Off
+			if hasStr(off, id) {
+				t.Fatalf("init --agent %s 应把 %s 移出 off，实得 %v", id, id, off)
+			}
+			if !hasStr(off, "trae") {
+				t.Fatalf("init 只该清自己那个 agent，实得 %v", off)
+			}
+		})
+	}
+}
+
+// TestRefreshHidesOffAgents 校验 init --refresh（不带 --agent）不再列出已卸载的 agent
+// ——「卸载即断联」：例行输出里不出现已卸 agent（显式 --agent 点名除外）。
+func TestRefreshHidesOffAgents(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := state.UpdateLedger(func(l *state.Ledger) error { l.AddOff("dsh"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() { Init([]string{"--refresh"}) })
+	if strings.Contains(out, "dsh") {
+		t.Fatalf("init --refresh 不该列出已卸载的 agent，实得:\n%s", out)
 	}
 }
 

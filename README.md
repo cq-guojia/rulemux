@@ -12,8 +12,8 @@
 
 ### 1.1 The pain
 
-- **Every agent keeps rules somewhere else**: `.codebuddy/rules/`, `.claude/rules/`,
-  `.dsh/rules/`… one coding convention has to be rewritten once per agent.
+- **Every agent keeps rules somewhere else**: `.codebuddy/rules/`, `.trae/rules/`, a single
+  `AGENTS.md`, an injected recall block… one coding convention has to be rewritten once per agent.
 - **And every workspace keeps its own copy**: to make a rule apply in a workspace you write it
   there again.
 - So the rules that are genuinely **shared** (team conventions, coding standards) can neither be
@@ -48,8 +48,8 @@ One source of truth (your own .md files, declared in ~/.rulemux/config.toml)
 
               rulemux sync  ↓  real copies (never fades out / never accumulates / no symlinks)
 
-    workspace A ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
-    workspace B ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
+    workspace A ──► .codebuddy/rules/   .trae/rules/        (dsh: injected, nothing on disk)
+    workspace B ──► .codebuddy/rules/   .trae/rules/        (dsh: injected, nothing on disk)
 ```
 
 - **Rules are reused**: layer 3 inherits layer 2, layer 2 inherits layer 1 — write what is shared
@@ -122,7 +122,7 @@ directory and hook location have been confirmed by a real canary test. Today:
 | **trae** (Trae CN) | Tier-1 (real copy) | `.trae/rules/` | not yet | ✅ **Verified — installable** (2026-10-09 canary: user-level hook `~/.trae-cn/hooks.json`; the international `~/.trae` build is not wired yet) |
 | codex | Tier-2 (injection) | none — injects into context | not yet | ⚠️ registered, **not verified yet** |
 | opencode | Tier-2 (injection) | none — injects into context | not yet | ⚠️ registered, **not verified yet** |
-| **dsh** (DeepSeek Harness) | Tier-1 (real copy) | `.dsh/rules/` | not yet | ✅ **Verified — installable**; the reading half is a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only syncs; it does not install the plugin) |
+| **dsh** (DeepSeek Harness) | Tier-2 (injection) | none — injects into context | not yet | ✅ **Verified — installable**; delivery is a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only renders the text with `inject`, and writes nothing into your workspace) |
 
 - `rulemux init` **refuses** any agent that is not verified — it will not half-install an adapter
   whose behaviour has not been proven. `rulemux doctor` marks unverified agents with ⚠.
@@ -135,20 +135,24 @@ directory and hook location have been confirmed by a real canary test. Today:
   single `AGENTS.md`). It injects via the session hook and never touches your own `AGENTS.md`, but
   it cannot satisfy the "never fades out" bar. See
   [design/features/hook-injection.md](docs/design/features/hook-injection.md).
-- **dsh is a two-part story**: it has no hook file. rulemux writes `.dsh/rules/` (Tier-1); a
-  **separate plugin package** in this repo ([`dsh-plugin/`](dsh-plugin/)) reads it back, installed
-  the normal dsh way — it is on npm as `rulemux-dsh`:
-  `dsh plugin --profile web add rulemux-dsh` (or straight from git:
-  `add "github:cq-guojia/rulemux#path:/dsh-plugin"`). So
-  `rulemux init --agent dsh` installs nothing — it just prints the plugin command.
-  That plugin then **sets itself up as dsh starts** (restart dsh after installing): readiness is three
+- **dsh is plugin-delivered, and nothing lands on disk**: it has no hook file and no rules directory,
+  so rulemux never writes into your workspace for it. A **separate plugin package** in this repo
+  ([`dsh-plugin/`](dsh-plugin/)) — on npm as `rulemux-dsh` — asks the CLI for the rules rendered for
+  the session's workspace (`rulemux inject --agent dsh`) and injects that text once, on the first
+  user turn. Install it the normal dsh way — `dsh plugin --profile web add rulemux-dsh` (or straight
+  from git: `add "github:cq-guojia/rulemux#path:/dsh-plugin"`); `rulemux init --agent dsh` installs
+  nothing — it just prints that command.
+  The plugin then **sets itself up as dsh starts** (restart dsh after installing): readiness is three
   steps and **all of them must hold** — the `rulemux` CLI is resolved *and* its version satisfies the
   plugin's minimum (an older one is upgraded with pnpm/npm and re-checked — never accepted as-is),
   the plugin itself is loaded, and `~/.rulemux/config.toml` exists (created for you when missing,
   never overwritten). Any step that does not hold **raises**, so the session fails visibly instead of
   quietly running without rules. Because it happens at startup, `~/.rulemux/config.toml` is already
-  there when you go to edit it: install → restart → edit the config → open **one** session. Syncing
-  is a separate concern: a failing `rulemux sync` is logged, and the session carries on.
+  there when you go to edit it: install → restart → edit the config → open **one** session. Asking for
+  the rules is a separate concern: a failing `rulemux inject` is logged, and the session carries on
+  without an injected block. Uninstalling rulemux cannot stop the plugin (it belongs to the host), so
+  `rulemux uninstall --agent dsh` says so — and points out any leftover `.dsh/rules` files from the
+  old design, which rulemux no longer writes but also no longer deletes.
 
 ---
 
@@ -193,8 +197,8 @@ moved this agent's config directory with `CODEBUDDY_CONFIG_DIR`, rulemux follows
 ### 3.1 dsh: a plugin, not a hook
 
 Every other agent is “`rulemux init --agent <id>` installs a session hook”. **dsh is the exception**:
-it has no hook file, so `rulemux init --agent dsh` installs nothing and only prints the command
-below — the reading half is a dsh plugin:
+it has no hook file and no rules directory, so `rulemux init --agent dsh` installs nothing and only
+prints the command below — a dsh plugin does the delivery, asking rulemux for the text:
 
 ```bash
 dsh plugin --profile <your profile> add rulemux-dsh        # npm
@@ -207,6 +211,12 @@ dsh plugin --profile <your profile> add "github:cq-guojia/rulemux#path:/dsh-plug
 when it is missing (never overwriting one that exists). Any step that fails raises, so a session
 never quietly runs without rules. Because this happens at startup, the config file is already there
 when you go to edit it: install → restart → edit the config → open **one** session.
+
+On that session the plugin runs `rulemux inject --agent dsh` and injects the rendered rules —
+**nothing is written into your workspace**: no `.dsh/rules`, no copies, nothing left behind to clean
+up. (Older versions of rulemux wrote copies into `.dsh/rules` and the plugin read them back; that
+directory is now unused — if you have one left over, delete it yourself, or run
+`rulemux uninstall --agent dsh` which will point at it.)
 
 ---
 
@@ -316,8 +326,8 @@ and skips the rest.
 
 > ⚠️ **Run `rulemux sync` after editing your config or source docs**
 > After you edit `~/.rulemux/config.toml` (adding/removing a `[[source]]`, changing `path`) or any
-> source rule document, run `rulemux sync --agent codebuddy` (omit `--agent` to sync every supported
-> agent).
+> source rule document, run `rulemux sync --agent codebuddy` (a bare `rulemux sync` only touches the
+> agents already recorded for this workspace — name `--agent <id>` to add one).
 > - **If you run sync**: the next new session reads the updated rules.
 > - **If you don't**: CodeBuddy / WorkBuddy still auto-sync on every session start via the SessionStart
 >   hook, but the harness fixes the rule snapshot at the **start of the session** (before the hook runs),
@@ -552,19 +562,28 @@ rulemux also **revisits every workspace recorded in its ledger** (`~/.rulemux/wo
 cleans those too — otherwise, with the hook gone, that residue could never be removed again. You are
 shown the list of workspaces before anything is deleted.
 
+Once a rules/skills dir is empty it is removed as well (a symlinked, non-empty or subdir-bearing dir
+is left alone, and the dir above it is never touched; user-level dirs are kept). The agent is then
+**dropped from the ledger** for every workspace that was actually cleaned, and recorded as
+uninstalled — a later `rulemux sync` never writes to it again, and it stays out of `doctor` and of the
+sync summary until *you* install it again with `rulemux init --agent <id>`. For a plugin host (dsh)
+rulemux can neither remove the host-side plugin nor stop it: the plugin keeps calling
+`rulemux inject --agent dsh`, so it keeps injecting rules into your sessions until you disable it.
+Uninstall says exactly that, and points at the documented switch.
+
 ---
 
 ## 7. Commands
 
 | Command | What it does |
 |---|---|
-| `rulemux sync [--hook] [--agent <id>] [--config <path>] [--workspace <dir>]` | Sync rules. `--hook` = this run comes from an agent's SessionStart hook (only then may it create the rules dir and emit the change notice); omit `--agent` to target every supported agent |
+| `rulemux sync [--hook] [--agent <id>] [--config <path>] [--workspace <dir>]` | Sync rules. `--hook` = this run comes from an agent's SessionStart hook (only then may it create the rules dir and emit the change notice). Without `--agent` it only touches the agents already recorded for this workspace, or named explicitly in the config — an agent that was never used here, or one you uninstalled, is never written to. (A legacy ledger entry recorded as "all / unknown" is honoured only for agents whose hook is installed, i.e. that demonstrably read this workspace.) |
 | `rulemux sync --all [--config <path>]` | Manually re-align every workspace recorded in the ledger (never reads cwd, never creates dirs, prunes ledger entries whose directory is gone). Mutually exclusive with `--hook` / `--agent` / `--workspace` |
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2: print rules to stdout for hook injection |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | Write a sample config and install the SessionStart hook |
 | `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | Refresh **only** the hooks rulemux already installed. This also happens by itself on the first sync after an upgrade; use this to force it. Never adds a hook, never creates a file or directory, preserves every other entry and key in the host config |
 | `rulemux doctor [--config <path>] [--workspace <dir>]` | Environment self-check: how/where rulemux is installed, config file, which agents are initialized (TTY-aware colours) |
-| `rulemux verify --agent <id> [--clean] [--workspace <dir>]` | Canary acceptance test |
+| `rulemux verify [--agent <id>] [--clean] [--config <path>] [--workspace <dir>]` | Canary acceptance test. Without `--agent` it only probes agents already in use here; `--agent <id>` forces one (onboarding). `--clean` removes every canary in this workspace |
 | `rulemux uninstall --agent <id[,id...]> \| --off \| --all [--yes]` | Remove hooks and delivered files |
 
 Run `rulemux` with no arguments for the full help.
@@ -573,8 +592,9 @@ Run `rulemux` with no arguments for the full help.
 
 ## 8. Scope
 
-**The agent set is frozen.** rulemux supports exactly four agents — all Tier-1, all confirmed by a
-real canary run: **codebuddy**, **workbuddy**, **trae**, and **dsh**. `claude`, `codex` and `opencode`
+**The agent set is frozen.** rulemux supports exactly four agents, all confirmed by a real canary
+run: **codebuddy**, **workbuddy**, **trae** (Tier-1 — real copies) and **dsh** (Tier-2 — injection,
+delivered by its own plugin, nothing written into the workspace). `claude`, `codex` and `opencode`
 stay registered but unverified, which is why `rulemux init` refuses them; there is no plan to finish
 them. (The checklist for adding an agent is kept for reference:
 [design/features/agent-onboarding.md](docs/design/features/agent-onboarding.md).)

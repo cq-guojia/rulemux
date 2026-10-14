@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -114,5 +115,128 @@ func TestOthers(t *testing.T) {
 		if ws == "/b" {
 			t.Fatal("Others 不该包含当前工作区")
 		}
+	}
+}
+
+// TestLoadRespectsEmptyAgentsEntry 校验「空列表 = 无 agent」：v2 文件里某工作区是
+// 空列表（uninstall 清空后的终态）时，Load 不得回填哨兵 *——那会把卸载成果冲掉（B1）。
+func TestLoadRespectsEmptyAgentsEntry(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvStateDir, dir)
+	body := `{"version":2,"workspaces":["/a"],"agents":{"/a":[]}}`
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().AgentsFor("/a"); len(got) != 0 {
+		t.Fatalf("空 agents 条目应表示「无 agent」，实得 %v", got)
+	}
+}
+
+// TestSaveDoesNotDegradeToV1AfterOff 校验：清空 agents + 写 off 之后，文件必须保持
+// v2 形态（agents 键在），再次 Load 不得把工作区还原成「全部 agent」。
+func TestSaveDoesNotDegradeToV1AfterOff(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvStateDir, dir)
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(`{"workspaces":["/a"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateLedger(func(l *Ledger) error {
+		l.Agents["/a"] = []string{}
+		l.AddOff("dsh")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"agents"`)) {
+		t.Fatalf("Save 后必须保留 agents 键（不得退化成 v1 形态），实得 %s", b)
+	}
+	l := Load()
+	if got := l.AgentsFor("/a"); len(got) != 0 {
+		t.Fatalf("清空后应是「无 agent」，实得 %v", got)
+	}
+	if !containsStr(l.Off, "dsh") {
+		t.Fatalf("off 应持久化，实得 %v", l.Off)
+	}
+}
+
+// TestForgetAgentSemantics 校验 ForgetAgent：显式列表移除该 agent、哨兵 * 列表不动
+// （排除交给 off）、Workspaces 条目保留、幂等。
+func TestForgetAgentSemantics(t *testing.T) {
+	t.Setenv(EnvStateDir, t.TempDir())
+	if err := UpdateLedger(func(l *Ledger) error {
+		l.Workspaces = []string{"/ws", "/star"}
+		l.Agents = map[string][]string{
+			"/ws":   {"codebuddy", "dsh"},
+			"/star": {AnyAgent},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateLedger(func(l *Ledger) error {
+		l.ForgetAgent("/ws", "dsh")
+		l.ForgetAgent("/star", "dsh") // 哨兵列表不动
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	l := Load()
+	if got := l.AgentsFor("/ws"); len(got) != 1 || got[0] != "codebuddy" {
+		t.Fatalf("显式列表应移除 dsh，实得 %v", got)
+	}
+	if got := l.AgentsFor("/star"); len(got) != 1 || got[0] != AnyAgent {
+		t.Fatalf("哨兵列表应保持 *（排除交给 off），实得 %v", got)
+	}
+	if !containsStr(l.Workspaces, "/ws") || !containsStr(l.Workspaces, "/star") {
+		t.Fatalf("Workspaces 条目必须保留，实得 %v", l.Workspaces)
+	}
+	if err := UpdateLedger(func(l *Ledger) error { l.ForgetAgent("/ws", "dsh"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().AgentsFor("/ws"); len(got) != 1 || got[0] != "codebuddy" {
+		t.Fatalf("ForgetAgent 应幂等，实得 %v", got)
+	}
+	// 不存在的工作区：安静无操作（不 panic、不新增条目）
+	if err := UpdateLedger(func(l *Ledger) error { l.ForgetAgent("/nope", "dsh"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Workspaces; len(got) != 2 {
+		t.Fatalf("对不存在的工作区 ForgetAgent 不该改动账本，实得 %v", got)
+	}
+}
+
+// TestOffRoundTrip 校验 off 的增删与去重持久化。
+func TestOffRoundTrip(t *testing.T) {
+	t.Setenv(EnvStateDir, t.TempDir())
+	if err := UpdateLedger(func(l *Ledger) error { l.AddOff("dsh", "dsh", "trae"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Off; len(got) != 2 {
+		t.Fatalf("off 应去重持久化，实得 %v", got)
+	}
+	if err := UpdateLedger(func(l *Ledger) error { l.ClearOff("dsh"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Off; len(got) != 1 || got[0] != "trae" {
+		t.Fatalf("ClearOff 后应只剩 trae，实得 %v", got)
+	}
+}
+
+// TestRecordDoesNotTouchOff 校验 Record 不碰 off：自愈已删（全局自愈会跨工作区
+// 复活已卸 agent），「重新在用」只由 init 安装模式清 off 表达。
+func TestRecordDoesNotTouchOff(t *testing.T) {
+	t.Setenv(EnvStateDir, t.TempDir())
+	if err := UpdateLedger(func(l *Ledger) error { l.AddOff("dsh"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := Record("/ws", "dsh"); err != nil {
+		t.Fatal(err)
+	}
+	if !containsStr(Load().Off, "dsh") {
+		t.Fatal("Record 不得把 agent 从 off 移除")
 	}
 }

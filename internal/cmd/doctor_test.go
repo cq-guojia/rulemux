@@ -8,6 +8,7 @@ import (
 
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
+	"github.com/cq-guojia/rulemux/internal/state"
 )
 
 // TestInstallMethod 表驱动校验安装方式判定（纯函数，不碰真文件系统）。
@@ -51,12 +52,79 @@ func TestDoctorOutput(t *testing.T) {
 		"Install",
 		"Config",
 		"Agents —",
-		"not initialized:",
 		"next: rulemux verify",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor 输出应包含 %q，实得:\n%s", want, out)
 		}
+	}
+}
+
+// TestDoctorHidesUninstalledAgent 校验「卸载即断联」（用户 2026-10-14 拍板）：
+// uninstall 后 off 含该 agent ⇒ doctor 输出不再提它——不出现、不 nag、不建议重装。
+// 也顺带锁住名单新口径：从没用过的 agent 同样不出现，于是卸载完这个工作区就没人可列。
+func TestDoctorHidesUninstalledAgent(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	traeRules := filepath.Join(ws, ".trae", "rules")
+	if err := os.MkdirAll(traeRules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(traeRules, "__rulemux__a.md"), []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := state.Record(ws, "trae"); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	_ = captureStdout(t, func() {
+		Uninstall([]string{"--agent", "trae", "--config", cfgPath, "--workspace", ws, "--yes"})
+	})
+	out := captureStdout(t, func() { Doctor([]string{"--config", cfgPath, "--workspace", ws}) })
+	if strings.Contains(out, "trae") {
+		t.Fatalf("已卸载 agent 不该出现在 doctor 输出里，实得:\n%s", out)
+	}
+	if !strings.Contains(out, "Agents — none in use in this workspace") {
+		t.Fatalf("卸载后没人在用，Agents 段应这么说（而不是 0 of 0），实得:\n%s", out)
+	}
+}
+
+// TestDoctorShowsInjectionOnlyAgent 校验 dsh 改注入后 doctor 说人话：它由宿主侧插件
+// 现取现注入，工作区里没有可初始化的东西——既不报「未初始化」（那会把用户支去跑一个
+// 修不好它的 init），也不静默消失（那会让用户以为 doctor 没看见它），而是单列一行说明。
+func TestDoctorShowsInjectionOnlyAgent(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := state.Record(ws, "dsh"); err != nil {
+		t.Fatal(err) // dsh 在用（账本记着）
+	}
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	out := captureStdout(t, func() { Doctor([]string{"--config", cfgPath, "--workspace", ws}) })
+	if !strings.Contains(out, "dsh") || !strings.Contains(out, "host-side plugin") {
+		t.Fatalf("在用 dsh 应有一行说明它由宿主侧插件注入，实得:\n%s", out)
+	}
+	if strings.Contains(out, "not initialized: dsh") {
+		t.Fatalf("dsh 不该被报成「未初始化」：\n%s", out)
+	}
+	if !strings.Contains(out, "Agents — 0 of 1 initialized") {
+		t.Fatalf("分母只算在用的 agent（这里只有 dsh），实得:\n%s", out)
 	}
 }
 

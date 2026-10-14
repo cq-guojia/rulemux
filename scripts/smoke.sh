@@ -5,11 +5,13 @@
 #   Uses $REPO_ROOT/rulemux if present, otherwise builds it.
 #
 # Scope note: only *verified* agents can be installed, which today means
-# codebuddy (hook ~/.codebuddy/settings.json, rules .codebuddy/rules) and
-# workbuddy (separate agent since 2026-10-09: hook ~/.workbuddy/settings.json,
-# rules .workbuddy/rules). Agents such as claude / trae / codex / opencode are
-# registered but NOT verified yet, so they are deliberately excluded here -
-# their coverage arrives with their adapter.
+# codebuddy (hook ~/.codebuddy/settings.json, rules .codebuddy/rules),
+# workbuddy (hook ~/.workbuddy/settings.json, rules .codebuddy/rules — SHARED
+# with codebuddy since the 2026-10-09 probe), trae (hook ~/.trae-cn/hooks.json,
+# rules .trae/rules) and dsh (plugin-first: no hook, rules .dsh/rules).
+# Agents such as claude / codex / opencode are registered but NOT verified yet,
+# so they are deliberately excluded here - their coverage arrives with their
+# adapter.
 #
 # Isolation note: HOME is redirected to a temp dir, so the user-level hook config
 # written by init never touches the real ~/.codebuddy/settings.json.
@@ -35,7 +37,7 @@ CFG="$TMP/config.toml"
 mkdir -p "$WS" "$TMP/src"
 
 AGENT=codebuddy
-RULES_REL=".codebuddy/rules"          # codebuddy only; workbuddy uses .workbuddy/rules (separate agent)
+RULES_REL=".codebuddy/rules"          # codebuddy and workbuddy SHARE this dir (probe-verified 2026-10-09)
 HOOK_CFG="$HOME/.codebuddy/settings.json"  # hooks live in the user-level host config
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -69,9 +71,14 @@ ok "init is idempotent"
 ok "sync drops prefixed files into the rules dir"
 
 # 4. Idempotent: a second sync skips everything
+# Report format (2026-10-13 聚合版式): per-agent lines "rules N · skills M", a changed
+# block gets a glyph header with a "rules +N / ~N / −N" suffix, and the closing Summary
+# table carries the totals row "rules <files> <+added> <−removed> <~updated>".
+# Assert on the ASCII totals row only — all four counters zero IS the proof of
+# idempotency, and it keeps the check free of locale-dependent glyph matching.
 "$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync2.log" 2>&1
-grep -q "Unchanged, skipped" "$TMP/sync2.log" || fail "second sync did not skip (not idempotent)"
-if grep -q "Added:" "$TMP/sync2.log"; then fail "second sync added files again"; fi
+grep -Eq 'rules[[:space:]]+2[[:space:]]+0[[:space:]]+0[[:space:]]+0' "$TMP/sync2.log" \
+  || fail "second sync was not idempotent (totals row)"
 ok "sync is idempotent (skips unchanged files)"
 
 # 5. The user's own files are never touched
@@ -83,7 +90,9 @@ ok "user files are left alone"
 # 6. Changing the source overwrites the copy
 printf 'rule A v2\n' > "$TMP/src/a.md"
 "$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync3.log" 2>&1
-grep -q "Updated:" "$TMP/sync3.log" || fail "content change did not trigger an update"
+# totals row: files=2 +added=0 −removed=0 ~updated=1
+grep -Eq 'rules[[:space:]]+2[[:space:]]+0[[:space:]]+0[[:space:]]+1' "$TMP/sync3.log" \
+  || fail "content change did not trigger an update"
 grep -q "rule A v2" "$WS/$RULES_REL/__rulemux__a.md" || fail "updated content is wrong"
 ok "source change overwrites the copy"
 
@@ -93,7 +102,9 @@ cat > "$CFG" <<EOF
 path = ["$TMP/src/a.md"]
 EOF
 "$BIN" sync --hook --agent "$AGENT" --config "$CFG" --workspace "$WS" >"$TMP/sync4.log" 2>&1
-grep -q "Removed residue" "$TMP/sync4.log" || fail "residue was not removed"
+# totals row: files=1 +added=0 −removed=1 ~updated=0
+grep -Eq 'rules[[:space:]]+1[[:space:]]+0[[:space:]]+1[[:space:]]+0' "$TMP/sync4.log" \
+  || fail "residue was not removed"
 [ ! -f "$WS/$RULES_REL/__rulemux__b.txt" ] || fail "residue __rulemux__b.txt still present"
 [ -f "$WS/$RULES_REL/__rulemux__a.md" ]    || fail "__rulemux__a.md was wrongly deleted"
 ok "residue is cleaned up"
@@ -143,7 +154,10 @@ ok "workspace matching"
 
 # 12. Ledger: uninstalling from one workspace also sweeps the other recorded ones.
 # Prior steps synced into $WS and wsA, so both are in the ledger (wsB is undeclared
-# and therefore skipped => never recorded).
+# and therefore skipped => never recorded). Make that precondition explicit instead of
+# relying on earlier steps having recorded them.
+grep -qF "$WS" "$HOME/.rulemux/workspaces.json" || fail "precondition: $WS was not recorded in the ledger"
+grep -qF "$TMP/wsA" "$HOME/.rulemux/workspaces.json" || fail "precondition: wsA was not recorded in the ledger"
 # --config is required here: pruning needs the config to know what is still in use, and an
 # unreadable config deliberately leaves every file untouched (safety guard, see uninstall.go).
 "$BIN" uninstall --agent "$AGENT" --config "$CFG" --workspace "$TMP/wsB" --yes >"$TMP/uninstall.log" 2>&1 || fail "uninstall exited non-zero"
@@ -209,7 +223,7 @@ cat > "$HOOKHOME/.codebuddy/settings.json" <<'EOF'
 {"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
 EOF
 HOME="$HOOKHOME" "$BIN" doctor --workspace "$WS" >"$TMP/doctor2.log" 2>&1 || fail "doctor exited non-zero"
-grep -q "installed but OUTDATED" "$TMP/doctor2.log" || fail "doctor did not flag the outdated hook"
+grep -q "hook OUTDATED" "$TMP/doctor2.log" || fail "doctor did not flag the outdated hook"
 grep -q "rulemux init --refresh" "$TMP/doctor2.log" || fail "doctor did not point at the fix"
 ok "doctor flags outdated hooks"
 
@@ -304,6 +318,202 @@ for base in .codebuddy .workbuddy; do
 done
 [ -f "$HOME/.codebuddy/rules/my-own.md" ] || fail "uninstall deleted the user's own user-level file"
 ok "uninstall converges the user-level dirs"
+
+# 21. D1: bare sync (no --agent, not --hook) with an empty ledger writes nothing:
+# exit 0, an actionable hint, no rules dirs, no ledger file.
+D1A_HOME="$TMP/d1a-home"
+mkdir -p "$D1A_HOME" "$TMP/d1aws"
+HOME="$D1A_HOME" RULEMUX_STATE_DIR="$D1A_HOME/.rulemux" \
+  "$BIN" sync --config "$CFG" --workspace "$TMP/d1aws" >"$TMP/d1a.log" 2>&1 \
+  || fail "bare sync with an empty ledger must exit 0"
+grep -q "sync --agent" "$TMP/d1a.log" || fail "empty-ledger bare sync did not say how to start"
+for d in .codebuddy .dsh .trae; do
+  [ ! -e "$TMP/d1aws/$d" ] || fail "empty-ledger bare sync created $d"
+done
+[ ! -e "$D1A_HOME/.rulemux/workspaces.json" ] || fail "empty-ledger bare sync created the ledger"
+ok "bare sync with an empty ledger writes nothing (D1)"
+
+# 22. D1: bare sync only touches ledger-recorded agents — this replicates the REPORTED
+# user machine (only workbuddy ever used): .dsh/.trae must never be written again.
+D1B_HOME="$TMP/d1b-home"
+mkdir -p "$D1B_HOME" "$TMP/d1bws/.codebuddy/rules"
+HOME="$D1B_HOME" RULEMUX_STATE_DIR="$D1B_HOME/.rulemux" \
+  "$BIN" sync --hook --agent workbuddy --config "$CFG" --workspace "$TMP/d1bws" >/dev/null 2>&1 \
+  || fail "seed sync (workbuddy) failed"
+HOME="$D1B_HOME" RULEMUX_STATE_DIR="$D1B_HOME/.rulemux" \
+  "$BIN" sync --config "$CFG" --workspace "$TMP/d1bws" >/dev/null 2>&1 \
+  || fail "bare sync failed"
+[ -f "$TMP/d1bws/.codebuddy/rules/__rulemux__a.md" ] || fail "the ledger-recorded agent was not synced"
+for d in .dsh .trae; do
+  [ ! -e "$TMP/d1bws/$d" ] || fail "bare sync touched $d (never recorded in the ledger)"
+done
+ok "bare sync only touches ledger-recorded agents (the reported user machine) (D1)"
+
+# 23. D1: hook self-heal is decoupled from the sync scope — an empty ledger still
+# upgrades an outdated hook (otherwise bare sync would silently lose self-healing).
+D1C_HOME="$TMP/d1c-home"
+mkdir -p "$D1C_HOME/.codebuddy" "$TMP/d1cws"
+cat > "$D1C_HOME/.codebuddy/settings.json" <<'EOF'
+{"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "rulemux sync --agent codebuddy"}]}]}}
+EOF
+HOME="$D1C_HOME" RULEMUX_STATE_DIR="$D1C_HOME/.rulemux" \
+  "$BIN" sync --config "$CFG" --workspace "$TMP/d1cws" >/dev/null 2>&1 \
+  || fail "bare sync failed"
+grep -qF 'rulemux sync --hook --agent codebuddy' "$D1C_HOME/.codebuddy/settings.json" \
+  || fail "empty-ledger bare sync stopped self-healing hooks"
+[ ! -e "$TMP/d1cws/.codebuddy/rules" ] || fail "empty-ledger bare sync wrote rule files"
+ok "hook self-heal is decoupled from the sync scope (D1)"
+
+# 24. M3: a config that explicitly names an agent still syncs it on a bare sync
+# (explicit intent beats the ledger gate).
+cat > "$TMP/d1m.toml" <<EOF
+[[source]]
+path = ["$TMP/src/a.md"]
+agents = ["trae"]
+EOF
+D1M_HOME="$TMP/d1m-home"
+mkdir -p "$D1M_HOME" "$TMP/d1mws/.trae/rules"
+HOME="$D1M_HOME" RULEMUX_STATE_DIR="$D1M_HOME/.rulemux" \
+  "$BIN" sync --config "$TMP/d1m.toml" --workspace "$TMP/d1mws" >/dev/null 2>&1 \
+  || fail "bare sync failed"
+[ -f "$TMP/d1mws/.trae/rules/__rulemux__a.md" ] || fail "the config-explicit agent was not synced"
+ok "config-explicit agents sync on a bare sync (M3)"
+
+# 25. D2: uninstall drops the agent from the ledger — off gains the agent, the
+# workspace's agent list loses it, other agents' entries stay.
+D2_HOME="$TMP/d2-home"
+mkdir -p "$D2_HOME" "$TMP/d2ws/.codebuddy/rules"
+HOME="$D2_HOME" RULEMUX_STATE_DIR="$D2_HOME/.rulemux" \
+  "$BIN" sync --hook --agent codebuddy --config "$CFG" --workspace "$TMP/d2ws" >/dev/null 2>&1
+HOME="$D2_HOME" RULEMUX_STATE_DIR="$D2_HOME/.rulemux" \
+  "$BIN" sync --hook --agent workbuddy --config "$CFG" --workspace "$TMP/d2ws" >/dev/null 2>&1
+HOME="$D2_HOME" RULEMUX_STATE_DIR="$D2_HOME/.rulemux" \
+  "$BIN" uninstall --agent workbuddy --config "$CFG" --workspace "$TMP/d2ws" --yes >/dev/null 2>&1 \
+  || fail "uninstall exited non-zero"
+LEDGER="$D2_HOME/.rulemux/workspaces.json"
+# Cut the "agents" object out of the JSON by its braces (line-window greps would break
+# as soon as the object's shape changes) and check the entries inside it only.
+agents_block="$(awk '/^  "agents": \{/{f=1} f{print} f && /^  \},/{exit}' "$LEDGER")"
+echo "$agents_block" | grep -q '"codebuddy"' || fail "uninstall dropped the wrong ledger entry"
+if echo "$agents_block" | grep -q '"workbuddy"'; then fail "uninstall left the agent in the ledger"; fi
+grep -A2 '"off"' "$LEDGER" | grep -q '"workbuddy"' || fail "the agent was not recorded as uninstalled (off)"
+ok "uninstall drops the agent from the ledger and records it as uninstalled (D2)"
+
+# 26. D3: uninstall removes the emptied rules dir — and never upward.
+D3_HOME="$TMP/d3-home"
+mkdir -p "$D3_HOME" "$TMP/d3ws/.trae/rules"
+HOME="$D3_HOME" RULEMUX_STATE_DIR="$D3_HOME/.rulemux" \
+  "$BIN" sync --hook --agent trae --config "$CFG" --workspace "$TMP/d3ws" >/dev/null 2>&1 \
+  || fail "seed sync for trae failed"
+HOME="$D3_HOME" RULEMUX_STATE_DIR="$D3_HOME/.rulemux" \
+  "$BIN" uninstall --agent trae --config "$CFG" --workspace "$TMP/d3ws" --yes >/dev/null 2>&1 \
+  || fail "uninstall exited non-zero"
+[ ! -e "$TMP/d3ws/.trae/rules" ] || fail "the emptied rules dir survived uninstall"
+[ -d "$TMP/d3ws/.trae" ] || fail "uninstall deleted above the leaf dir"
+ok "uninstall removes the emptied rules dir (D3)"
+
+# 26b. dsh is injection-only (2026-10-14): `sync --hook --agent dsh` writes NOTHING
+# (a leftover .dsh/rules is neither rewritten nor deleted), `inject --agent dsh` is the
+# delivery path, and uninstall only *reports* the legacy residue plus the fact that the
+# host-side plugin keeps calling inject.
+DSH_HOME="$TMP/dsh-home"
+mkdir -p "$DSH_HOME" "$TMP/dshws/.dsh/rules"
+printf 'leftover\n' > "$TMP/dshws/.dsh/rules/__rulemux__a.md"
+HOME="$DSH_HOME" RULEMUX_STATE_DIR="$DSH_HOME/.rulemux" \
+  "$BIN" sync --hook --agent dsh --config "$CFG" --workspace "$TMP/dshws" >/dev/null 2>&1 \
+  || fail "sync --hook --agent dsh exited non-zero"
+grep -q 'leftover' "$TMP/dshws/.dsh/rules/__rulemux__a.md" || fail "sync --hook --agent dsh rewrote the legacy dir"
+HOME="$DSH_HOME" RULEMUX_STATE_DIR="$DSH_HOME/.rulemux" \
+  "$BIN" inject --agent dsh --config "$CFG" --workspace "$TMP/dshws" >"$TMP/dsh-inject.log" 2>&1 \
+  || fail "inject --agent dsh exited non-zero"
+grep -q 'rulemux:managed' "$TMP/dsh-inject.log" || fail "inject --agent dsh printed no rendered rules"
+HOME="$DSH_HOME" RULEMUX_STATE_DIR="$DSH_HOME/.rulemux" \
+  "$BIN" uninstall --agent dsh --config "$CFG" --workspace "$TMP/dshws" --yes >"$TMP/dsh-uninstall.log" 2>&1 \
+  || fail "uninstall --agent dsh exited non-zero"
+grep -q 'inject --agent dsh' "$TMP/dsh-uninstall.log" || fail "uninstall did not warn that the plugin keeps calling inject"
+grep -q 'disabled: true' "$TMP/dsh-uninstall.log" || fail "uninstall did not print the documented way to disable the plugin"
+grep -q 'leftover' "$TMP/dsh-uninstall.log" || fail "uninstall did not report the legacy .dsh/rules residue"
+[ -f "$TMP/dshws/.dsh/rules/__rulemux__a.md" ] || fail "uninstall deleted a legacy file it no longer owns"
+ok "dsh is injection-only: sync writes nothing, inject delivers, uninstall reports (D1+D3+R1)"
+
+# 27. D3 boundaries: a dir that is not truly empty is kept — the user's own file,
+# a prefixed subdir, or a symlink all count as "not empty".
+D3B_HOME="$TMP/d3b-home"
+mkdir -p "$D3B_HOME" "$TMP/d3bws/.dsh/rules" "$TMP/d3dws/.dsh/rules/__rulemux__x" \
+         "$TMP/d3cws/.dsh" "$TMP/d3-real"
+echo mine > "$TMP/d3bws/.dsh/rules/my-own.md"
+printf 'x\n' > "$TMP/d3-real/__rulemux__a.md"
+ln -s "$TMP/d3-real" "$TMP/d3cws/.dsh/rules"
+for w in d3bws d3dws d3cws; do
+  HOME="$D3B_HOME" RULEMUX_STATE_DIR="$D3B_HOME/.rulemux" \
+    "$BIN" sync --hook --agent dsh --config "$CFG" --workspace "$TMP/$w" >/dev/null 2>&1 \
+    || fail "seed sync for $w failed"
+done
+HOME="$D3B_HOME" RULEMUX_STATE_DIR="$D3B_HOME/.rulemux" \
+  "$BIN" uninstall --agent dsh --config "$CFG" --workspace "$TMP/d3bws" --yes >/dev/null 2>&1
+[ -f "$TMP/d3bws/.dsh/rules/my-own.md" ] || fail "uninstall deleted the user's own file"
+[ -d "$TMP/d3bws/.dsh/rules" ] || fail "a non-empty rules dir was removed"
+[ -d "$TMP/d3dws/.dsh/rules/__rulemux__x" ] || fail "a prefixed subdir was removed"
+[ -d "$TMP/d3dws/.dsh/rules" ] || fail "a dir with a subdir entry was removed"
+[ -L "$TMP/d3cws/.dsh/rules" ] || fail "a symlinked rules dir was not left alone"
+[ -d "$TMP/d3-real" ] || fail "the symlink target was deleted"
+ok "uninstall keeps non-empty / subdir-bearing / symlinked rules dirs (D3)"
+
+# 28. R4: bare verify probes only in-use agents; explicit --agent still works;
+# bare --clean is a superset (removes every canary, in use or not).
+R4_HOME="$TMP/r4-home"
+mkdir -p "$R4_HOME" "$TMP/r4ws/.codebuddy/rules" "$TMP/r4ws/.dsh/rules" "$TMP/r4ws/.trae/rules"
+HOME="$R4_HOME" RULEMUX_STATE_DIR="$R4_HOME/.rulemux" \
+  "$BIN" sync --hook --agent codebuddy --config "$CFG" --workspace "$TMP/r4ws" >/dev/null 2>&1
+HOME="$R4_HOME" RULEMUX_STATE_DIR="$R4_HOME/.rulemux" \
+  "$BIN" verify --config "$CFG" --workspace "$TMP/r4ws" >/dev/null 2>&1 \
+  || fail "bare verify exited non-zero"
+[ -f "$TMP/r4ws/.codebuddy/rules/__rulemux__canary.md" ] || fail "bare verify did not probe the in-use agent"
+for d in .dsh .trae; do
+  [ ! -e "$TMP/r4ws/$d/rules/__rulemux__canary.md" ] || fail "bare verify probed $d (not in use)"
+done
+HOME="$R4_HOME" RULEMUX_STATE_DIR="$R4_HOME/.rulemux" \
+  "$BIN" verify --agent trae --config "$CFG" --workspace "$TMP/r4ws" >/dev/null 2>&1
+[ -f "$TMP/r4ws/.trae/rules/__rulemux__canary.md" ] || fail "explicit --agent verify was blocked"
+HOME="$R4_HOME" RULEMUX_STATE_DIR="$R4_HOME/.rulemux" \
+  "$BIN" verify --clean --config "$CFG" --workspace "$TMP/r4ws" >/dev/null 2>&1
+for d in .codebuddy .trae; do
+  [ ! -e "$TMP/r4ws/$d/rules/__rulemux__canary.md" ] || fail "bare --clean left a canary in $d"
+done
+[ ! -e "$TMP/r4ws/.dsh/rules/__rulemux__canary.md" ] || fail "bare --clean left a canary in the injection-only dsh dir"
+
+# ...and bare --clean must still work when NOTHING is in use (empty ledger): the
+# "nothing to verify" early return must not swallow the cleanup.
+R4B_HOME="$TMP/r4b-home"
+mkdir -p "$R4B_HOME" "$TMP/r4bws/.trae/rules"
+HOME="$R4B_HOME" RULEMUX_STATE_DIR="$R4B_HOME/.rulemux" \
+  "$BIN" verify --agent trae --config "$CFG" --workspace "$TMP/r4bws" >/dev/null 2>&1
+[ -f "$TMP/r4bws/.trae/rules/__rulemux__canary.md" ] || fail "explicit verify did not write the canary"
+HOME="$R4B_HOME" RULEMUX_STATE_DIR="$R4B_HOME/.rulemux" \
+  "$BIN" verify --clean --config "$CFG" --workspace "$TMP/r4bws" >/dev/null 2>&1 \
+  || fail "bare --clean exited non-zero on an empty in-use set"
+[ ! -e "$TMP/r4bws/.trae/rules/__rulemux__canary.md" ] || fail "bare --clean skipped the canary (empty in-use set)"
+[ ! -e "$TMP/r4bws/.trae/rules" ] || fail "the emptied rules dir survived bare --clean"
+ok "verify probes only in-use agents; --clean is a superset (R4)"
+
+# 29. D1 + legacy ledger: a v1 ledger (no "agents" key => the "unknown / all" sentinel)
+# must NOT re-authorise writes to agents that never proved they read this workspace —
+# i.e. a leftover .dsh/rules on such a workspace stays untouched, and no new dir appears.
+L_HOME="$TMP/legacy-home"
+L_WS="$TMP/legacyws"
+mkdir -p "$L_HOME" "$L_HOME/.rulemux" "$L_WS/.dsh/rules"
+printf 'leftover v1\n' > "$L_WS/.dsh/rules/__rulemux__a.md"
+cat > "$L_HOME/.rulemux/workspaces.json" <<EOF
+{"version":2,"workspaces":["$L_WS"],"agents":{"$L_WS":["*"]}}
+EOF
+HOME="$L_HOME" RULEMUX_STATE_DIR="$L_HOME/.rulemux" \
+  "$BIN" sync --config "$CFG" --workspace "$L_WS" >"$TMP/legacy.log" 2>&1 \
+  || fail "bare sync on a legacy ledger should exit 0"
+grep -q 'leftover v1' "$L_WS/.dsh/rules/__rulemux__a.md" || fail "a legacy '*' ledger entry rewrote a never-used agent's rules dir"
+for d in .codebuddy .trae; do
+  [ ! -e "$L_WS/$d" ] || fail "a legacy '*' ledger entry created $d out of nowhere"
+done
+ok "a legacy '*' ledger entry does not authorise foreign agents (D1)"
 
 echo
 echo "ALL SMOKE TESTS PASSED"

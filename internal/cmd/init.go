@@ -9,6 +9,7 @@ import (
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/hooks"
+	"github.com/cq-guojia/rulemux/internal/state"
 )
 
 // exampleConfig is the default config content written on the first run of init.
@@ -241,8 +242,10 @@ func Init(args []string) int {
 			mark = "⚠"
 		}
 		if ar.Agent.Style == "external" {
-			// 宿主侧插件由宿主自己的命令安装，rulemux 只负责同步规则。
+			// 宿主侧插件由宿主自己的命令安装；rulemux 只负责渲染规则（`rulemux inject`），
+			// 由插件取走注入——工作区里不留任何东西。
 			fmt.Printf("  %s %-10s no hook to install — add the plugin with the host's own command, e.g. `dsh plugin --profile <p> add \"github:cq-guojia/rulemux#path:/dsh-plugin\"`\n", mark, ar.Display)
+			clearOff(ar.Agent.ID)
 			continue
 		}
 		p, err := hooks.Install(ar.Agent, ws, ar.Display)
@@ -250,6 +253,7 @@ func Init(args []string) int {
 			fmt.Printf("  ✗ %-10s %v\n", ar.Agent.ID, err)
 			continue
 		}
+		clearOff(ar.Agent.ID)
 		// 回显用用户写的标识（如 workbuddy），让用户面与安装命令一致。
 		fmt.Printf("  %s %-10s %s → rulemux %s --agent %s\n", mark, ar.Display, p, hooks.SubcommandFor(ar.Agent), ar.Display)
 	}
@@ -269,7 +273,13 @@ func refreshHooks(agentArg string, f *Flags) int {
 	if agentArg == "" {
 		// 只遍历「已核实」的 agent（与 sync、安装的范围一致）：未核实的不去读它们的配置，
 		// 既省几次无意义的文件读取，也不会刷出"登记了但没实现"的噪音行。
-		targets = agents.Supported()
+		// 已卸载（off）的不列：卸载即断联——例行输出里不出现已卸 agent（显式 --agent 除外）。
+		off := state.Load().Off
+		for _, a := range agents.Supported() {
+			if !containsFold(off, a.ID) {
+				targets = append(targets, a)
+			}
+		}
 	} else {
 		ts, err := parseAgents(agentArg)
 		if err != nil {
@@ -330,6 +340,20 @@ func refreshHooks(agentArg string, f *Flags) int {
 	return 0
 }
 
+// clearOff 把 agent 从机器级卸载集合（off）里移除：init 安装 = 用户明确重新启用，
+// 这是已卸 agent 唯一的回来路径（无任何提示牵引，卸载即断联）。
+// 失败只警告——off 残留的最坏后果是裸 sync 暂不同步它，不值得让 init 失败。
+//
+// ⚠ 已知的非用户主动触发点：dsh 插件在 `~/.rulemux/config.toml` 缺失时会自己跑
+// `rulemux init --agent dsh`（dsh-plugin/index.mjs:330，就绪链第 ③ 步）⇒ 会顺带清掉
+// dsh 的 off。窗口很窄（要求配置缺失），且「插件装着且配置没了」本身说明用户还在用
+// dsh；不为此加特例。
+func clearOff(id string) {
+	if err := state.UpdateLedger(func(l *state.Ledger) error { l.ClearOff(id); return nil }); err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ could not update the ledger for %s: %v\n", id, err)
+	}
+}
+
 // InitHelp prints detailed English help for `rulemux init`.
 func InitHelp() {
 	fmt.Print(`rulemux init - install the SessionStart hook for one or more agents
@@ -343,16 +367,21 @@ you must name the agent(s) you want. This is deliberate: auto-detecting which
 agents exist locally is unreliable, so the choice is always yours.
 
 SUPPORTED AGENTS (value of --agent; only VERIFIED agents can be installed):
-  workbuddy  WorkBuddy   Tier-1  .workbuddy/rules/   [verified — install this one]
-              use this if you are setting up WorkBuddy:
-                rulemux init --agent workbuddy
-              (separate from codebuddy: own rules dir and own hook file
-               ~/.workbuddy/settings.json)
-  codebuddy  CodeBuddy   Tier-1  .codebuddy/rules/   [verified]
+  codebuddy  CodeBuddy   Tier-1  .codebuddy/rules/      [verified]
               rulemux init --agent codebuddy
-  trae       Trae (CN)   Tier-1  .trae/rules/        [verified 2026-10-09]
+  workbuddy  WorkBuddy   Tier-1  .codebuddy/rules/      [verified]
+              (its OWN hook file ~/.workbuddy/settings.json, but the rules dir is
+               SHARED with codebuddy — not .workbuddy/rules)
+              rulemux init --agent workbuddy
+  trae       Trae (CN)   Tier-1  .trae/rules/           [verified 2026-10-09]
               CN hook ~/.trae-cn/hooks.json; intl ~/.trae/hooks.json
               rulemux init --agent trae
+  dsh        DeepSeek    Tier-2  (injection)           [verified 2026-10-10]
+              plugin-first host: there is NO hook to install, and rulemux writes
+              NOTHING into the workspace for it. 'init --agent dsh' only prints the
+              plugin command (repo sub-package dsh-plugin/, npm 'rulemux-dsh');
+              that plugin asks "rulemux inject --agent dsh" for the rules and injects
+              them — install it with dsh's own command, then restart dsh.
 
 The following are registered but NOT YET verified, so init refuses to install them
 until their adapter is canary-tested and flipped to verified:

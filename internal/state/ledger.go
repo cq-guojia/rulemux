@@ -1,5 +1,5 @@
 // Package state 维护 rulemux 极小的一部分运行时状态：「曾经在哪些工作区投放过规则文件」，
-// 以及每个工作区「用过哪些 agent」。
+// 每个工作区「用过哪些 agent」，以及机器级「已卸载」的 agent 集合（off）。
 //
 // 为什么需要它：
 //   - SessionStart 钩子装在 user 级 host 配置里，对所有工作区**全局**生效；
@@ -67,7 +67,14 @@ type Ledger struct {
 	// Workspaces 记录所有曾经同步过的工作区绝对路径；保存时去重并排序，便于稳定比对。
 	Workspaces []string `json:"workspaces"`
 	// Agents 记录每个工作区用过哪些 agent（规范 ID）。值可能含哨兵 AnyAgent。
-	Agents map[string][]string `json:"agents,omitempty"`
+	// **不设 omitempty**：空 map 也落 "agents":{}，保证文件永不退化成 v1 形态
+	// （v1 形态会让 Load 给所有工作区回填哨兵，把卸载成果冲掉——见 Load）。
+	// 某工作区是空列表 = 明确的「该工作区无 agent」（uninstall 清空后的终态）。
+	Agents map[string][]string `json:"agents"`
+	// Off 是机器级「已卸载」集合：uninstall --agent X 时加入，init 装入时移除。
+	// 展开哨兵 * 与例行输出（sync 汇总未初始化名单 / doctor）时减去它 ⇒ 已卸
+	// agent 对用户不可见（卸载即断联）。缺省空 = 没有卸载记录。
+	Off []string `json:"off,omitempty"`
 }
 
 // Load 读取账本。文件不存在、为空或损坏时返回空账本而非报错——
@@ -86,14 +93,17 @@ func Load() Ledger {
 		return l // 损坏：返回空账本（尽力清理，不阻塞主线）
 	}
 	l.Workspaces = raw.Workspaces
+	l.Off = append([]string(nil), raw.Off...)
 	if raw.Agents != nil {
 		l.Agents = raw.Agents
+		return l
 	}
-	// v1 → v2：没有 agents 信息的老条目用哨兵占位。
+	// v1 → v2：**整个文件没有 agents 键**（v1 老形态）才给每条工作区填哨兵占位，
+	// 绝不丢条目（丢条目会让卸载再也回访不到，残留永存）。
+	// 键存在但缺某工作区 = 明确的「该工作区无 agent」——这是 uninstall 清空后的
+	// 正常终态，绝不能再回填成 *：那会让下一次 Load 把卸载成果整个冲掉（B1）。
 	for _, ws := range l.Workspaces {
-		if _, ok := l.Agents[ws]; !ok {
-			l.Agents[ws] = []string{AnyAgent}
-		}
+		l.Agents[ws] = []string{AnyAgent}
 	}
 	return l
 }
@@ -108,6 +118,16 @@ func Record(ws, agent string) error {
 	if ws == "" {
 		return nil
 	}
+	return UpdateLedger(func(l *Ledger) error {
+		l.add(ws, agent)
+		return nil
+	})
+}
+
+// UpdateLedger 是全项目唯一的账本写入口：持锁 load → mutate → 原子 save。
+// mutate 里只改内存中的账本，返回 error 则不动盘。Record / Prune / uninstall
+// 清账本 / init 清 off 全走它 ⇒ 锁与原子写只有一份实现。
+func UpdateLedger(mutate func(*Ledger) error) error {
 	unlock, err := acquireLock()
 	if err != nil {
 		return err
@@ -115,8 +135,62 @@ func Record(ws, agent string) error {
 	defer unlock()
 
 	l := Load()
-	l.add(ws, agent)
+	if err := mutate(&l); err != nil {
+		return err
+	}
 	return l.Save()
+}
+
+// ForgetAgent 把 agent 从指定工作区的 agents 列表里移除（只动 Agents，保留
+// Workspaces 条目——卸载的回访清单不能少工作区）。
+//
+// 哨兵 * 的列表**不动**：「未知 = 全部」的排除由 off 在展开时完成；在这里物化成
+// 具体清单，等于把「猜测此刻有哪些 agent」写进账本（B2），还会让将来新就绪的
+// agent 不再被 * 覆盖。
+func (l *Ledger) ForgetAgent(ws string, ids ...string) {
+	if ws == "" || len(ids) == 0 {
+		return
+	}
+	target := resolveWS(ws)
+	for key, list := range l.Agents {
+		if resolveWS(key) != target || containsStr(list, AnyAgent) {
+			continue
+		}
+		l.Agents[key] = removeStrings(list, ids)
+	}
+}
+
+// AddOff / ClearOff 维护机器级「已卸载」集合：uninstall 时加、init 装入时清。
+func (l *Ledger) AddOff(ids ...string)   { l.Off = append(l.Off, ids...) }
+func (l *Ledger) ClearOff(ids ...string) { l.Off = removeStrings(l.Off, ids) }
+
+// removeStrings 返回 list 去掉 drop 中元素后的新切片（不原地改）。
+func removeStrings(list, drop []string) []string {
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		if !containsStr(drop, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// dedupeSorted 去重排序；空 ⇒ nil（省略 JSON 键 = 缺省空集合）。
+func dedupeSorted(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // add 幂等地把一条 (工作区, agent) 收进账本（不写盘）。
@@ -163,7 +237,7 @@ func (l Ledger) Save() error {
 		return err
 	}
 
-	out := Ledger{Version: Version, Workspaces: []string{}, Agents: map[string][]string{}}
+	out := Ledger{Version: Version, Workspaces: []string{}, Agents: map[string][]string{}, Off: dedupeSorted(l.Off)}
 	seen := map[string]bool{}
 	for _, w := range l.Workspaces {
 		w = filepath.Clean(w)
@@ -220,34 +294,33 @@ func Prune(workspaces []string) error {
 		}
 	}
 
-	unlock, err := acquireLock()
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
-	l := Load()
-	kept := make([]string, 0, len(l.Workspaces))
-	for _, ws := range l.Workspaces {
-		if drop[resolveWS(ws)] {
-			continue
+	return UpdateLedger(func(l *Ledger) error {
+		kept := make([]string, 0, len(l.Workspaces))
+		for _, ws := range l.Workspaces {
+			if drop[resolveWS(ws)] {
+				continue
+			}
+			kept = append(kept, ws)
 		}
-		kept = append(kept, ws)
-	}
-	l.Workspaces = kept
-	for k := range l.Agents {
-		if drop[resolveWS(k)] {
-			delete(l.Agents, k)
+		l.Workspaces = kept
+		for k := range l.Agents {
+			if drop[resolveWS(k)] {
+				delete(l.Agents, k)
+			}
 		}
-	}
-	return l.Save()
+		return nil
+	})
 }
 
 // Others 返回账本中除 except 之外的其它工作区列表。
-func Others(except string) []string {
+func Others(except string) []string { return Load().Others(except) }
+
+// Others 返回账本中除 except 之外的其它工作区列表（方法版：供调用方复用同一份
+// 快照，避免 confirm/sweep 两次 Load 之间的 TOCTOU）。
+func (l Ledger) Others(except string) []string {
 	except = resolveWS(except)
 	var out []string
-	for _, w := range Load().Workspaces {
+	for _, w := range l.Workspaces {
 		if resolveWS(w) != except {
 			out = append(out, w)
 		}

@@ -95,7 +95,6 @@ func TestSyncReportFormat(t *testing.T) {
 		"rules +1 · skills +1",          // 首拷 ⇒ 块标题行尾的增量
 		"Summary — 1 workspace · 1 agent initialized",
 		"files  +added  −removed  ~updated", // 总计小表表头（+/−/~ 前缀承载列义）
-		"not initialized:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("报告应包含 %q，实得:\n%s", want, out)

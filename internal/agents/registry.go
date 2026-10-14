@@ -41,6 +41,11 @@ type Agent struct {
 	Tier Tier
 	// RulesDir 是工作区规则目录（相对工作区根），Tier2 为空。
 	RulesDir string
+	// LegacyRulesDir 是这套交付**曾经**用过的规则目录（相对工作区根；目前只有 dsh 的
+	// ".dsh/rules"）：改成注入交付后它已不再被 rulemux 读写，保留这个字段只为在 uninstall
+	// 时**报告**用户盘上可能残留的旧文件——残留不强制清除（用户 2026-10-14 定调：新的不许
+	// 再写，旧的清不掉就算了），但不能装作它不存在。
+	LegacyRulesDir string
 	// SkillsDir 是工作区 skills 目录（相对工作区根）；空 = 该 agent 本轮不接 skill 同步。
 	// 例：codebuddy 为 ".codebuddy/skills"（bundle getProjectSkillsDir，2026-10-12 代码级坐实，
 	// 见 docs/design/external/agent-rules-dirs.md §5.5）。
@@ -215,24 +220,33 @@ var registry = []Agent{
 	},
 	{
 		// DeepSeek Harness (dsh) is plugin-first: no hook config file, and it does NOT scan a rules
-		// directory on its own. rulemux's share is the WRITE half — sync real copies into
-		// <workspace>/.dsh/rules (Tier-1: a real dir, real files). The READ half is a separate dsh
-		// plugin package shipped as the repo sub-package `dsh-plugin/` (name `rulemux-dsh`), installed
-		// the normal dsh way: `dsh plugin --profile <p> add rulemux-dsh` (npm, a packed .tgz, or git).
-		// rulemux therefore does NOT install it ⇒ Style "external": init/doctor print the install
-		// hint, uninstall only prunes the rules dir and leaves the host config alone.
+		// directory on its own — so it takes no rules directory at all and is delivered by
+		// INJECTION, exactly like codex / opencode: the repo sub-package `dsh-plugin/` (npm name
+		// `rulemux-dsh`) asks the CLI for the rendered rules (`rulemux inject --agent dsh`) on the
+		// first user turn and injects that stdout. Nothing is written into the workspace.
+		//
+		// 2026-10-14 用户拍板：原本的 WRITE half（sync 真实拷贝进 <workspace>/.dsh/rules、插件读回）
+		// 作废 —— 那个目录宿主根本不认，只是两边之间的交接物；忘了清理就永久留在用户盘上，
+		// 正是「机器上没装 dsh，.dsh/rules 却被反复重写」那个缺陷的舞台。现在没有中间目录，
+		// 也就没有东西需要保持同步、没有残渣需要清理。
+		// rulemux does NOT install the plugin ⇒ Style "external": init/doctor print the install hint,
+		// uninstall leaves the host config alone.
 		ID:       "dsh",
 		Aliases:  []string{"deepseek", "deepseek-harness"},
-		Tier:     Tier1,
-		RulesDir: ".dsh/rules",
-		Style:    "external",
-		// 2026-10-10 用户拍板先行开放（本机无 dsh 可跑 canary）：sync/verify 可用。
-		// ⚠ 语义漂移：Verified 原义为「canary 坐实」，此处是「由用户决定先行开放」；真机跑过后复核。
+		Tier:     Tier2,
+		RulesDir: "",
+		// 旧交接目录：2026-10-14 前的设计往这里写真实拷贝。现在只用于 uninstall 时报一句
+		// 「这里还有旧文件，rulemux 不再写它了」——不删（那只目录不是 rulemux 的）。
+		LegacyRulesDir: ".dsh/rules",
+		Style:          "external",
+		// 2026-10-10 先行开放；同日容器内真机 canary 通过（装载期生成配置、首轮注入一次成功、
+		// token 成本与宿主原生读文件字节一致 ⇒ 见 worklog 202610/10-0000-dsh-adapter-9f1e.md）。
+		// ⚠ 2026-10-14 交付改为纯注入（不再有 .dsh/rules），该 canary 结论需按新链路重跑。
 		Verified: true,
-		// 插件每会话首轮现读 .dsh/rules ⇒ 无 CodeBuddy 式「差一拍」，不需要变化提示。
+		// 插件每会话首轮现取现注入 ⇒ 无 CodeBuddy 式「差一拍」，不需要变化提示。
 		SessionHint:  false,
 		HintProtocol: "",
-		Note:         "Plugin-first host (no hook binary). rulemux syncs real copies into .dsh/rules; the reading half is the repo sub-package `dsh-plugin/` (npm name `rulemux-dsh`), installed via the dsh plugin command (`dsh plugin --profile <p> add github:cq-guojia/rulemux#path:/dsh-plugin`, or npm) — rulemux does not install it (Style \"external\"). Enabled 2026-10-10 by user decision (no dsh runtime available for canary); the injection chain is still unverified on a real dsh — re-check after one real session (docs/worklog/dsh-adapter-9f1e.md).",
+		Note:         "Plugin-first host (no hook binary, and no rules directory at all): delivery is injection. The repo sub-package `dsh-plugin/` (npm name `rulemux-dsh`) is installed through the dsh plugin command (`dsh plugin --profile <p> add github:cq-guojia/rulemux#path:/dsh-plugin`, or npm) and asks the CLI for the workspace's rules (`rulemux inject --agent dsh`) on the first user turn — rulemux does not install it (Style \"external\"), and nothing is written into the workspace. Canary passed 2026-10-10 on a real dsh in a container (load-time config generation, one successful first-turn injection, token cost byte-identical to the host reading files natively) — see docs/worklog/202610/10-0000-dsh-adapter-9f1e.md; that was the directory hand-off, so it needs re-running for the injection-only delivery of 2026-10-14. Uninstalling rulemux cannot remove the host-side plugin, and it cannot stop it either: the plugin keeps calling `rulemux inject --agent dsh` in every session, so `uninstall --agent dsh` says exactly that (disable the plugin row in the profile's cordis.patch.yml, or remove it with dsh's own plugin command).",
 	},
 }
 

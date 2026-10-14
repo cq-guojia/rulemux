@@ -37,9 +37,13 @@
 
 ## 四、支持范围
 
-- **Tier-1（读整个规则文件夹 ⇒ 真实拷贝丢文件）**：Claude Code、CodeBuddy、Trae、WorkBuddy。
-- **Tier-2（只认单文件 `AGENTS.md` ⇒ 走 hooks 注入，不碰用户文件）**：Codex、OpenCode。
-- **DeepSeek harness**：**移出当前范围**（最开放、支持插件，后续以插件市场解决）。
+- **Tier-1（有原生规则目录 ⇒ 真实拷贝丢文件）**：CodeBuddy、WorkBuddy、Trae。
+  Claude Code 的适配器已注册但尚未 canary 坐实，暂不可安装。
+- **Tier-2（没有 rulemux 写的规则目录 ⇒ 走注入交付，不碰用户文件）**：Codex、OpenCode（已注册，尚未核实）
+  与 **DSH**（2026-10-10 纳入，**2026-10-14 由 Tier-1 改为注入交付**：原先 Go 把真实拷贝写进 `.dsh/rules`、
+  再由仓库子包插件读回，而那个目录宿主根本不认、只是两边之间的交接物，清不干净就永久留在用户盘上 ⇒ 现改为
+  插件每个会话自己调用 `rulemux inject --agent dsh` 取渲染文本注入，工作区零产物，见
+  [`features/dir-sync.md`](features/dir-sync.md) §DSH）。
 
 各家的工作区规则目录与读取行为见 [`external/agent-rules-dirs.md`](external/agent-rules-dirs.md)。
 

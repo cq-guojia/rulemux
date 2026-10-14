@@ -36,7 +36,7 @@ USAGE:
                                                                           Generate a sample config + install SessionStart hooks
   rulemux init      --refresh [--agent <id[,id...]>]                        Refresh already-installed hooks to the current format
   rulemux doctor    [--config <path>] [--workspace <dir>]                  Environment self-check
-  rulemux verify    --agent <id> [--clean] [--workspace <dir>]             Canary acceptance test
+  rulemux verify    [--agent <id>] [--clean] [--config <path>] [--workspace <dir>]  Canary acceptance test
   rulemux uninstall --agent <id[,id...]> | --off | --all [--yes]           Remove rulemux hooks and synced files
 
 `)

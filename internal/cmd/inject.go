@@ -9,12 +9,13 @@ import (
 	"github.com/cq-guojia/rulemux/internal/engine"
 )
 
-// Inject prints the rendered rules to stdout so a Tier-2 agent's SessionStart hook
-// can feed them into the context.
+// Inject prints the rendered rules to stdout so a Tier-2 agent can feed them into the context.
 //
 // Usage: rulemux inject --agent codex
-// Tier-2 agents (single-file AGENTS.md only) have no directory to drop files into,
-// hence injection — and your own AGENTS.md is never touched.
+// Tier-2 agents have no rulemux-written directory to drop files into — codex / opencode only
+// read a single-file AGENTS.md (so your own AGENTS.md is never touched), and dsh is plugin-first:
+// its plugin asks for this text every session (`rulemux inject --agent dsh`) and injects it,
+// writing nothing into the workspace — hence injection.
 func Inject(args []string) int {
 	f := ParseFlags(args)
 	id := f.Get("agent", "")

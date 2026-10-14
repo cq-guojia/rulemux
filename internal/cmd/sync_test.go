@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cq-guojia/rulemux/internal/agents"
+	"github.com/cq-guojia/rulemux/internal/state"
 )
 
 // TestSyncSelfHealsOutdatedHook：不依赖任何 npm 安装脚本 —— 一次普通 sync 就应把
@@ -322,13 +325,21 @@ func TestCascadeNeverCreatesDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// 关键：预先把这两个目录建出来。否则「目录不存在 + create=false ⇒ 不写」会让断言
+	// 恒真（无论跳过逻辑在不在都通过）——目录先存在，才验证得到「确实没去处理它们」。
+	for _, rel := range []string{".claude/rules", ".ghost/rules"} {
+		if err := os.MkdirAll(filepath.Join(ws, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	if code := Sync([]string{"--config", cfgPath, "--workspace", ws, "--hook", "--agent", "codebuddy"}); code != 0 {
 		t.Fatalf("hook sync 应成功，实得 %d", code)
 	}
 
 	for _, rel := range []string{".claude/rules", ".ghost/rules"} {
-		if _, err := os.Stat(filepath.Join(ws, rel)); !os.IsNotExist(err) {
-			t.Fatalf("顺手同步绝不创建目录，但出现了 %s（stat err=%v）", rel, err)
+		if _, err := os.Stat(filepath.Join(ws, rel, "__rulemux__a.md")); !os.IsNotExist(err) {
+			t.Fatalf("顺手同步不该处理未验证 / 未知 agent，但 %s 被写了文件（stat err=%v）", rel, err)
 		}
 	}
 }
@@ -432,4 +443,422 @@ func TestSyncSharedRulesDir_FallsBackToWholeGroupWhenNoHook(t *testing.T) {
 	dir := filepath.Join(ws, ".codebuddy", "rules")
 	mustExist(t, filepath.Join(dir, "__rulemux__a.md"))
 	mustExist(t, filepath.Join(dir, "__rulemux__b.md"))
+}
+
+// TestSyncBareEmptyLedgerWritesNothing 校验 D1 第一半：裸 sync（无 --agent）且账本
+// 为空 ⇒ 不写任何规则目录、不建账本文件，只给一句可执行提示，退出码 0。
+func TestSyncBareEmptyLedgerWritesNothing(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("RULEMUX_STATE_DIR", stateDir)
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	code := 0
+	errOut := captureStderr(t, func() { code = Sync([]string{"--config", cfgPath, "--workspace", ws}) })
+	if code != 0 {
+		t.Fatalf("空账本裸 sync 应安静退出（0），实得 %d", code)
+	}
+	if !strings.Contains(errOut, "sync --agent") {
+		t.Fatalf("应提示怎么开始（sync --agent），实得 %q", errOut)
+	}
+	for _, d := range []string{".codebuddy", ".dsh", ".trae", ".workbuddy"} {
+		if _, err := os.Stat(filepath.Join(ws, d)); !os.IsNotExist(err) {
+			t.Fatalf("空账本裸 sync 不该创建 %s（stat err=%v）", d, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "workspaces.json")); !os.IsNotExist(err) {
+		t.Fatal("空账本裸 sync 不该创建账本文件")
+	}
+}
+
+// TestSyncBareLedgerRestrictsTargets 校验 D1 第二半：账本只记 codebuddy 时，裸 sync
+// 只落 codebuddy；.dsh/rules、.trae/rules 一个字节都不写（用户机元凶的回归锁）。
+func TestSyncBareLedgerRestrictsTargets(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	rules := filepath.Join(ws, ".codebuddy", "rules")
+	if err := os.MkdirAll(rules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := state.Record(ws, "codebuddy"); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	if code := Sync([]string{"--config", cfgPath, "--workspace", ws}); code != 0 {
+		t.Fatalf("裸 sync 应成功，实得 %d", code)
+	}
+	mustExist(t, filepath.Join(rules, "__rulemux__a.md"))
+	for _, d := range []string{".dsh", ".trae"} {
+		if _, err := os.Stat(filepath.Join(ws, d)); !os.IsNotExist(err) {
+			t.Fatalf("账本没记 %s，裸 sync 不该碰它（stat err=%v）", d, err)
+		}
+	}
+}
+
+// TestSyncBareHealsHookWhenLedgerEmpty 校验 healHooks 与同步范围解耦：账本为空时
+// 裸 sync 什么都不落，但已存在的旧格式钩子仍被自愈（否则空账本会丧失升级路径）。
+func TestSyncBareHealsHookWhenLedgerEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(filepath.Join(home, ".codebuddy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	hookPath := filepath.Join(home, ".codebuddy", "settings.json")
+	seed := `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"rulemux sync --agent codebuddy"}]}]}}`
+	if err := os.WriteFile(hookPath, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := Sync([]string{"--config", cfgPath, "--workspace", ws}); code != 0 {
+		t.Fatalf("裸 sync 应成功，实得 %d", code)
+	}
+	b, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "rulemux sync --hook --agent codebuddy") {
+		t.Fatalf("空账本裸 sync 仍应自愈旧格式钩子，实得 %s", b)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".codebuddy", "rules")); !os.IsNotExist(err) {
+		t.Fatal("空账本裸 sync 不该落规则文件")
+	}
+}
+
+// TestSyncBareConfigExplicitAgentStillSyncs 校验 M3：配置里 agents 非空且点名的
+// agent，即使账本没有它，裸 sync 也照样落盘——显式配置意图优先于账本收窄。
+func TestSyncBareConfigExplicitAgentStillSyncs(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	traeRules := filepath.Join(ws, ".trae", "rules")
+	if err := os.MkdirAll(traeRules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state")) // 空账本
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\nagents = [\"trae\"]\n")
+
+	if code := Sync([]string{"--config", cfgPath, "--workspace", ws}); code != 0 {
+		t.Fatalf("裸 sync 应成功，实得 %d", code)
+	}
+	mustExist(t, filepath.Join(traeRules, "__rulemux__a.md"))
+}
+
+// TestAgentsFromLedger 表驱动校验账本 → agent 的解析语义（D1/D2 暗雷）：
+// nil/空 = 无 agent（不再是「全部」）；显式列表跳过未知/未验证，同样减 off。
+// （哨兵 `*` 的收紧见 TestAgentsFromLedgerSentinel —— 它依赖钩子状态。）
+func TestAgentsFromLedger(t *testing.T) {
+	cases := []struct {
+		name string
+		ids  []string
+		off  []string
+		want []string
+	}{
+		{"nil 不是全部", nil, nil, nil},
+		{"空不是全部", []string{}, nil, nil},
+		{"显式跳过未知与未验证", []string{"codebuddy", "ghost", "claude"}, nil, []string{"codebuddy"}},
+		{"显式也减 off", []string{"codebuddy", "trae"}, []string{"trae"}, []string{"codebuddy"}},
+		{"Tier-2 注入型不进表", []string{"codebuddy", "dsh", "codex"}, nil, []string{"codebuddy"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := agentIDs(agentsFromLedger(c.ids, c.off, ""))
+			if strings.Join(got, ",") != strings.Join(c.want, ",") {
+				t.Fatalf("want %v, got %v", c.want, got)
+			}
+		})
+	}
+}
+
+// TestAgentsFromLedgerSentinel 校验哨兵 `*`（v1 账本占位）的收紧：只取**有在用证据**
+// 的 agent —— 钩子型要求钩子已装；external 型（dsh）与没装钩子的一律不纳入。否则
+// `*` 会把裸 sync / cascade / sync --all 重新放大成「全部 Tier-1」，把遗留的
+// `.dsh/rules` 又写一遍（正是本次修复要消灭的「新的写入」）。
+func TestAgentsFromLedgerSentinel(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	// dsh 的规则目录存在（历史残留 / 插件建的）也不构成「在用」证据
+	if err := os.MkdirAll(filepath.Join(ws, ".dsh", "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := agentIDs(agentsFromLedger([]string{"*"}, nil, ws)); len(got) != 0 {
+		t.Fatalf("没有任何钩子时哨兵不该展开出任何 agent（含 dsh），实得 %v", got)
+	}
+
+	installHook(t, home, ".codebuddy", "codebuddy")
+	if got := agentIDs(agentsFromLedger([]string{"*"}, nil, ws)); strings.Join(got, ",") != "codebuddy" {
+		t.Fatalf("哨兵应只展开有钩子在用的 agent，实得 %v", got)
+	}
+	if got := agentIDs(agentsFromLedger([]string{"*"}, []string{"codebuddy"}, ws)); len(got) != 0 {
+		t.Fatalf("哨兵展开后仍要减 off，实得 %v", got)
+	}
+}
+
+// agentIDs 提取 agent 的规范 ID（测试辅助）。
+func agentIDs(list []agents.Agent) []string {
+	out := make([]string, 0, len(list))
+	for _, a := range list {
+		out = append(out, a.ID)
+	}
+	return out
+}
+
+// TestSyncBareConfigExplicitAgentSkipsOff 校验 off 的减法覆盖**配置点名**那一路
+// （不只是账本那一路）：配置里显式点名了一个已卸载的 agent，裸 sync 也不许写它。
+func TestSyncBareConfigExplicitAgentSkipsOff(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	dshRules := filepath.Join(ws, ".dsh", "rules")
+	if err := os.MkdirAll(dshRules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := state.UpdateLedger(func(l *state.Ledger) error { l.AddOff("dsh"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\nagents = [\"dsh\"]\n")
+
+	if code := Sync([]string{"--config", cfgPath, "--workspace", ws}); code != 0 {
+		t.Fatalf("裸 sync 应安静退出（0），实得 %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dshRules, "__rulemux__a.md")); !os.IsNotExist(err) {
+		t.Fatalf("已卸载 agent（off 里）即使被配置点名也不该同步（stat err=%v）", err)
+	}
+}
+
+// TestSharedGroupFallbackRespectsOff 校验共享组「一个钩子都没装 ⇒ 退回整组」的兜底
+// 也要减 off：否则「两家钩子都不在 + off 含其中一家」时，手动 sync 会把已卸那家的
+// 源并回共享目录（已卸载的 agent 被复活）。
+func TestSharedGroupFallbackRespectsOff(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	dir := filepath.Join(ws, ".codebuddy", "rules")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	// 账本记过 codebuddy + workbuddy；两家钩子都没装；workbuddy 已卸载（off）
+	if err := state.Record(ws, "codebuddy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Record(ws, "workbuddy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.UpdateLedger(func(l *state.Ledger) error {
+		l.ForgetAgent(ws, "workbuddy")
+		l.AddOff("workbuddy")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	a := filepath.Join(tmp, "a.md") // 两家都要
+	b := filepath.Join(tmp, "b.md") // 只给 workbuddy
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, []byte("# x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfgPath := writeConfig(t, tmp,
+		"[[source]]\npath = \""+a+"\"\n\n"+
+			"[[source]]\npath = \""+b+"\"\nagents = [\"workbuddy\"]\n")
+
+	_ = captureStdout(t, func() {
+		Sync([]string{"--config", cfgPath, "--workspace", ws, "--agent", "codebuddy"})
+	})
+
+	mustExist(t, filepath.Join(dir, "__rulemux__a.md"))
+	if _, err := os.Stat(filepath.Join(dir, "__rulemux__b.md")); !os.IsNotExist(err) {
+		t.Fatalf("已卸载的 workbuddy 不该被整组兜底并回来（stat err=%v）", err)
+	}
+}
+
+// TestExplicitSyncOfOffAgentStillExecutes 校验「显式 --agent 按意图执行」：点名一个
+// 已卸载（off）的 agent 时，若其规则目录已存在，仍按它的源同步 —— 不能被并集兜底
+// 把它自己剔掉（那样 want 为空，反倒把它的残留删了）。
+func TestExplicitSyncOfOffAgentStillExecutes(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	dir := filepath.Join(ws, ".trae", "rules")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := state.Record(ws, "trae"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.UpdateLedger(func(l *state.Ledger) error {
+		l.ForgetAgent(ws, "trae")
+		l.AddOff("trae")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	_ = captureStdout(t, func() {
+		Sync([]string{"--config", cfgPath, "--workspace", ws, "--agent", "trae"})
+	})
+
+	mustExist(t, filepath.Join(dir, "__rulemux__a.md"))
+}
+
+// TestSyncBareReportListsOnlyInUseUninitialized 校验未初始化名单的新口径
+// （2026-10-14 用户拍板「没用过的别出现，没有意义」）：名单 = 这个工作区**在用**
+// （账本记录 ∪ 配置点名 − off）却**没有规则目录**的 agent。
+//   - 阶段一：codebuddy 在用但没目录、trae 只用配置点名也没目录 ⇒ 两者都列；
+//     workbuddy 从没用过、dsh 已卸载（off）⇒ 都不列；
+//   - 阶段二：把两者的目录建出来（都初始化的状态）⇒ 整行消失，包括从没用过的
+//     workbuddy —— 这正是老口径（全部 Tier-1 减 off）做不到的：它会把 workbuddy 一直挂着。
+func TestSyncBareReportListsOnlyInUseUninitialized(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	if err := state.Record(ws, "codebuddy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Record(ws, "dsh"); err != nil {
+		t.Fatal(err) // 账本里记着 dsh，但它在 off 里（已卸载）
+	}
+	if err := state.UpdateLedger(func(l *state.Ledger) error { l.AddOff("dsh"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("# a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\nagents = [\"trae\"]\n")
+
+	errOut := captureStderr(t, func() { Sync([]string{"--config", cfgPath, "--workspace", ws}) })
+	line := notInitLine(errOut)
+	for _, id := range []string{"codebuddy", "trae"} {
+		if !strings.Contains(line, id) {
+			t.Fatalf("在用但没目录的 %s 应出现在未初始化名单：%q", id, line)
+		}
+	}
+	for _, id := range []string{"workbuddy", "dsh"} {
+		if strings.Contains(line, id) {
+			t.Fatalf("%s 不该出现在未初始化名单（从没用过 / 已卸载）：%s", id, line)
+		}
+	}
+
+	// 阶段二：把两个在用 agent 的目录建出来 ⇒ 名单整行消失。
+	for _, d := range []string{".codebuddy/rules", ".trae/rules"} {
+		if err := os.MkdirAll(filepath.Join(ws, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errOut = captureStderr(t, func() { Sync([]string{"--config", cfgPath, "--workspace", ws}) })
+	if line := notInitLine(errOut); line != "" {
+		t.Fatalf("都初始化后不该再有未初始化名单（含从没用过的 workbuddy），实得 %q", line)
+	}
+}
+
+// TestSyncHookTier2AgentWritesNothing 锁住 dsh 改注入后最关键的一条：`sync --hook --agent dsh`
+// 不再往工作区写任何东西——旧的 .dsh/rules 残留既不被改写也不被删（那段设计已作废，
+// 残留不强制清除），账本也不会记它（它不再靠目录型交付）。
+func TestSyncHookTier2AgentWritesNothing(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "ws")
+	legacy := filepath.Join(ws, ".dsh", "rules")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(legacy, "__rulemux__a.md")
+	if err := os.WriteFile(stale, []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+
+	src := filepath.Join(tmp, "a.md")
+	if err := os.WriteFile(src, []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeConfig(t, tmp, "[[source]]\npath = \""+src+"\"\n")
+
+	_ = captureStdout(t, func() {
+		if code := Sync([]string{"--hook", "--agent", "dsh", "--config", cfgPath, "--workspace", ws}); code != 0 {
+			t.Fatalf("sync --hook --agent dsh 应安静成功（什么也不做），实得 %d", code)
+		}
+	})
+	b, err := os.ReadFile(stale)
+	if err != nil {
+		t.Fatalf("旧残留文件不该被删：%v", err)
+	}
+	if strings.TrimSpace(string(b)) != "stale" {
+		t.Fatalf("旧残留文件不该被改写，实得 %q", b)
+	}
+	if got := state.Load().AgentsFor(ws); len(got) != 0 {
+		t.Fatalf("Tier-2 注入型不该进账本，实得 %v", got)
+	}
+}
+
+// notInitLine 从 sync 报告里抽出「not initialized:」那一行（测试辅助）。
+func notInitLine(report string) string {
+	for _, l := range strings.Split(report, "\n") {
+		if strings.Contains(l, "not initialized:") {
+			return l
+		}
+	}
+	return ""
 }

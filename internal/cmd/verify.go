@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/cq-guojia/rulemux/internal/agents"
+	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/engine"
 )
 
@@ -17,6 +18,10 @@ import (
 //  1. the hook really fires before rules are read (otherwise this session can't see it)
 //  2. the agent really loads our probe file: a non-hidden __rulemux__ name, carrying an
 //     alwaysApply:true frontmatter so frontmatter-gated agents (CodeBuddy/WorkBuddy) pick it up
+//
+// targets 两条路（R4）：显式 --agent 永远允许（onboarding 唯一入口）；裸 verify 只给
+// 「在用」的 Tier-1 agent 种 canary（与裸 sync 同一条公式）——否则一次裸 verify 就给
+// 没装 / 已卸的 agent 建出规则目录，成为后续回填的跳板。
 func Verify(args []string) int {
 	f := ParseFlags(args)
 	ws, err := workspace(f.Get("workspace", ""))
@@ -26,34 +31,69 @@ func Verify(args []string) int {
 	}
 
 	requested := f.Get("agent", "")
-	targets := targetAgents(requested)
-	if len(targets) == 0 {
-		fmt.Fprintf(os.Stderr, "rulemux: unknown agent %q\n", requested)
-		return 1
-	}
-	// With no explicit agent, only Tier-1 (Tier-2 has no rules dir to drop a probe into).
-	if requested == "" {
-		var onlyTier1 []agents.Agent
-		for _, a := range targets {
+	var targets []agents.Agent
+	if requested != "" {
+		// 显式点名：永远允许（onboarding 的唯一入口，设计原则 1 的例外）。
+		targets = targetAgents(requested)
+		if len(targets) == 0 {
+			fmt.Fprintf(os.Stderr, "rulemux: unknown agent %q\n", requested)
+			return 1
+		}
+	} else {
+		// 裸 verify：只给「在用」的 Tier-1 agent 种 canary（与裸 sync 同一条公式）。
+		// 否则一次裸 verify 就给没装 / 已卸的 agent 建出规则目录，成为后续回填的
+		// 跳板（R4）。读不了配置 ⇒ 降级为仅账本，不崩。
+		cfg, cfgErr := config.Load(f.Get("config", config.DefaultPath()))
+		if cfgErr != nil {
+			fmt.Fprintf(os.Stderr, "rulemux: cannot read config (%v) — using the ledger only\n", cfgErr)
+			cfg = nil
+		} else if verr := cfg.Validate(); verr != nil {
+			fmt.Fprintf(os.Stderr, "rulemux: invalid config (%v) — using the ledger only\n", verr)
+			cfg = nil
+		}
+		for _, a := range bareTargets(cfg, ws) {
 			if a.Tier == agents.Tier1 {
-				onlyTier1 = append(onlyTier1, a)
+				targets = append(targets, a)
 			}
 		}
-		targets = onlyTier1
+		// ⚠ 空 targets 不能在这里对 --clean 也早退：裸 --clean 是超集清理（下面会把
+		// targets 覆盖成 allTier1），用「在用集合为空」就返回会让 canary（例如
+		// `verify --agent dsh` 种给不在用 agent 的那颗）永远清不掉 —— 正是 R4 要堵的跳板。
+		if len(targets) == 0 && !f.Has("clean") {
+			fmt.Fprintln(os.Stderr, "rulemux: no agent recorded for this workspace yet — nothing to verify")
+			fmt.Fprintln(os.Stderr, "  run `rulemux sync --agent <id>` once, or pass --agent <id> explicitly")
+			return 0
+		}
 	}
 
 	// Cleanup mode
 	if f.Has("clean") {
+		// 清理集合必须 ⊇ 写入集合：裸 --clean 清本工作区**所有**已验证 Tier-1 的
+		// canary（含显式 --agent 种给不在用 agent 的那颗）——否则它永远没人清（R4）。
+		if requested == "" {
+			targets = allTier1()
+		}
+		failed := false
 		for _, a := range targets {
 			dir := a.RulesDirAbs(ws)
 			if dir == "" {
+				if requested != "" {
+					fmt.Printf("  %s: Tier-2 has no rules dir — nothing to clean\n", a.ID)
+				}
 				continue
 			}
 			if err := engine.CleanCanary(dir); err != nil {
 				fmt.Fprintf(os.Stderr, "rulemux: failed to clean canary for %s: %v\n", a.ID, err)
-				return 1
+				failed = true
+				continue // 清完剩下的再汇总报错，不半途而废
 			}
+			// 清完 canary 后目录若确认为空也一并删掉（与 uninstall 的 D3 同规）：
+			// 否则「探针建出来的空目录」会留在盘上，成为下次回填的位置。
+			removeEmptyLeaf(dir)
 			fmt.Printf("Canary cleaned: %s\n", a.ID)
+		}
+		if failed {
+			return 1
 		}
 		return 0
 	}
@@ -89,7 +129,8 @@ func Verify(args []string) int {
 	fmt.Println("    Prefix / NeedsFrontmatter accordingly.")
 	fmt.Println()
 	fmt.Println("Clean up when done: rulemux verify --clean")
-	fmt.Println("(the canary carries the __rulemux__ prefix, so even if you skip this, the next")
-	fmt.Println("rulemux sync treats it as residue and deletes it automatically)")
+	fmt.Println("(bare --clean removes every agent's canary in this workspace, in use or not;")
+	fmt.Println("the canary also carries the __rulemux__ prefix, so a later `rulemux sync`")
+	fmt.Println("treats it as residue and deletes it automatically)")
 	return 0
 }

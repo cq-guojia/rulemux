@@ -44,8 +44,8 @@
 
               rulemux sync  ↓  真实拷贝（永不淡出 / 不累积 / 不用软链）
 
-    工作区 A ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
-    工作区 B ──► .codebuddy/rules/   .workbuddy/rules/   .dsh/rules/
+    工作区 A ──► .codebuddy/rules/   .trae/rules/        （dsh：注入交付，盘上零产物）
+    工作区 B ──► .codebuddy/rules/   .trae/rules/        （dsh：注入交付，盘上零产物）
 ```
 
 - **规则复用**：第 3 层继承第 2 层、第 2 层继承第 1 层 —— 通用的只写一次，越往下越具体。
@@ -109,7 +109,7 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 | **trae**（Trae CN） | Tier-1（真实拷贝） | `.trae/rules/` | 暂不支持 | ✅ **已验证，可安装**（2026-10-09 canary 坐实：用户级钩子 `~/.trae-cn/hooks.json`；国际版目录 `~/.trae` 尚未接入） |
 | codex | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
 | opencode | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
-| **dsh**（DeepSeek Harness） | Tier-1（真实拷贝） | `.dsh/rules/` | 暂不支持 | ✅ **已验证，可安装**；读取那半由**独立的 dsh 插件**做 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责同步，不替你装插件） |
+| **dsh**（DeepSeek Harness） | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ✅ **已验证，可安装**；交付由**独立的 dsh 插件**做 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责用 `inject` 渲染文本，工作区零产物） |
 
 - `rulemux init` **会拒绝**未验证的 agent —— 不会给你装一个行为未经验证的半成品。
   `rulemux doctor` 会给未验证的 agent 标 ⚠。
@@ -120,8 +120,10 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 - **Tier-2 是刻意的降级**：面向没有规则目录、只认单个 `AGENTS.md` 的 agent，走会话钩子注入，
   且绝不碰你自己的 `AGENTS.md`；但它满足不了「永不淡出」。见
   [`docs/design/features/hook-injection.md`](docs/design/features/hook-injection.md)。
-- **dsh 是「两半」的故事**：它没有钩子配置文件。rulemux 负责写 `.dsh/rules/`（Tier-1）；读取那半由本仓库里
-  **独立的插件包** [`dsh-plugin/`](dsh-plugin/) 做，按 dsh 正常方式安装（npm 上就是 `rulemux-dsh`）：
+- **dsh 由插件交付，而且盘上什么都不会留下**：它既没有钩子配置文件，也没有规则目录 —— rulemux 不会为它往
+  你的工作区写任何东西。交付那半由本仓库里**独立的插件包** [`dsh-plugin/`](dsh-plugin/)（npm 上就是
+  `rulemux-dsh`）做：它向 CLI 要「本会话工作区渲染好的规则」（`rulemux inject --agent dsh`），
+  在首个用户回合把那文本注入一次。按 dsh 正常方式安装：
   `dsh plugin --profile web add rulemux-dsh`（也可 git 直装：
   `add "github:cq-guojia/rulemux#path:/dsh-plugin"`）。
   所以 `rulemux init --agent dsh` 什么都不装 —— 只打印插件安装命令。
@@ -129,6 +131,9 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
   `rulemux` 命令行工具可得**且版本满足插件要求**（偏旧会用 pnpm/npm 升级并复查，不会「装了就当成过」）、
   插件本身已装载、`~/.rulemux/config.toml` 存在（缺失则替你生成，**已存在绝不覆盖**）。
   任何一步不成立就**抛错**，让失败在会话里可见，绝不悄悄跑在没有规则的状态下。
+  取规则是另一件事：`rulemux inject` 失败只记日志，会话照常往下走（只是本回合没有注入）。
+  卸载 rulemux 停不掉这个插件（它归属宿主），所以 `rulemux uninstall --agent dsh` 会明说这一点，
+  并指出旧设计可能在 `.dsh/rules` 留下的残留（rulemux 不再写它，也不再删它）。
   因为发生在启动时，你**去改配置时那份 `config.toml` 已经在**：装插件 → 重启 → 改配置 → 开**一次**会话即可。
   同步是另一回事：`rulemux sync` 失败只记日志，会话照常继续。
 
@@ -182,6 +187,11 @@ dsh plugin --profile <你的 profile> add "github:cq-guojia/rulemux#path:/dsh-pl
 并在 `~/.rulemux/config.toml` 缺失时替你生成（已存在绝不覆盖）。三步缺一步就抛错，不会悄悄跑在
 没有规则的会话里。因为就绪发生在启动时，你去改配置时那份文件已经在了：装插件 → 重启 → 改配置 →
 开**一次**会话。
+
+那次会话里插件会跑 `rulemux inject --agent dsh`，把渲染好的规则注入 —— **工作区里什么都不写**：
+没有 `.dsh/rules`、没有副本、没有需要清理的残渣。（更早的 rulemux 版本会把拷贝写进 `.dsh/rules`
+再由插件读回；那个目录现在已废弃 —— 你机器上若还留着，自己删掉即可，或跑
+`rulemux uninstall --agent dsh` 它会指给你看。）
 
 ---
 
@@ -504,19 +514,25 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 `scope = "user"` 投递到**用户级（全局）**目录的规则与 skill 也会按「卸载后还有谁在用」收敛
 （只删 `__rulemux__` 前缀内容，目录本身保留）。
 
+工作区级的目录在**收敛后确认为空**时会连目录一起删掉（软链、非空、含子目录的一律保留；
+绝不向上删父目录）。该 agent 随后会**从账本里移除**（只对确实清过的工作区），并记为「已卸载」
+—— 之后的 `rulemux sync` 不会再写它，`doctor` 与 sync 汇总里也不再出现，直到你主动
+`rulemux init --agent <id>` 把它装回来。插件型宿主（dsh）例外：rulemux 卸不掉宿主侧的插件，
+只会给你一条警告 —— 插件不卸，每次 dsh 会话都会把规则重新同步进 `.dsh/rules`。
+
 ---
 
 ## 7. 命令一览
 
 | 命令 | 作用 |
 |---|---|
-| `rulemux sync [--hook] [--agent <id>] [--config <path>] [--workspace <dir>]` | 同步规则。`--hook` = 本次由某 agent 的 SessionStart 钩子调起（**只有此时**才允许创建规则目录、才可能输出变化提示）；省略 `--agent` 则针对全部已支持 agent |
+| `rulemux sync [--hook] [--agent <id>] [--config <path>] [--workspace <dir>]` | 同步规则。`--hook` = 本次由某 agent 的 SessionStart 钩子调起（**只有此时**才允许创建规则目录、才可能输出变化提示）。省略 `--agent` 时只处理**这个工作区已记录过**（或配置里显式点名）的 agent —— 从没用过的、已卸载的，一个字节都不写（账本里那种「未知/全部」的老条目也只对**钩子已装**、确实会读这个工作区的 agent 生效） |
 | `rulemux sync --all [--config <path>]` | 手动把账本里记录过的所有工作区重新对齐（不读 cwd、绝不创建目录、顺手 GC 掉目录已不在的条目）。与 `--hook` / `--agent` / `--workspace` 互斥 |
 | `rulemux inject --agent <id> [--config <path>]` | Tier-2：把规则输出到 stdout 供钩子注入 |
 | `rulemux init --agent <id[,id...]> [--config <path>] [--workspace <dir>]` | 生成示例配置并安装 SessionStart 钩子 |
 | `rulemux init --refresh [--agent <id[,id...]>] [--workspace <dir>]` | **只刷新** rulemux 自己装过的钩子（升级后首次 `sync` 会自动做一次，这条用于手动强制）：不新增、不创建任何文件或目录、文件里其它条目与其它键一律原样保留 |
 | `rulemux doctor [--config <path>] [--workspace <dir>]` | 环境自检：安装方式与路径、配置文件、哪些 agent 已初始化（TTY 自适应颜色） |
-| `rulemux verify --agent <id> [--clean] [--workspace <dir>]` | canary 验收 |
+| `rulemux verify [--agent <id>] [--clean] [--config <path>] [--workspace <dir>]` | canary 验收。省略 `--agent` 只探「在用」的 agent；`--agent <id>` 强制指定（onboarding 用）。`--clean` 清掉本工作区**所有** canary |
 | `rulemux uninstall --agent <id[,id...]> \| --off \| --all [--yes]` | 移除钩子与已投递文件 |
 
 直接运行 `rulemux`（不带参数）可看完整帮助。
@@ -525,8 +541,9 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 
 ## 8. 支持范围（已定稿）
 
-**支持的 agent 到此为止**，一共四家 —— 全是 Tier-1，全都经真实 canary 坐实：**codebuddy**、
-**workbuddy**、**trae**、**dsh**。`claude`、`codex`、`opencode` 仍在注册表里但未核实，因此
+**支持的 agent 到此为止**，一共四家，全都经真实 canary 坐实：**codebuddy**、**workbuddy**、**trae**
+（Tier-1，真实拷贝）与 **dsh**（Tier-2，注入交付 —— 由它自己的插件完成，工作区零产物）。
+`claude`、`codex`、`opencode` 仍在注册表里但未核实，因此
 `rulemux init` 会拒绝它们 —— **没有补齐它们的计划**。（接入新 agent 的清单留作参考：
 [`docs/design/features/agent-onboarding.md`](docs/design/features/agent-onboarding.md)。）
 

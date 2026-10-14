@@ -11,6 +11,7 @@ import (
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/config"
 	"github.com/cq-guojia/rulemux/internal/hooks"
+	"github.com/cq-guojia/rulemux/internal/state"
 	"github.com/cq-guojia/rulemux/internal/ui"
 )
 
@@ -42,8 +43,8 @@ func Doctor(args []string) int {
 	cfgOK := printConfig(cfgPath, cfg, cfgErr, ws)
 	fmt.Println()
 
-	// 3. Agents：初始化了哪些（每 agent 一行；未初始化的折叠一行）
-	printAgents(ws)
+	// 3. Agents：初始化了哪些（每 agent 一行；在用但未初始化的折叠一行；没用过的不提）
+	printAgents(cfg, ws)
 
 	// 4. 汇总 + 下一步
 	printDoctorSummary(cfgOK, in.OnPATH)
@@ -205,8 +206,10 @@ func pathMark(p string, wantDir bool) string {
 }
 
 // agentInitialized 报告该 agent 是否已初始化：钩子已装（latest 与否另见
-// agentStateLine）。external 样式（如 dsh）没有 rulemux 可装的钩子——插件由
-// 宿主装、rulemux 探测不到，以其规则目录存在为据。
+// agentStateLine）。external 样式没有 rulemux 可装的钩子——插件由宿主装、rulemux
+// 探测不到，若它还有规则目录就以目录存在为据；没有目录的（dsh：纯注入，规则由插件
+// 每个会话现取现注入，盘上什么都不留）**永远判不出来**，由 printAgents 单列一行
+// 说明，而不是当「未初始化」报——判错还会把用户支去跑一个修不好它的 init。
 func agentInitialized(a agents.Agent, ws string) bool {
 	if a.Style == "external" {
 		if dir := a.RulesDirAbs(ws); dir != "" {
@@ -220,17 +223,56 @@ func agentInitialized(a agents.Agent, ws string) bool {
 	return err == nil && installed
 }
 
-func printAgents(ws string) {
-	all := agents.All()
-	var inited, unined []agents.Agent
-	for _, a := range all {
-		if agentInitialized(a, ws) {
-			inited = append(inited, a)
-		} else {
-			unined = append(unined, a)
+// printAgents 报告 agent 的初始化状态（2026-10-14 用户拍板：没用过的一律不出现）：
+//   - 已初始化的（钩子已装；external 的规则目录存在）逐行列出；
+//   - 在用的（账本记录 ∪ 配置点名 − off）但未初始化 ⇒ 折叠一行提示；
+//   - 从没用过的一律不提，也不计入分母。
+//
+// 已卸载（off）的同样不提：卸载即断联，不出现、不 nag。
+func printAgents(cfg *config.Config, ws string) {
+	off := state.Load().Off
+	// 「在用」的判据在 doctor 里要比裸 sync 宽一档：只问「这个工作区有没有用过它」，
+	// 不按 Tier 过滤 —— 注入型（dsh）没有目录也没有钩子，只有这条判据看得见它。
+	mention := mentionedInUse(cfg, ws)
+	inUse := func(a agents.Agent) bool {
+		for _, id := range append([]string{a.ID}, a.Aliases...) {
+			if mention[strings.ToLower(id)] {
+				return true
+			}
 		}
+		return false
 	}
-	fmt.Println(ui.Header(fmt.Sprintf("Agents — %d of %d initialized", len(inited), len(all))))
+
+	var inited, unined, injectionOnly []agents.Agent
+	visible := 0
+	for _, a := range agents.All() {
+		if containsFold(off, a.ID) {
+			continue
+		}
+		switch {
+		case agentInitialized(a, ws):
+			inited = append(inited, a)
+		case a.Tier == agents.Tier2 && a.Style == "external":
+			// 注入型且探测不到安装状态（dsh）：工作区里没有可初始化的东西。在用就提一句
+			// 它由宿主侧插件交付，不用就不提。
+			if !inUse(a) {
+				continue
+			}
+			injectionOnly = append(injectionOnly, a)
+		case inUse(a):
+			unined = append(unined, a)
+		default:
+			continue // 从没用过：既不计入分母，也不列名
+		}
+		visible++
+	}
+
+	if visible == 0 {
+		// 名单收窄后（2026-10-14）分母只算在用的 agent：一个都没有时别印「0 of 0」。
+		fmt.Println(ui.Header("Agents — none in use in this workspace"))
+		return
+	}
+	fmt.Println(ui.Header(fmt.Sprintf("Agents — %d of %d initialized", len(inited), visible)))
 	for _, a := range inited {
 		fmt.Printf("  %s %-10s %s\n", ui.Green(ui.GlyphOK), a.ID, agentStateLine(a, ws))
 	}
@@ -242,13 +284,18 @@ func printAgents(ws string) {
 		fmt.Printf("  %s not initialized: %s — rulemux init --agent <id>\n",
 			ui.Dim(ui.GlyphSkip), strings.Join(ids, ", "))
 	}
+	for _, a := range injectionOnly {
+		fmt.Printf("  %s %-10s delivered by the host-side plugin (rulemux renders, the plugin injects) — nothing to initialize here\n",
+			ui.Dim(ui.GlyphSkip), a.ID)
+	}
 }
 
 // agentStateLine 只报已初始化 agent 的钩子健康度（2026-10-13 用户拍版二版：
 // 「我理解你下面的 Agent 就是做判断对吧？……判断它的钩子正不正常，不就行了吗？
 // 搞这么多干嘛呢？」）。规则/skill 目录的存在性不再罗列——sync 已经报过，doctor
-// 不重复刷屏。external 样式（如 dsh）没有 rulemux 可装的钩子——插件由宿主装、
-// rulemux 探测不到，以其规则目录存在为据（见 agentInitialized）。
+// 不重复刷屏。external 样式没有 rulemux 可装的钩子——插件由宿主装、rulemux 探测不到，
+// 有规则目录的以其存在为据（见 agentInitialized）；dsh 这种纯注入的连目录都没有，
+// 由 printAgents 单列一行说明（这里的 external 分支对它不会命中）。
 func agentStateLine(a agents.Agent, ws string) string {
 	if a.Style == "external" {
 		return "plugin (external)"

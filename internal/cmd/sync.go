@@ -20,7 +20,9 @@ import (
 // Sync 把配置所列源文件真实拷贝进各 agent 的原生规则目录（Tier-1）。
 //
 // 典型调用：由各 agent 的 SessionStart 钩子执行 `rulemux sync --hook --agent <id>`。
-// 未指定 --agent 时处理全部「已验证」的 Tier-1 agent —— 规则是公共的，默认全给。
+// 裸 `rulemux sync`（无 --agent、非 hook）只处理「账本记录 ∪ 配置显式点名 − off」
+// 内的 agent —— 规则是公共的，但投递范围以「这个工作区实际用过谁」为准：
+// 未安装 / 已卸载（off）的 agent 不会被写（D1）。
 //
 // 关键语义（详见 docs/design/features/sync-all-and-change-notice.md §二/§六/§八）：
 //   - 只有「hook 调用」且「被 --agent 点名」的那一个 agent 才允许创建它的规则目录；
@@ -97,25 +99,32 @@ func Sync(args []string) int {
 		return 0
 	}
 
-	targets := targetAgents(requested)
-	if len(targets) == 0 {
-		if requested != "" {
-			if a, ok := agents.Get(requested); ok && !a.Verified {
-				fmt.Fprintf(os.Stderr, "rulemux: agent %q is not supported yet: only verified agents are available: %s\n", requested, agents.SupportedSummary())
-			} else {
-				fmt.Fprintf(os.Stderr, "rulemux: unknown agent %q\n", requested)
-			}
-		} else {
-			fmt.Fprintln(os.Stderr, "rulemux: no verified agent to process")
-		}
-		return 1
+	// targets 两条路：
+	//   - 显式 --agent（hook 点名也走这）：解析那一个（:50-59 已校验存在且 Verified）；
+	//   - 裸 sync（无 --agent、非 hook）：按「账本(ws) ∪ 配置显式点名 − off」收窄，
+	//     空 ⇒ 提示怎么开始 + exit 0 + 零 rules/skills 写入（D1）。
+	var targets []agents.Agent
+	if requested != "" {
+		targets = targetAgents(requested)
+	} else {
+		targets = bareTargets(cfg, ws)
 	}
 
 	// 自愈（不依赖 npm 的安装脚本）：顺手把「我们自己装过的那条钩子」升级到当前格式。
 	// 任何安装方式（npm / tarball / 容器入口 / go install）都会在下一次 sync 时自动跟上；
 	// 旧格式钩子（缺 --hook）正是在这里被修好的 —— 因为它调起我们时也不带 --hook，
 	// 所以这条自愈必须在「非 hook 路径」同样生效。
-	healHooks(ws, targets)
+	// 遍历范围与同步范围**解耦**（全部已核实 agent）：否则空账本时裸 sync 会丧失自愈。
+	healHooks(ws)
+
+	if len(targets) == 0 {
+		// 只有裸路径可能为空：账本与配置都没点名任何 agent。不写任何东西，
+		// 只告诉用户怎么开始（提示可执行，不唠叨任何具体 agent）。
+		fmt.Fprintln(os.Stderr, "rulemux: no agent recorded for this workspace yet — nothing to sync")
+		fmt.Fprintln(os.Stderr, "  run `rulemux sync --agent <id>` once, or just open a session in your agent;")
+		fmt.Fprintln(os.Stderr, "  rulemux records what it syncs and picks it up from there")
+		return 0
+	}
 
 	// 只有 hook 点名的那一个 agent 才允许创建自己的规则目录（设计 §二 原则 1）。
 	requestedID := ""
@@ -321,7 +330,7 @@ func (r *syncRun) cascade() {
 			done[e.id] = true
 		}
 	}
-	for _, a := range agentsFromLedger(l.AgentsFor(r.ws)) {
+	for _, a := range agentsFromLedger(l.AgentsFor(r.ws), l.Off, r.ws) {
 		if done[a.ID] || a.Tier != agents.Tier1 {
 			continue
 		}
@@ -332,15 +341,15 @@ func (r *syncRun) cascade() {
 	}
 }
 
-// healHooks 把 targets 里每个 agent「已存在的自家钩子」升级到当前格式（幂等）。
+// healHooks 把每个已核实 agent「已存在的自家钩子」升级到当前格式（幂等）。
 //
 // 这是「升级即生效」的自愈路径，替代原先依赖 npm postinstall 的做法：npm 11 起安装脚本
 // 默认需要白名单放行（`allow-scripts`），靠它迟早会静默失效 —— 不押在别人的策略上。
 //
 // 硬规则（与 init --refresh 同一口径）：只重写已存在的自家条目；没装过不创建、别人的条目
 // 与其它键不碰、已是最新不写盘。诊断一律走 stderr，绝不污染 stdout 的协议输出。
-func healHooks(ws string, targets []agents.Agent) {
-	for _, a := range targets {
+func healHooks(ws string) {
+	for _, a := range agents.Supported() {
 		path := a.HookFileAbs(ws)
 		installed, cmd, err := hooks.Inspect(path, a)
 		if err != nil || !installed || cmd == hooks.TargetCommand(a) {
@@ -367,18 +376,33 @@ func peerIDs(ps []agents.Agent) []string {
 // （手动 sync 的兜底：没钩子可判时按整组并集，保证手动跑仍有东西落）。
 //
 // 「还装着」是判断某个 agent 是否仍在使用的唯一依据：卸载 = 摘钩子，钩子一没它就自然
-// 退出并集，因此**不需要任何额外的状态文件**。
-func hookedPeersIn(group []agents.Agent, ws string) []agents.Agent {
+// 退出并集，因此**不需要任何额外的状态文件**（off 复用同一份账本，不新增存储）。
+//
+// ⚠ 兜底退回的整组要**减 off**：已卸载的 agent 即使在这一组的兜底里也不该回来（否则
+// 「组内钩子一个都没装 + off 含其中一家」时，手动 sync 会把已卸那家的源并回来）。
+// self 例外：**正在被处理的这个 agent 永远留在组里** —— 显式 `sync --agent X` 点名
+// 已卸 agent 时按用户意图执行（否则兜底把它自己剔掉 ⇒ want 为空 ⇒ 反倒把它的残留删了）。
+func hookedPeersIn(group []agents.Agent, ws, self string) []agents.Agent {
 	var hooked []agents.Agent
 	for _, b := range group {
 		if hookInstalled(b, ws) {
 			hooked = append(hooked, b)
 		}
 	}
-	if len(hooked) == 0 {
+	if len(hooked) > 0 {
+		return hooked
+	}
+	off := state.Load().Off
+	if len(off) == 0 {
 		return group
 	}
-	return hooked
+	kept := make([]agents.Agent, 0, len(group))
+	for _, b := range group {
+		if !containsFold(off, b.ID) || b.ID == self {
+			kept = append(kept, b)
+		}
+	}
+	return kept
 }
 
 // syncAll 实现 `rulemux sync --all`：只遍历账本记录过的工作区，把它们各自对齐到当前配置。
@@ -413,7 +437,7 @@ func syncAll(cfg *config.Config) int {
 		}
 		run.ws = ws
 		run.wsList = append(run.wsList, ws)
-		for _, a := range agentsFromLedger(l.AgentsFor(ws)) {
+		for _, a := range agentsFromLedger(l.AgentsFor(ws), l.Off, ws) {
 			run.agent(a)
 		}
 	}
@@ -441,28 +465,181 @@ func syncAll(cfg *config.Config) int {
 }
 
 // agentsFromLedger 把账本里记录的一组 agent 解释为具体的 Tier-1 适配器：
-//   - 空 / 含哨兵 state.AnyAgent ⇒ 全部已支持 agent；
-//   - 其它值按注册表解析（认别名）；查不到或未验证的**跳过**（条目保留，等将来就绪）。
-func agentsFromLedger(ids []string) []agents.Agent {
-	any := len(ids) == 0
+//   - 空 / nil ⇒ **无 agent**（不再是「全部」——空列表是 uninstall 清空后的终态，
+//     当成「全部」会让已卸 agent 被 cascade / sync --all 复活，D2 白修）；
+//   - 含哨兵 state.AnyAgent ⇒ 「未知」（v1 迁移占位）：只取**有在用证据**的 Tier-1
+//     agent，而非「全部」——判据是钩子已装（hookInstalled，等于「它真的会读这个
+//     目录」）。注入型（Tier-2：codex / opencode / dsh）**不纳入**：它们没有规则
+//     目录，也就没有「目录存在」这种证据可言（要同步它，用 --agent 或配置点名）。
+//     哨兵的原始用途是「卸载回访不丢条目」，而回访只看 Workspaces、不看这份列表，
+//     所以收紧这里不影响清理。
+//   - 其它值按注册表解析（认别名）；查不到、未验证、或**不是 Tier-1** 的跳过
+//     （条目保留，等将来就绪）。Tier-2 注入型即使被账本记着也不进这张表：
+//     它没有目录可写，进了只会污染裸 sync 的 targets 与「未初始化」名单。
+func agentsFromLedger(ids, off []string, ws string) []agents.Agent {
+	if len(ids) == 0 {
+		return nil
+	}
+	sentinel := false
 	for _, id := range ids {
 		if id == state.AnyAgent {
-			any = true
+			sentinel = true
 			break
 		}
 	}
-	if any {
-		return targetAgents("")
+	var base []agents.Agent
+	if sentinel {
+		for _, a := range allTier1() { // allTier1 已排除 Tier-2 注入型
+			if !hookInstalled(a, ws) {
+				continue
+			}
+			base = append(base, a)
+		}
+	} else {
+		seen := map[string]bool{}
+		for _, id := range ids {
+			a, ok := agents.Get(id)
+			if !ok || !a.Verified || a.Tier != agents.Tier1 || seen[a.ID] {
+				continue
+			}
+			seen[a.ID] = true
+			base = append(base, a)
+		}
+	}
+	if len(off) == 0 {
+		return base
+	}
+	out := make([]agents.Agent, 0, len(base))
+	for _, a := range base {
+		if !containsFold(off, a.ID) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// bareTargets 计算裸 sync（无 --agent、非 hook）的 targets：
+// 账本记录(ws) ∪ 配置里 agents 非空且点名且对本工作区适用的 agent，再减 off。
+// 空 ⇒ 调用方提示怎么开始、exit 0、零写入。
+func bareTargets(cfg *config.Config, ws string) []agents.Agent {
+	l := state.Load()
+	seen := map[string]bool{}
+	var out []agents.Agent
+	add := func(a agents.Agent) {
+		if !seen[a.ID] {
+			seen[a.ID] = true
+			out = append(out, a)
+		}
+	}
+	for _, a := range agentsFromLedger(l.AgentsFor(ws), l.Off, ws) {
+		add(a)
+	}
+	for _, a := range configExplicitAgents(cfg, ws) {
+		add(a)
+	}
+	if len(l.Off) == 0 {
+		return out
+	}
+	kept := make([]agents.Agent, 0, len(out))
+	for _, a := range out {
+		if !containsFold(l.Off, a.ID) {
+			kept = append(kept, a)
+		}
+	}
+	return kept
+}
+
+// configExplicitAgents 返回配置里 agents 字段**非空**且点名、且对本工作区适用的
+// Tier-1 agent（workspace 域要求工作区匹配；user 域全局适用——用户级目录本就跨
+// 工作区，见 M2）。
+// agents 为空的 source **不算**点名：它命中全部 agent，拿它当点名会把 D1 的收窄
+// 整个抵消掉（M1）。别名与规范 ID 都认。
+func configExplicitAgents(cfg *config.Config, ws string) []agents.Agent {
+	if cfg == nil {
+		return nil // 配置读不了时的降级（verify 路径）：只靠账本
+	}
+	named := map[string]bool{}
+	note := func(ids []string) {
+		for _, id := range ids {
+			named[strings.ToLower(strings.TrimSpace(id))] = true
+		}
+	}
+	for _, s := range cfg.Sources {
+		if s.IsUserScope() || s.MatchesWorkspace(ws) {
+			note(s.Agents)
+		}
+	}
+	for _, s := range cfg.SkillSources {
+		if s.IsUserScope() || s.MatchesWorkspace(ws) {
+			note(s.Agents)
+		}
+	}
+	if len(named) == 0 {
+		return nil
 	}
 	var out []agents.Agent
-	seen := map[string]bool{}
-	for _, id := range ids {
-		a, ok := agents.Get(id)
-		if !ok || !a.Verified || seen[a.ID] {
-			continue
+	for _, a := range allTier1() {
+		for _, id := range append([]string{a.ID}, a.Aliases...) {
+			if named[strings.ToLower(id)] {
+				out = append(out, a)
+				break
+			}
 		}
-		seen[a.ID] = true
-		out = append(out, a)
+	}
+	return out
+}
+
+// mentionedInUse 返回「这个工作区用过哪些 agent」的名字集合（小写；**不按 Tier 过滤**）：
+// 账本记录 + 配置里 agents 非空且点名（workspace 域要求匹配本工作区，user 域全局适用）。
+//
+// 与 bareTargets 的区别：那个是「裸 sync 该动哪些目录」，天然只可能是 Tier-1；这里回答的是
+// 另一个问题——「这台机器上有没有人在用某个 agent」，注入型（Tier-2，如 dsh）也算在用。
+// doctor 需要后者：dsh 没有目录、没有钩子，只有这条判据能说明它确实在用。
+func mentionedInUse(cfg *config.Config, ws string) map[string]bool {
+	out := map[string]bool{}
+	for _, id := range state.Load().AgentsFor(ws) {
+		if id != state.AnyAgent {
+			out[strings.ToLower(id)] = true
+		}
+	}
+	if cfg == nil {
+		return out
+	}
+	note := func(ids []string, applicable bool) {
+		if !applicable || len(ids) == 0 {
+			return
+		}
+		for _, id := range ids {
+			out[strings.ToLower(strings.TrimSpace(id))] = true
+		}
+	}
+	for _, s := range cfg.Sources {
+		note(s.Agents, s.IsUserScope() || s.MatchesWorkspace(ws))
+	}
+	for _, s := range cfg.SkillSources {
+		note(s.Agents, s.IsUserScope() || s.MatchesWorkspace(ws))
+	}
+	return out
+}
+
+// containsFold 报告 list 里是否有与 s 大小写不敏感的相等项。
+func containsFold(list []string, s string) bool {
+	for _, x := range list {
+		if strings.EqualFold(x, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// allTier1 返回全部已验证的 Tier-1 agent（不受任何「在用」门禁）。
+// 供 agentsFromLedger 展开哨兵、printTotals 列未初始化名单使用。
+func allTier1() []agents.Agent {
+	var out []agents.Agent
+	for _, a := range agents.Supported() {
+		if a.Tier == agents.Tier1 {
+			out = append(out, a)
+		}
 	}
 	return out
 }
@@ -531,7 +708,7 @@ func emitChangeNotice(w io.Writer, protocol string) {
 //
 // ⚠ 卸载侧调用时必须在 `hooks.Uninstall` **之前**取好结果：钩子一摘就判不出谁还在用。
 func hookedPeers(a agents.Agent, ws string) []agents.Agent {
-	return hookedPeersIn(agents.SharingRulesDir(a), ws)
+	return hookedPeersIn(agents.SharingRulesDir(a), ws, a.ID)
 }
 
 // hookInstalled 报告该 agent 是否还装着 rulemux 的 SessionStart 钩子。
@@ -550,31 +727,24 @@ func unionAgentIDs(a agents.Agent, ws string) []string {
 
 // unionSkillIDs 返回参与**工作区 skills** 并集的 agent 规范 ID（共享 skills 目录，同 rules 规律）。
 func unionSkillIDs(a agents.Agent, ws string) []string {
-	return peerIDs(hookedPeersIn(agents.SharingSkillsDir(a), ws))
+	return peerIDs(hookedPeersIn(agents.SharingSkillsDir(a), ws, a.ID))
 }
 
 // unionUserIDs 返回参与**用户级**（rules + skills）并集的 agent 规范 ID。
 // 用户级目录两家共享（codebuddy 家族双目录）⇒ 同样必须按并集，否则一家的 hook 会把
 // 另一家投的文件当残留删掉。
 func unionUserIDs(a agents.Agent, ws string) []string {
-	return peerIDs(hookedPeersIn(agents.SharingUserDirs(a), ws))
+	return peerIDs(hookedPeersIn(agents.SharingUserDirs(a), ws, a.ID))
 }
 
+// targetAgents 解析显式点名的 agent（--agent / hook 点名）；未就绪 / 未知 ⇒ nil。
+// 裸路径（无 --agent）的 targets 走 bareTargets，不经过这里。
 func targetAgents(id string) []agents.Agent {
-	if id != "" {
-		a, ok := agents.Get(id)
-		if !ok || !a.Verified {
-			return nil
-		}
-		return []agents.Agent{a}
+	a, ok := agents.Get(id)
+	if !ok || !a.Verified {
+		return nil
 	}
-	var out []agents.Agent
-	for _, a := range agents.Supported() {
-		if a.Tier == agents.Tier1 {
-			out = append(out, a)
-		}
-	}
-	return out
+	return []agents.Agent{a}
 }
 
 // syncLine 是报告里的一行：某个作用域（工作区或用户级）下某个 agent 的同步结果。
@@ -794,10 +964,25 @@ func (r *syncRun) printTotals(w io.Writer) {
 		fmt.Fprintln(w, render(row))
 	}
 
-	// 未初始化 = 本轮没有任何落盘的 Tier-1 agent（点名但不打叉）
+	// 「未初始化」名单（2026-10-14 用户拍板：没用过的一律不出现，没有意义）：
+	// 只列这个工作区**在用**（账本记录 ∪ 配置点名 − off）的 Tier-1 agent 里、规则目录
+	// 此刻不存在的那些——即「用过，但目录不在了」，这时提示才有用（装回钩子
+	// `rulemux init --agent <id>`，下一个会话就会重建目录）。
+	// 从没用过的 agent 一律不提；已卸载的在 off 里，也不提（卸载即断联）。因此
+	// 「在用集合」直接复用裸 sync 的 targets 公式，不另立判据。
 	var uninit []string
-	for _, a := range targetAgents("") {
-		if !seen[a.ID] {
+	uninitSeen := map[string]bool{}
+	for _, ws := range r.wsList {
+		for _, a := range bareTargets(r.cfg, ws) {
+			if uninitSeen[a.ID] || a.Tier != agents.Tier1 {
+				continue
+			}
+			if dir := a.RulesDirAbs(ws); dir != "" {
+				if _, err := os.Stat(dir); err == nil {
+					continue // 目录在 ⇒ 已初始化
+				}
+			}
+			uninitSeen[a.ID] = true
 			uninit = append(uninit, a.ID)
 		}
 	}

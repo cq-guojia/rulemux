@@ -95,6 +95,9 @@
 
 - **同步取并集**：`agents.SharingRulesDir(a)` 找出同目录的 agent，`config.SourcesForAny(ids, ws)` 取它们 sources 的并集，`engine.Sync` 一次落齐 ⇒ 谁跑都不会删别人的（`ByRulesDir`+`unionSources` 的能力以这个形式**回来了**）。
 - **「谁算在用」= 还装着钩子**（`hookedPeers` / `hookInstalled`，基于 `hooks.Inspect`）：卸载即摘钩子、天然退出并集，**不新增任何状态文件**。共享组内一个都没装（纯手动 `sync`）⇒ 退回该组全部 agent。
+  ⚠ **2026-10-14 补**：该判据只管**共享目录的并集**；裸 `sync` 的**投递范围**改走账本门禁
+  `账本(ws) ∪ 配置显式点名 − off`（见 §八矩阵与 §十）。注入交付的 agent（dsh，2026-10-14 起 Tier-2）
+  既没有规则目录也没有钩子，两组判据都不参与：它的规则由插件调 `rulemux inject` 交付。
 - **卸载改为收敛**：`pruneRulesDir` 用 `engine.Sync(dir, remainingSrcs, false)` 把目录收敛到「仍在用 agent 的应有集合」；剩余为空 ⇒ want 为空 ⇒ 全清（自然覆盖 `--all`）。⚠ 剩余集合必须在 `hooks.Uninstall` **之前**算好。
 - 详见 `dir-sync.md`「共享规则目录」一节。
 
@@ -114,6 +117,12 @@
 - 写入：在 `cmd/sync.go` 的同步循环里按 `a.ID` 记录；**只存规范 `a.ID`**。
 - 读取器：`AgentsFor(ws) []string`；哨兵 `"*"`（`state.AnyAgent`）表示「未知 / 全部已支持 agent」，由消费方展开为 `Supported()`。
   v1 老条目迁移时**就地填入并落盘**该哨兵（占位，避免丢信息）；已知具体 agent 的条目则记真实 `a.ID`，两者不混写。
+- **2026-10-14 补（`off` 与「无 agent」语义）**：账本顶层新增 `off []string` = 机器级「已卸载」集合
+  （uninstall 时加、init 装入时清；`Record` **不做**自愈——全局自愈会跨工作区把已卸 agent 复活）。
+  消费侧三条：① `agentsFromLedger` 展开哨兵 `*` 时减 `off`；② 哨兵列表**不物化**（物化等于把「猜测此刻有
+  哪些 agent」写进账本）；③ `Load` 的回填门改判「**整个文件没有 `agents` 键**」——键在但某工作区缺条目 /
+  是空列表 = 明确的「该工作区无 agent」，绝不回填成 `*`；`Save` 去掉 `agents` 的 omitempty，文件永不
+  退化成 v1 形态。已卸 agent 在例行输出（sync 汇总未初始化名单 / doctor）里也一并减去 `off`。
 - **路径归一**：入库统一 `resolvePath`（`EvalSymlinks`+`Clean`），与 config 口径一致（否则软链路径会记成两条）。⇒ 需要**导出** `config.ResolvePath`（现为私有 `config.go:253`）。
 - **写入安全**：`Save` 改 **临时文件 + rename**（防半截文件）；`Record` 的"load→改→save"再加**文件级锁**（防并发丢更新）。二者互补，缺一不可（详见 §九）。
 - ⚠️ **`Record` 的触发条件要收窄**：现在 `cmd/sync.go:100` **无条件**记账 ⇒ 改成**至少有一个目录被真正处理**时才记（否则原则 2 下大量"跳过"会污染账本）。
@@ -183,7 +192,7 @@
 |---|---|---|---|---|---|
 | `sync --hook --agent X`（SessionStart hook 调） | cwd 工作区 × X | ✅ **只 X 自己的目录** | 有实际处理才记 | ✅ 一层 | 有变化 ⇒ 协议 JSON；无变化 ⇒ 空 |
 | `sync --agent X`（手动） | cwd 工作区 × X | ❌ | 有实际处理才记 | ✅ 一层 | 空 |
-| `sync`（手动，无 `--agent`） | cwd 工作区 × 全部 `Supported()` | ❌ | 有实际处理才记 | ✅ 一层 | 空 |
+| `sync`（手动，无 `--agent`） | cwd 工作区 × **账本记录 ∪ 配置显式点名 − off**（空 ⇒ 提示怎么开始、exit 0、零写入） | ❌ | 有实际处理才记 | ✅ 一层 | 空 |
 | `sync --all` | **账本全部工作区** × 各自记录的 agents | ❌ | 有实际处理才记 | ❌ 禁用 | 空 |
 | `sync --hook`（无 `--agent`） | — | — | — | — | **报错** |
 | `sync --all` + `--workspace` | — | — | — | — | **报错**（互斥） |
@@ -221,8 +230,12 @@
 
 1. **红线改写**（`agent-onboarding.md:69`）：本意是「不许枚举/探测本机装了哪些 agent」，不是"`--agent` 必填"。改为：
    > 不扫描机器检测 agent | 目标 agent **只来自编译期注册表**（`agents.Supported()`）；任何命令都不得枚举/探测本机已安装的 agent（不读 PATH、不扫安装目录、不查包管理器/进程），也不以"是否安装"作为投递前提。
-   > `init` 仍**必须**显式 `--agent`；`sync` 的 `--agent` **可选**，缺省 = `Supported()` 全部。
-2. **`--agent` 缺省** = 全部 `Supported()`；注意现实现（`sync.go:108-123` `targetAgents("")`）只返回 Tier-1，需与"全部 Supported"对齐。
+   > `init` 仍**必须**显式 `--agent`；`sync` 的 `--agent` **可选**（缺省范围见下条，2026-10-14 改）。
+2. ~~**`--agent` 缺省** = 全部 `Supported()`~~（**2026-10-14 作废**）：裸 `sync` 的缺省 targets 改为
+   **账本记录 ∪ 配置显式点名 − `off`**（空 ⇒ 可执行提示 + exit 0 + 零 rules/skills 写入）。
+   理由：全量缺省会把从未用过 / 已卸载 agent 的遗留目录反复重写——用户机实测：只装 WorkBuddy 的机器上
+   `.dsh/rules` 被反复写入（见 `../../worklog/202610/13-2349-未安装-已卸载-agent-仍被同步-dsh-规则目录定位待拍板-11fd.md`）。
+   仅显式点名（`--agent`）或配置 `agents` 字段点名时才投递该 agent；`healHooks` 的自愈范围与同步范围解耦（仍全量）。
 3. **口径统一**：`uninstall --all` 现用 `agents.All()`（含未验证），`sync` 用 `Supported()` ⇒ 统一到 **`Supported()`**。
 4. **别名归一化（四个入口）**：① 配置 `agents` 值（`config.go:186-198` 现按原字符串匹配，`agents=["workbuddy"]` 不会命中合并后的 codebuddy）；② CLI `--agent`；③ hook 命令行 agentID；④ 账本读写。收敛为**单一入口函数**。
 5. **README/usage**：删 `README.md:176-184` / `README.zh-CN.md:164-169`「改完配置后手动跑 sync」段；命令表（`README.md:208` / `README.zh-CN.md:191`）与 `main.go:31` usage 补 `sync --all` 与 `--hook`。
