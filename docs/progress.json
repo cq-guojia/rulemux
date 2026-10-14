@@ -1,3 +1,24 @@
 {
-  "tasks": {}
+  "tasks": {
+    "20261015-0033-git-和远程-skill-源-s3-4417": {
+      "created": "2026-10-15 00:33:47",
+      "creator": "GuoJia-Agent",
+      "finished": null,
+      "owner": "GuoJia-Agent",
+      "started": "2026-10-15 00:33:47",
+      "status": "doing",
+      "title": "git 和远程 skill 源 S3",
+      "worklog": "worklog/202610/15-0033-git-和远程-skill-源-s3-4417.md"
+    },
+    "20261015-0033-trae-skills-接入-aa84": {
+      "created": "2026-10-15 00:33:47",
+      "creator": "GuoJia-Agent",
+      "finished": null,
+      "owner": "GuoJia-Agent",
+      "started": "2026-10-15 00:33:47",
+      "status": "doing",
+      "title": "Trae skills 接入",
+      "worklog": "worklog/202610/15-0033-trae-skills-接入-aa84.md"
+    }
+  }
 }
