@@ -77,8 +77,10 @@ session fails with an error.**
    older CLI (e.g. 0.3.1–0.4.1) knows `dsh` but then fails to parse such a config, so it must not be
    trusted. Only when the version is entirely unreadable does the check fall back to whether
    `rulemux --help` lists the `dsh` agent (the guard for a binary whose `--version` lies). A CLI that
-   fails is upgraded with `pnpm add -g`, falling back to `npm install -g`, and re-checked afterwards.
-   If it still fails, that is a **failure**, not a success.
+   fails is upgraded with `pnpm add -g`, falling back to `npm install -g` and finally
+   `npm install -g --force` (which overrides a `rulemux` binary that was copied onto PATH by hand,
+   the usual cause of an `EEXIST`), and re-checked afterwards. If it still fails, that is a
+   **failure**, not a success.
 2. **This plugin is loaded.** Nothing to check: the fact that this code runs at all is the proof.
 3. **The config exists.** `~/.rulemux/config.toml`, created with `rulemux init --agent dsh` when it is
    missing. An existing config counts as success and is **never overwritten**.

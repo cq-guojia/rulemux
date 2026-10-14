@@ -24,12 +24,28 @@ const RULES = "<!-- rulemux:managed -->\n\n# base\nkeep it short\n";
 
 let caseNo = 0;
 
+/** The stub `rulemux`: logs argv, answers --version / --help / init / inject for the given version. */
+function cliScript(version) {
+  return [
+    "#!/bin/sh",
+    'printf \'%s\\n\' "$*" >> "$STUB_LOG"',
+    'case "$1" in',
+    `  --version) printf "rulemux ${version}\\n"; exit 0 ;;`,
+    '  --help) printf "  dsh   DeepSeek Harness (self-contained)\\n"; exit 0 ;;',
+    '  init) mkdir -p "$HOME/.rulemux"; : > "$HOME/.rulemux/config.toml"; exit 0 ;;',
+    '  inject) printf "%s" "$STUB_RULES"; exit "$STUB_INJECT_EXIT" ;;',
+    "esac",
+    "exit 0",
+    "",
+  ].join("\n");
+}
+
 /**
  * Set up an isolated world: temp HOME, temp workspace, and a stub `rulemux` first on PATH.
  * The stub records every argv into $STUB_LOG, answers `--version` / `--help` / `init` / `inject`,
  * and can be told to fail `inject` (that failure must never fail the session).
  */
-async function world({ injectExit = 0, rules = RULES, version = "0.4.7" } = {}) {
+async function world({ injectExit = 0, rules = RULES, version = "0.4.7", npmForce = false } = {}) {
   const tmp = mkdtempSync(join(tmpdir(), "rulemux-dsh-test-"));
   const home = join(tmp, "home");
   const bin = join(tmp, "bin");
@@ -38,36 +54,34 @@ async function world({ injectExit = 0, rules = RULES, version = "0.4.7" } = {}) 
 
   const log = join(tmp, "calls.log");
   const stub = join(bin, "rulemux");
+  writeFileSync(stub, cliScript(version));
+  chmodSync(stub, 0o755);
+
+  // The CLI a successful `npm --force` install would leave in place (used by npmForce worlds only).
+  writeFileSync(join(bin, "rulemux-installed"), cliScript("0.4.7"));
+
+  // Guard rails: an unsatisfied CLI is upgraded with pnpm, then npm, then npm --force. Stub the package
+  // managers so a test that exercises the upgrade path can never reach the network or touch the real
+  // global install. All attempts fail by default; with npmForce the --force attempt "installs" the
+  // good CLI over the stub, exactly as a real forced install would.
+  writeFileSync(join(bin, "pnpm"), ["#!/bin/sh", 'printf \'%s\\n\' "$*" >> "$STUB_LOG"', "exit 1", ""].join("\n"));
   writeFileSync(
-    stub,
+    join(bin, "npm"),
     [
       "#!/bin/sh",
       'printf \'%s\\n\' "$*" >> "$STUB_LOG"',
-      'case "$1" in',
-      `  --version) printf "rulemux ${version}\\n"; exit 0 ;;`,
-      '  --help) printf "  dsh   DeepSeek Harness (self-contained)\\n"; exit 0 ;;',
-      '  init) mkdir -p "$HOME/.rulemux"; : > "$HOME/.rulemux/config.toml"; exit 0 ;;',
-      '  inject) printf "%s" "$STUB_RULES"; exit "$STUB_INJECT_EXIT" ;;',
-      "esac",
-      "exit 0",
+      npmForce ? 'case "$*" in *--force*) cp "$STUB_BIN/rulemux-installed" "$STUB_BIN/rulemux"; exit 0 ;; esac' : "",
+      "exit 1",
       "",
     ].join("\n"),
   );
-  chmodSync(stub, 0o755);
-
-  // Guard rails: an unsatisfied CLI is upgraded with pnpm, then npm. Stub both as failing no-ops so a
-  // test that exercises the upgrade path can never reach the network or touch the real global install
-  // (and so "old CLI ⇒ loud failure" is deterministic).
-  for (const pm of ["pnpm", "npm"]) {
-    const shim = join(bin, pm);
-    writeFileSync(shim, ["#!/bin/sh", 'printf \'%s\\n\' "$*" >> "$STUB_LOG"', "exit 1", ""].join("\n"));
-    chmodSync(shim, 0o755);
-  }
+  for (const pm of ["pnpm", "npm"]) chmodSync(join(bin, pm), 0o755);
 
   process.env.HOME = home;
   process.env.STUB_LOG = log;
   process.env.STUB_RULES = rules;
   process.env.STUB_INJECT_EXIT = String(injectExit);
+  process.env.STUB_BIN = bin;
   process.env.PATH = `${bin}:${process.env.PATH}`;
 
   const mod = await import(`${pathToFileURL(PLUGIN).href}?case=${++caseNo}`);
@@ -149,4 +163,15 @@ test("a dsh-aware but too-old CLI is not trusted: readiness fails loudly instead
 
   await assert.rejects(() => w.turn(), /rulemux-dsh/);
   assert.doesNotMatch(w.calls(), /inject --agent dsh/, "an unusable CLI must never be asked for rules");
+});
+
+test("when a stray rulemux blocks a plain install, npm --force is the fallback and the rules get in", async () => {
+  // A `rulemux` copied onto PATH by hand makes a plain `npm i -g` fail with EEXIST; npm's own remedy
+  // is --force. The stub installs the good CLI only on --force, so this passes only if that last-resort
+  // attempt actually runs and is re-checked.
+  const w = await world({ version: "0.3.7", npmForce: true });
+
+  const first = await w.turn();
+  assert.equal(first.messages.length, 2, "the forced install must let the injected block through");
+  assert.match(w.calls(), /install -g --force rulemux/, "the forced npm attempt must have run");
 });

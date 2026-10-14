@@ -274,12 +274,20 @@ async function cliInGlobalBin(pm) {
 }
 
 /**
- * Install the CLI globally: pnpm first (dsh itself uses pnpm), then npm. Returns
+ * Install the CLI globally, in order of preference: pnpm (dsh itself uses pnpm), then npm. Returns
  * { cli, installedBy } on success, or null with every failure appended to `reasons`.
+ *
+ * The final `npm --force` attempt is deliberate: a `rulemux` binary copied onto PATH by hand (not by
+ * npm) makes a plain `npm i -g` die with EEXIST, and npm's own remedy for that is `--force`. The
+ * file is named `rulemux`, so overwriting it is exactly what we mean to do.
  */
 async function installCli(reasons, spec) {
-  for (const pm of ["pnpm", "npm"]) {
-    const args = pm === "npm" ? ["install", "-g", spec] : ["add", "-g", spec];
+  const attempts = [
+    ["pnpm", ["add", "-g", spec]],
+    ["npm", ["install", "-g", spec]],
+    ["npm", ["install", "-g", "--force", spec]],
+  ];
+  for (const [pm, args] of attempts) {
     const r = await run(pm, args);
     if (r.error) {
       reasons.push(`${pm}: cannot run (${r.error.message})`);
