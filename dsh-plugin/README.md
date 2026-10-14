@@ -2,11 +2,14 @@
 
 DeepSeek Harness (dsh) plugin for [rulemux](https://github.com/cq-guojia/rulemux).
 
-rulemux syncs the rule files you maintain into each agent's native rules directory. dsh is
-plugin-first and does **not** scan a rules directory on its own, so this plugin is the reading half:
-it reads the copies rulemux puts in `<workspace>/.dsh/rules/__rulemux__*.md` and injects them into
-the session once, at the first user turn — the same rules, the same token cost as a host that reads
-a rules directory natively.
+rulemux keeps your rule files in one place and delivers them to each agent. dsh is plugin-first and
+does **not** scan a rules directory on its own, so this plugin is the delivery: it asks the rulemux
+CLI for the rules rendered for the current workspace (`rulemux inject --agent dsh`) and injects that
+text into the session once, at the first user turn — the same rules, the same token cost as a host
+that reads a rules directory natively, because it is the same renderer.
+
+**Nothing is written into your workspace.** No `.dsh/rules`, no copies, no residue to clean up: the
+rules travel from your source files straight into the session.
 
 ## Install
 
@@ -85,27 +88,25 @@ Failures are loud and actionable: the error names the step that failed, carries 
 says where to fix it (then restart the session to retry). There is deliberately no "succeeded
 halfway" notice — a half-ready plugin is useless, and it must not look healthy.
 
-## Syncing is separate, and never fails the session
+## Asking for the rules is separate, and never fails the session
 
-`rulemux sync --hook --agent dsh` runs once per session — it needs the session's workspace, which
-does not exist at load time — exactly as syncing works for every other agent. A non-zero exit is
-**logged** (`console.error`, which lands in dsh's log) and the session carries on with whatever rule
-files are already on disk.
+`rulemux inject --agent dsh` runs once per session — it needs the session's workspace, which does
+not exist at load time. A non-zero exit is **logged** (`console.error`, which lands in dsh's log) and
+the session carries on without an injected block.
 
-A config with no `[[source]]` yet lands here too — the CLI exits non-zero, it is logged, and nothing
-is injected. That is a normal syncing outcome, **not** a readiness failure: it has no bearing on the
-three steps above.
+A config with no `[[source]]` yet — or one whose sources do not cover this workspace — lands here
+too: the CLI prints nothing and exits 0, so nothing is injected. That is a normal outcome, **not** a
+readiness failure: it has no bearing on the three steps above.
 
 ## What it does
 
 - At load (dsh startup) → starts the three-step readiness chain, so `~/.rulemux/config.toml` is there
-  before you need it. At `agent/session-start` → runs `rulemux sync --hook --agent dsh` **once**, so
-  the on-disk copies are current.
-- `agent/pre-step` → on the first turn that carries user input, reads `.dsh/rules/__rulemux__*.md`
-  and injects them as recalled material. It injects **once** per session and only re-injects if a
-  later compaction provably dropped the block — never every turn.
-- It reads **only** files with rulemux's `__rulemux__` prefix, so it coexists with other
-  `.dsh/rules` readers.
+  before you need it. At `agent/session-start` → makes sure that chain has run before the first turn.
+- `agent/pre-step` → on the first turn that carries user input, runs `rulemux inject --agent dsh` and
+  injects its stdout as recalled material. It asks **once** per session and only re-asks if a later
+  compaction provably dropped the block — never every turn.
+- It writes nothing anywhere, so there is no per-workspace state to keep in sync — and nothing left
+  behind when you stop using it.
 
 ## Requirements
 

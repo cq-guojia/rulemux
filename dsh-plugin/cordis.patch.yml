@@ -1,4 +1,5 @@
-# rulemux: deliver the rules rulemux syncs into <workspace>/.dsh/rules to a dsh session.
+# rulemux: deliver a workspace's rules to a dsh session — the plugin asks the rulemux CLI for them
+# (`rulemux inject --agent dsh`) and injects that text, so nothing is written into the workspace.
 #
 # Installed through the normal dsh plugin route — `dsh plugin --profile <name> add rulemux-dsh`
 # (from npm, a local .tgz, or git). Because package.json declares `dsh.bundle.patch`, that command

@@ -1,13 +1,18 @@
 /**
  * rulemux-dsh — a native Cordis plugin for DeepSeek Harness (dsh).
  *
- * Two halves:
- *   - WRITE half: the `rulemux` CLI copies your rule files into <cwd>/.dsh/rules/__rulemux__*.md
- *     (real copies, never symlinks).
- *   - READ half (this file): reads those copies back and injects them into the session ONCE, on the
- *     first user turn — the same text, hence the same token cost, as a host that scans a rules
- *     directory natively. It reads ONLY rulemux's own `__rulemux__` prefix, so it coexists with any
- *     other `.dsh/rules` reader.
+ * The read half, and the only half: on the first user turn we ask the `rulemux` CLI for this
+ * workspace's rules (`rulemux inject --agent dsh`) and inject that stdout into the session ONCE as
+ * recalled material. The very same text, hence the same token cost, as a host that scans a rules
+ * directory natively — it is literally the same renderer the Tier-2 agents get.
+ *
+ * WHY INJECTION AND NOT FILES: dsh scans no rules directory of its own, so the older hand-off
+ * ("rulemux syncs real copies into <workspace>/.dsh/rules, the plugin reads them back") needed a
+ * directory that belongs to neither side: the host never reads it, and whatever rulemux did not
+ * clean up there stayed on disk for good. Asking the CLI for the text removes the middleman — this
+ * plugin writes NOTHING to the workspace, so there is nothing to keep in sync and nothing to clean
+ * up. (`rulemux inject` is the long-standing rulemux path for agents that cannot take a rules
+ * directory.)
  *
  * READINESS is exactly THREE steps, and every one of them must hold:
  *   ① the `rulemux` CLI is resolvable AND its version satisfies REQUIRED_CLI. "It is installed" is
@@ -29,10 +34,10 @@
  * config" session. (The first session after a load still re-checks nothing: readiness is a
  * process-wide singleton.)
  *
- * SYNCING is a separate concern, exactly as it is for every other agent: `rulemux sync` runs once per
- * session (it needs the session's workspace, which does not exist at load time), and if it fails (no
- * [[source]] configured, a bad path, anything) that is LOGGED and the session carries on with
- * whatever rule files are already on disk. Sync is not part of — and cannot fail — the three
+ * ASKING FOR THE RULES is a separate concern, exactly as syncing is for every other agent: it needs
+ * the session's workspace, which does not exist at load time, so it runs once per session instead.
+ * If that call fails (no [[source]] configured, a bad path, anything) it is LOGGED and the session
+ * carries on without an injected block. Asking is not part of — and cannot fail — the three
  * readiness steps above.
  *
  * Why readiness lives here at all: this package declares NO npm dependencies on purpose, because a
@@ -51,7 +56,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -59,8 +64,7 @@ import { dirname, join } from "node:path";
 export const name = "rulemux";
 export const inject = ["agents"];
 
-const RULES_SUBDIR = ".dsh/rules"; // where `rulemux sync` drops the copies (workspace-relative)
-const FILE_PREFIX = "__rulemux__"; // rulemux's ownership prefix: other files are never read
+const AGENT = "dsh"; // the agent id we ask the CLI to render for: `rulemux inject --agent dsh`
 const MANAGED_HEADER = "<!-- rulemux:managed -->"; // marks our injected block (re-injection check)
 const SOURCE_KIND = "plugin:rulemux"; // producer-owned source kind dsh expects for injected messages
 const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() in the Go CLI
@@ -71,10 +75,11 @@ const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() 
 // this". Either way an unsatisfied version is upgraded, then re-checked, and failing that we throw.
 //
 // ⚠ It must be the FIRST RELEASED version whose registry entry ships the dsh adapter: a version floor
-// only means anything if everything below it genuinely cannot do the job. The dsh adapter landed
-// after v0.3.0, so npm's 0.3.0 (and anything older, e.g. 0.2.7) answers "unknown agent dsh" for
-// `--agent dsh` — hence 0.3.1. It also decides what we upgrade *to* (see installTarget), so it is
-// bumped in the same change that cuts the release, never afterwards.
+// only means anything if everything below it genuinely cannot do the job. We call the long-standing
+// `inject` subcommand, but with `--agent dsh` — and what makes that agent id known at all is the dsh
+// adapter, which landed after v0.3.0. npm's 0.3.0 (and anything older, e.g. 0.2.7) answers "unknown
+// agent dsh" for `--agent dsh`, hence 0.3.1. It also decides what we upgrade *to* (see
+// installTarget), so it is bumped in the same change that cuts the release, never afterwards.
 const REQUIRED_CLI = ">=0.3.1";
 
 const INSTALL_TIMEOUT_MS = 120_000; // global install / sync: generous, but never hang forever
@@ -356,48 +361,27 @@ function provisionOnce() {
 }
 
 /**
- * Sync once for this workspace — NOT part of readiness. Syncing is the same concern for every agent,
- * and it is not ours to fail the session over: a non-zero exit is logged (with the CLI's own stderr)
- * and the session carries on with whatever is already on disk. This is also where a config with no
- * [[source]] yet lands: the CLI exits non-zero, we log it, and nothing is injected.
+ * Ask the CLI for this workspace's rules — NOT part of readiness, and not ours to fail the session
+ * over: a non-zero exit is logged (with the CLI's own stderr) and the session carries on without an
+ * injected block. This is also where a config with no [[source]] yet (or none that applies to this
+ * workspace) lands: the CLI prints nothing, exits 0, and we inject nothing — also not a failure.
  */
-async function syncOnce(root, cli) {
-  const r = await run(cli.cmd, [...cli.args, "sync", "--hook", "--agent", "dsh"], { cwd: root });
+async function rulesFromCli(root, cli) {
+  const r = await run(cli.cmd, [...cli.args, "inject", "--agent", AGENT], { cwd: root });
   if (r.code !== 0) {
     console.error(
-      `rulemux-dsh: \`rulemux sync --hook --agent dsh\` failed in ${root} ` +
-        `(exit ${r.code ?? "n/a"}). Continuing with the rule files already on disk.\n` +
+      `rulemux-dsh: \`rulemux inject --agent dsh\` failed in ${root} ` +
+        `(exit ${r.code ?? "n/a"}). Continuing without an injected block.\n` +
         `  ${tail(r.err || r.out) || r.error?.message || "no output"}`,
     );
+    return "";
   }
-}
-
-/** Readiness + one sync. Throws only for the three readiness steps — never for sync. */
-async function ensureReady(root) {
-  const prov = await provisionOnce();
-  await syncOnce(root, prov.cli);
+  return r.out.trim();
 }
 
 /** The directory a session is working in (dsh records it on the session header). */
 function workspaceRoot(agent) {
   return agent?.session?.header?.cwd || process.cwd();
-}
-
-/** Concatenate rulemux's own rule files for a workspace; "" when there are none. */
-function readRules(root) {
-  const dir = join(root, RULES_SUBDIR);
-  if (!existsSync(dir)) return "";
-  const parts = [];
-  for (const entry of readdirSync(dir).sort()) {
-    if (!entry.startsWith(FILE_PREFIX) || !entry.endsWith(".md")) continue;
-    try {
-      const text = readFileSync(join(dir, entry), "utf8").trim();
-      if (text) parts.push(text);
-    } catch {
-      /* a single unreadable file must not abort the whole injection */
-    }
-  }
-  return parts.join("\n\n");
 }
 
 /** The injection message: a non-user-typed message dsh renders as recalled material. */
@@ -446,14 +430,14 @@ function stateFor(agent) {
 }
 
 /**
- * Kick off (or reuse) the one readiness chain for a session, and sync once for its workspace.
+ * Kick off (or reuse) the one readiness chain — the CLI and the config — and resolve with it.
  * Awaited — with no upper bound — at the first turn. The copy started here must not reject
  * unobserved, so a no-op catch is attached: the real error is surfaced where it matters, at the
  * first pre-step.
  */
 function startReady(state) {
   if (!state.ready) {
-    state.ready = ensureReady(state.root);
+    state.ready = provisionOnce();
     state.ready.catch(() => {});
   }
   return state.ready;
@@ -486,7 +470,7 @@ export function apply(ctx) {
   ctx.on("agent/session-start", ({ agent }) => {
     loadCanary("agent/session-start");
     const state = stateFor(agent);
-    if (state) startReady(state); // fallback (if apply was never called) + the per-session sync
+    if (state) startReady(state); // fallback (if apply was never called): readiness ahead of turn 1
   });
 
   ctx.on("agent/pre-step", async ({ agent, signal }, next) => {
@@ -516,11 +500,11 @@ export function apply(ctx) {
 
     // The three readiness steps are a hard prerequisite. A rejection here is meant to surface as a
     // visible session error (see the file header) — so it is deliberately not caught.
-    await startReady(state);
+    const { cli } = await startReady(state);
 
-    const text = readRules(state.root);
+    const text = await rulesFromCli(state.root, cli);
     if (!text) {
-      state.injected = true; // nothing to inject: do not re-scan on every later turn
+      state.injected = true; // nothing to inject: do not ask the CLI again on every later turn
       return decision;
     }
     state.injected = true;
