@@ -91,6 +91,19 @@ func Sync(args []string) int {
 		}
 	}
 
+	// 宿主按 .git 定项目根的（dsh）：会话开在仓库子目录时，同步必须落到 git 根 ——
+	// 宿主的 findProjectRoot 从 cwd 逐级向上找 .git，写进子目录等于写进它不扫的位置
+	// （静默失败）。只 remap「未显式指定 --workspace」的路径（显式给了就按用户说的）；
+	// healHooks 仍用会话目录（各 agent 的钩子文件相对各自的会话 cwd，与项目根无关）。
+	hookWs := ws
+	if wsFlag == "" {
+		if a, ok := agents.Get(requested); ok && a.WorkspaceIsGitRoot {
+			if root := gitRoot(ws); root != "" {
+				ws = root
+			}
+		}
+	}
+
 	// 守卫（安全事故防线）：目标工作区必须被配置里某条 source 声明。
 	// 否则「空 want ⇒ 删残留」会清空一个我们无权管辖的目录。
 	// 见 docs/design/features/sync-all-and-change-notice.md §二「清空的正确姿势」/ §八。
@@ -115,7 +128,7 @@ func Sync(args []string) int {
 	// 旧格式钩子（缺 --hook）正是在这里被修好的 —— 因为它调起我们时也不带 --hook，
 	// 所以这条自愈必须在「非 hook 路径」同样生效。
 	// 遍历范围与同步范围**解耦**（全部已核实 agent）：否则空账本时裸 sync 会丧失自愈。
-	healHooks(ws)
+	healHooks(hookWs)
 
 	if len(targets) == 0 {
 		// 只有裸路径可能为空：账本与配置都没点名任何 agent。不写任何东西，
@@ -141,8 +154,10 @@ func Sync(args []string) int {
 	run := newSyncRun(cfg, ws, createAgent)
 	run.wsList = append(run.wsList, ws)
 	for _, a := range targets {
-		if a.Tier == agents.Tier2 {
-			// Tier-2 没有规则目录可丢文件，由 inject 子命令负责注入
+		if a.Tier == agents.Tier2 && a.SkillsDir == "" {
+			// Tier-2 且无 skills 目录（codex / opencode）：没有任何目录可丢文件 ——
+			// 规则由 inject 子命令负责注入，skills 也不参与。
+			// Tier-2 但有 skills 目录（dsh）：skills 照常真实拷贝落盘，rules 仍走注入。
 			continue
 		}
 		run.agent(a)

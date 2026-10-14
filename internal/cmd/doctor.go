@@ -207,9 +207,12 @@ func pathMark(p string, wantDir bool) string {
 
 // agentInitialized 报告该 agent 是否已初始化：钩子已装（latest 与否另见
 // agentStateLine）。external 样式没有 rulemux 可装的钩子——插件由宿主装、rulemux
-// 探测不到，若它还有规则目录就以目录存在为据；没有目录的（dsh：纯注入，规则由插件
-// 每个会话现取现注入，盘上什么都不留）**永远判不出来**，由 printAgents 单列一行
-// 说明，而不是当「未初始化」报——判错还会把用户支去跑一个修不好它的 init。
+// 探测不到，若它还有规则目录就以目录存在为据；没有规则目录的（dsh：规则由插件
+// 每个会话现取现注入）**判不出来**，由 printAgents 单列一行说明，而不是当「未初始化」
+// 报——判错还会把用户支去跑一个修不好它的 init。
+// ⚠ dsh 自 2026-10-14 起有 skills 目录（.dsh/skills，由插件的 sync 建），但「初始化」
+// 的问法是「rulemux init 该装什么」——对 dsh 的答案永远是「什么都不装，插件包办」，
+// 故不因 skills 目录存在就改判 initialized（skills 落盘情况由 sync 自己报）。
 func agentInitialized(a agents.Agent, ws string) bool {
 	if a.Style == "external" {
 		if dir := a.RulesDirAbs(ws); dir != "" {
@@ -285,8 +288,15 @@ func printAgents(cfg *config.Config, ws string) {
 			ui.Dim(ui.GlyphSkip), strings.Join(ids, ", "))
 	}
 	for _, a := range injectionOnly {
-		fmt.Printf("  %s %-10s delivered by the host-side plugin (rulemux renders, the plugin injects) — nothing to initialize here\n",
-			ui.Dim(ui.GlyphSkip), a.ID)
+		// dsh（2026-10-14 起）：规则仍纯注入，但 skills 由插件触发 sync 真实拷贝落盘
+		// ⇒ 这行说明要把 skills 通道讲清，别让用户以为盘上依旧什么都不落。
+		skills := ""
+		if a.SkillsDir != "" {
+			skills = fmt.Sprintf("; skills are real copies into %s (workspace) + %s (user-level)",
+				a.SkillsDir, strings.Join(a.UserSkillsDirs, " + "))
+		}
+		fmt.Printf("  %s %-10s delivered by the host-side plugin (rules injected per session%s) — nothing to initialize here\n",
+			ui.Dim(ui.GlyphSkip), a.ID, skills)
 	}
 }
 

@@ -150,6 +150,56 @@ func TestUserDirsAbs(t *testing.T) {
 	}
 }
 
+// TestDshSkillsDirs 校验 dsh 的 skills 双域（2026-10-14 用户拍板，源码级坐实于
+// deepseek-ai/deepseek-harness@master，见 docs/design/external/skill-ecosystem.md
+// §三·再续）：工作区 .dsh/skills（rank 100，最高）、用户级 ~/.dsh/skills（rank 400）；
+// .agents/* 一律不写；规则侧仍 Tier-2 纯注入（RulesDir 空）⇒ skills 是独立通道。
+func TestDshSkillsDirs(t *testing.T) {
+	dsh, ok := Get("dsh")
+	if !ok {
+		t.Fatal("Get(\"dsh\") 应解析到 dsh 条目")
+	}
+	if dsh.SkillsDir != ".dsh/skills" {
+		t.Errorf("dsh SkillsDir = %q, want .dsh/skills", dsh.SkillsDir)
+	}
+	if got := dsh.SkillsDirAbs("/w/sub"); got != "/w/sub/.dsh/skills" {
+		t.Errorf("dsh SkillsDirAbs = %q, want /w/sub/.dsh/skills", got)
+	}
+	home := expandHomeForTest(t)
+	want := []string{home + "/.dsh/skills"}
+	if !equalStrings(dsh.UserSkillsDirsAbs(), want) {
+		t.Fatalf("dsh 用户级 skills 目录 = %v, want %v", dsh.UserSkillsDirsAbs(), want)
+	}
+	// 不写 .agents/skills（跨框架公约目录，只读不碰）
+	for _, bad := range []string{home + "/.agents/skills", "/w/sub/.agents/skills"} {
+		if contains(dsh.UserSkillsDirsAbs(), bad) || dsh.SkillsDirAbs("/w/sub") == bad {
+			t.Errorf("dsh 不写 .agents/skills，实得涉及 %s", bad)
+		}
+	}
+	// 规则侧维持 Tier-2 纯注入：没有规则目录可写
+	if dsh.RulesDir != "" {
+		t.Errorf("dsh RulesDir 应为空（规则纯注入），实得 %q", dsh.RulesDir)
+	}
+	if dsh.Tier != Tier2 {
+		t.Errorf("dsh Tier 应维持 Tier2，实得 %v", dsh.Tier)
+	}
+	// skills 共享组只有自己（.dsh/skills 不与任何 agent 共享）
+	if g := SharingSkillsDir(dsh); len(g) != 1 || g[0].ID != "dsh" {
+		t.Errorf("dsh 的 skills 共享组应只有自己，实得 %v", ids(g))
+	}
+	// 宿主按 .git 定项目根 ⇒ 标记 WorkspaceIsGitRoot（sync 侧据此做 git 根对齐）
+	if !dsh.WorkspaceIsGitRoot {
+		t.Error("dsh 应标记 WorkspaceIsGitRoot（宿主 findProjectRoot 逐级找 .git）")
+	}
+	// 其它 agent 不跟这个标记（它们的工作区语义就是钩子载荷/命令行给的目录）
+	for _, id := range []string{"codebuddy", "workbuddy", "trae", "claude", "codex", "opencode"} {
+		a, _ := Get(id)
+		if a.WorkspaceIsGitRoot {
+			t.Errorf("%s 不应标记 WorkspaceIsGitRoot", id)
+		}
+	}
+}
+
 // TestSharingSkillsAndUserDirs 校验共享判定：
 // codebuddy 与 workbuddy 共享 skills 目录与用户级目录；trae 谁都不共享。
 func TestSharingSkillsAndUserDirs(t *testing.T) {

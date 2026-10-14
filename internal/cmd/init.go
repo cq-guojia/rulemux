@@ -87,12 +87,16 @@ const exampleConfig = `# rulemux configuration file
 #     workspace_groups  Reference [[workspace_group]] bundles (workspaces are shared with rules).
 #     scope             Same as [[source]]: "workspace" (default) or "user".
 #
-#   Where they land (2026-10-12, verified against the CodeBuddy bundle):
+#   Where they land (dsh added 2026-10-14, verified against deepseek-ai/deepseek-harness):
 #     workspace scope → <ws>/.codebuddy/skills   (shared by codebuddy + workbuddy)
+#                      or <git-root>/.dsh/skills  (dsh; the git root, not your cwd)
 #     user scope      → ~/.codebuddy/skills AND ~/.workbuddy/skills (both written)
+#                      or ~/.dsh/skills           (dsh)
 #   Skills land as __rulemux__<skill-name>/ directories; your own skills are never
 #   touched, and removing a source removes its copies on the next sync.
-#   Other agents (trae / dsh / claude / codex / opencode) do not take skills yet.
+#   dsh never reads .agents/skills from rulemux — that dir is a cross-framework
+#   convention and stays untouched.
+#   Other agents (trae / claude / codex / opencode) do not take skills yet.
 #
 # --- Advanced: bundle things into "groups" to avoid repetition -------------------
 # Once you have many files, bundle your common files / workspaces into groups and

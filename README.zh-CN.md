@@ -109,14 +109,14 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 | **trae**（Trae CN） | Tier-1（真实拷贝） | `.trae/rules/` | 暂不支持 | ✅ **已验证，可安装**（2026-10-09 canary 坐实：用户级钩子 `~/.trae-cn/hooks.json`；国际版目录 `~/.trae` 尚未接入） |
 | codex | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
 | opencode | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
-| **dsh**（DeepSeek Harness） | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ✅ **已验证，可安装**；交付由**独立的 dsh 插件**做 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责用 `inject` 渲染文本，工作区零产物） |
+| **dsh**（DeepSeek Harness） | Tier-2（注入） | 无 —— 注入上下文 | `.dsh/skills/`；用户级 `~/.dsh/skills/` | ✅ **已验证，可安装**；规则由**独立的 dsh 插件**交付 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责用 `inject` 渲染文本，规则零产物）。skill 是真实拷贝进原生 skills 目录，由同一插件在会话启动时同步（2026-10-14，对 `deepseek-ai/deepseek-harness` 源码级坐实） |
 
 - `rulemux init` **会拒绝**未验证的 agent —— 不会给你装一个行为未经验证的半成品。
   `rulemux doctor` 会给未验证的 agent 标 ⚠。
-- **skill 注入（2026-10-12 上线，仅 codebuddy / workbuddy）**：用 `[[skill_source]]` 声明本地 skill 目录，
-  真实拷贝进 `.codebuddy/skills/`（`__rulemux__<skill名>/` 前缀，你自己的 skill 一律不碰）；
+- **skill 注入（2026-10-12 上线 codebuddy / workbuddy，2026-10-14 加入 dsh）**：用 `[[skill_source]]` 声明本地 skill 目录，
+  真实拷贝进该 agent 的原生 skills 目录（`__rulemux__<skill名>/` 前缀，你自己的 skill 一律不碰）；
   `scope = "user"` 时落到**用户级（全局）**目录，规则与 skill 通用，详见 §5.4。
-  规则与 skill 都支持双域（工作区 / 用户级）；trae / dsh / claude / codex / opencode 的 skills 暂不支持。
+  trae / claude / codex / opencode 的 skills 暂不支持。
 - **Tier-2 是刻意的降级**：面向没有规则目录、只认单个 `AGENTS.md` 的 agent，走会话钩子注入，
   且绝不碰你自己的 `AGENTS.md`；但它满足不了「永不淡出」。见
   [`docs/design/features/hook-injection.md`](docs/design/features/hook-injection.md)。
@@ -331,14 +331,21 @@ path = ["~/react-skills", "~/css-skills"]
 - **skill 源字段与规则一致**：`path`、`agents`、`workspace`、`scope`，外加两个打包键
   `groups`（引用 `[[skill_group]]`）与 `workspace_groups`（引用 `[[workspace_group]]`）。
   `[[skill_group]]` 打包多个 skill 根目录（`name` / `path` / `use`），嵌套与成环检测与文件组完全相同。
-- **落到哪**（仅 codebuddy / workbuddy）：工作区级 → `<工作区>/.codebuddy/skills/`（两家共享）；
-  用户级 → `~/.codebuddy/skills/` **和** `~/.workbuddy/skills/`（都写，两家才都看得到）。
+- **落到哪**：工作区级 → 该 agent 的原生 skills 目录 —— `<工作区>/.codebuddy/skills/`（codebuddy 与
+  workbuddy 共享）或 `<git根>/.dsh/skills/`（dsh）；用户级 → `~/.codebuddy/skills/` **和**
+  `~/.workbuddy/skills/`（都写，两家才都看得到）或 `~/.dsh/skills/`（dsh）。
   规则侧同理：`[[source]]` 也支持 `scope = "user"`，落到 `~/.codebuddy/rules/` + `~/.workbuddy/rules/`。
 - **纪律与规则完全相同**：目标名 `__rulemux__<skill名>/`；你自己的 skill（无前缀）一律不碰；
   配置里删掉源，下一轮同步清掉对应副本；源目录只读。
 - **第一版只支持本地目录源**；远程 / git 源（跟进上游更新）在后续版本。
-- trae / dsh / claude / codex / opencode 的 skills 暂不支持（它们的 skills 目录尚未实测坐实）。
+- trae / claude / codex / opencode 的 skills 暂不支持（它们的 skills 目录尚未实测坐实）。
 - skill 的增改**不会**触发「请新开会话」提示（是否热重载待实测）；规则的提示行为不变。
+- **dsh 的 skill frontmatter 差异**（2026-10-14 源码级坐实）：dsh 要求 frontmatter `name` 匹配
+  `^[a-z0-9]+(?:-[a-z0-9]+)*$`，且遇到旧式驼峰调用键（`disableModelInvocation` / `modelInvocable` /
+  `userInvocable`）会**丢弃整个技能** —— 这两样 CodeBuddy 都不报错。rulemux 只做字节拷贝、不改内容，
+  所以「CodeBuddy 能装载、dsh 静默不装载」是可能的；CodeBuddy 市场扩展字段
+  （`display_name` / `description_zh` / `version` / `allowed-tools`）则被 dsh 无害忽略。
+  另外 dsh 找项目级 skill 是相对 **git 根**（最近的 `.git`），不是你的当前目录。
 
 ### 5.5 完整的默认配置（带注释）
 
@@ -407,12 +414,15 @@ path = ["~/react-skills", "~/css-skills"]
 #     workspace_groups  引用 [[workspace_group]] 组（工作区在规则与 skill 间共用）。
 #     scope             同 [[source]]："workspace"（默认）或 "user"。
 #
-#   落到哪（2026-10-12，对照 CodeBuddy bundle 核实）：
+#   落到哪（dsh 于 2026-10-14 加入，对照 deepseek-ai/deepseek-harness 源码核实）：
 #     workspace 域 → <ws>/.codebuddy/skills   （codebuddy + workbuddy 共享）
+#                     或 <git根>/.dsh/skills  （dsh；是 git 根，不是当前目录）
 #     user 域      → ~/.codebuddy/skills 与 ~/.workbuddy/skills（两个都写）
+#                     或 ~/.dsh/skills        （dsh）
 #   skill 以 __rulemux__<skill名>/ 目录落地；你自己的 skill 一律不碰，
 #   删掉源则下次同步移除其副本。
-#   其它 agent（trae / dsh / claude / codex / opencode）暂不支持 skill。
+#   dsh 绝不读写 .agents/skills —— 那是跨框架公约目录，不碰。
+#   其它 agent（trae / claude / codex / opencode）暂不支持 skill。
 #
 # --- 进阶：用「组」打包，避免重复 -------------------------------------------------
 # 文件多了以后，把常用文件 / 工作区打包成组，在 [[source]] 里按名引用。
@@ -518,7 +528,8 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 绝不向上删父目录）。该 agent 随后会**从账本里移除**（只对确实清过的工作区），并记为「已卸载」
 —— 之后的 `rulemux sync` 不会再写它，`doctor` 与 sync 汇总里也不再出现，直到你主动
 `rulemux init --agent <id>` 把它装回来。插件型宿主（dsh）例外：rulemux 卸不掉宿主侧的插件，
-只会给你一条警告 —— 插件不卸，每次 dsh 会话都会把规则重新同步进 `.dsh/rules`。
+只会给你一条警告 —— 插件不卸，每次 dsh 会话它都会重新把规则注入进会话（纯注入、不写盘），
+skill 副本则照常收敛（只删 `__rulemux__` 前缀内容，目录保留）。
 
 ---
 
@@ -547,9 +558,11 @@ rulemux uninstall --agent codebuddy --yes    # 跳过交互确认
 `rulemux init` 会拒绝它们 —— **没有补齐它们的计划**。（接入新 agent 的清单留作参考：
 [`docs/design/features/agent-onboarding.md`](docs/design/features/agent-onboarding.md)。）
 
-- **skill 注入的支持范围**（2026-10-12）：**只有 codebuddy / workbuddy** —— 两家的 skills 目录
-  （工作区 `.codebuddy/skills`、用户级 `~/.codebuddy/skills` + `~/.workbuddy/skills`）已经
-  bundle 代码级 + 本机实测坐实；trae / dsh / claude / codex / opencode 的 skills 目录尚未实测，
+- **skill 注入的支持范围**（2026-10-12 codebuddy / workbuddy；2026-10-14 dsh）：codebuddy /
+  workbuddy 的 skills 目录（工作区 `.codebuddy/skills`、用户级 `~/.codebuddy/skills` +
+  `~/.workbuddy/skills`）已经 bundle 代码级 + 本机实测坐实；dsh 的 skills 目录
+  （`<git根>/.dsh/skills`、`~/.dsh/skills`）已对 `deepseek-ai/deepseek-harness` 源码级坐实
+  （真机装载 canary 待补）；trae / claude / codex / opencode 的 skills 目录尚未实测，
   **暂不支持**，坐实一家开一家。
 - **分发** —— 已完成：GitHub Actions 交叉编译二进制并挂到 GitHub Release；npm 包随 tag **自动发布**（见 §9）。
 - 规则内容改写 / 模板渲染、以及自动自我更新，**明确不做**

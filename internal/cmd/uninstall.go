@@ -98,18 +98,22 @@ func Uninstall(args []string) int {
 		keep := remainingPeers(a, ws)
 
 		if a.Style == "external" {
-			// R1 警告（2026-10-14 随 dsh 改纯注入重写措辞）：宿主侧插件不由 rulemux 装，
-			// 也卸不掉；而且它的行为变了——不再往盘上同步任何东西，改为每个会话自己跑
-			// `rulemux inject --agent <id>` 取渲染结果注入。所以「卸载停不掉它」依然
-			// 成立，只是原因从「插件会把文件写回来」变成「插件会继续向会话注入」。
+			// R1 警告（2026-10-14 随 dsh 改纯注入重写措辞；2026-10-14 晚再补 skills）：
+			// 宿主侧插件不由 rulemux 装，也卸不掉；而且它的行为是「每会话自取」——
+			// 规则侧跑 `rulemux inject --agent <id>` 取渲染结果注入（盘上零写入），
+			// skills 侧跑 `rulemux sync --hook --agent <id>` 真实拷贝进 .dsh/skills
+			// /~/.dsh/skills（2026-10-14 起，dsh 有原生 skills 子系统）。
+			// 所以「卸载停不掉它」依然成立：不只规则会继续注入，skills 也会被继续同步
+			// 回来（本指令删掉的前缀副本，下一个会话就会被重建）。
 			// 只印有据的停用方式（cordis.patch.yml 的 `disabled: true`，见
 			// dsh-plugin/cordis.patch.yml）；未经坐实的 remove 语法不印
 			// （未核实不得作为实现依据）。
 			fmt.Printf("  ⚠ %-10s the host-side plugin is not rulemux's to remove.\n", a.ID)
 			fmt.Printf("      If it is still installed, every %s session keeps calling\n", a.ID)
-			fmt.Printf("      `rulemux inject --agent %s` and injecting the rules it renders — so this\n", a.ID)
-			fmt.Printf("      uninstall does not stop that. Disable the plugin row in the profile's cordis.patch.yml\n")
-			fmt.Printf("      (ID `%s`, set `disabled: true`), or remove it with %s's own plugin command.\n", a.ID, a.ID)
+			fmt.Printf("      `rulemux inject --agent %s` (rules) and `rulemux sync --hook --agent %s`\n", a.ID, a.ID)
+			fmt.Printf("      (skills) — so this uninstall does not stop that. Disable the plugin row in\n")
+			fmt.Printf("      the profile's cordis.patch.yml (ID `%s`, set `disabled: true`), or remove it\n", a.ID)
+			fmt.Printf("      with %s's own plugin command.\n", a.ID)
 			if n, dir := legacyResidue(a, ws); n > 0 {
 				fmt.Printf("      Note: %d leftover file(s) from the old directory hand-off are still in %s;\n", n, dir)
 				fmt.Printf("      rulemux no longer writes there — delete them yourself if you want them gone.\n")
@@ -281,7 +285,7 @@ func confirmUninstall(targets []agents.Agent, ws string, ledger state.Ledger) bo
 			what = "plugin"
 		}
 		kind := what + " only"
-		if a.RulesDirAbs(ws) != "" {
+		if a.RulesDirAbs(ws) != "" || a.SkillsDirAbs(ws) != "" {
 			kind = what + " + synced files"
 		}
 		fmt.Printf("  - %s (%s)\n", a.ID, kind)
@@ -502,7 +506,8 @@ WHAT IT DOES:
        session, so rulemux cannot stop the delivery on its own; disable the plugin
        in the profile's cordis.patch.yml (set the rulemux row's 'disabled: true');
     2. deletes the synced __rulemux__* files from that agent's rules/skills dirs
-       (Tier-1 agents only; Tier-2 agents like codex/opencode/dsh keep nothing on disk);
+       (Tier-1 agents, plus dsh's skills dirs — dsh has no rules dir but does
+       take skills; codex/opencode keep nothing on disk);
     3. removes the rules/skills dir itself once it is then empty (workspace level
        only: a symlinked, non-empty or subdir-bearing dir is left alone, and the
        dir above it is never touched; user-level dirs are kept);

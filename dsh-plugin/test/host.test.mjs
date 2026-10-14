@@ -3,8 +3,10 @@
  *
  * WHY A STUB, NOT A REAL dsh: there is no dsh in CI (and none on the machine that writes this), so
  * the only honest thing to verify here is our own half — that apply() → session-start → pre-step
- * asks the CLI for the rules, injects exactly that text once, and writes nothing into the
- * workspace. The stub is a three-line shell script placed first on PATH, which is exactly how the
+ * asks the CLI for the rules, injects exactly that text once, and asks it to sync the skills
+ * (`sync --hook --agent dsh`) once per session. The plugin itself writes NOTHING: the CLI does the
+ * writing (the stub writes nothing, so the workspace stays empty — that is what we assert).
+ * The stub is a three-line shell script placed first on PATH, which is exactly how the
  * plugin resolves a CLI (`resolveCli`). The dsh-side canary (a real session on a real dsh) is a
  * separate, manual step — see docs/worklog/202610/10-0000-dsh-adapter-9f1e.md.
  *
@@ -24,7 +26,7 @@ const RULES = "<!-- rulemux:managed -->\n\n# base\nkeep it short\n";
 
 let caseNo = 0;
 
-/** The stub `rulemux`: logs argv, answers --version / --help / init / inject for the given version. */
+/** The stub `rulemux`: logs argv, answers --version / --help / init / inject / sync for the given version. */
 function cliScript(version) {
   return [
     "#!/bin/sh",
@@ -34,6 +36,7 @@ function cliScript(version) {
     '  --help) printf "  dsh   DeepSeek Harness (self-contained)\\n"; exit 0 ;;',
     '  init) mkdir -p "$HOME/.rulemux"; : > "$HOME/.rulemux/config.toml"; exit 0 ;;',
     '  inject) printf "%s" "$STUB_RULES"; exit "$STUB_INJECT_EXIT" ;;',
+    '  sync) exit "$STUB_SYNC_EXIT" ;;',
     "esac",
     "exit 0",
     "",
@@ -42,10 +45,10 @@ function cliScript(version) {
 
 /**
  * Set up an isolated world: temp HOME, temp workspace, and a stub `rulemux` first on PATH.
- * The stub records every argv into $STUB_LOG, answers `--version` / `--help` / `init` / `inject`,
- * and can be told to fail `inject` (that failure must never fail the session).
+ * The stub records every argv into $STUB_LOG, answers `--version` / `--help` / `init` / `inject` /
+ * `sync`, and can be told to fail `inject` or `sync` (neither failure may fail the session).
  */
-async function world({ injectExit = 0, rules = RULES, version = "0.4.7", npmForce = false } = {}) {
+async function world({ injectExit = 0, syncExit = 0, rules = RULES, version = "0.5.0", npmForce = false } = {}) {
   const tmp = mkdtempSync(join(tmpdir(), "rulemux-dsh-test-"));
   const home = join(tmp, "home");
   const bin = join(tmp, "bin");
@@ -58,7 +61,7 @@ async function world({ injectExit = 0, rules = RULES, version = "0.4.7", npmForc
   chmodSync(stub, 0o755);
 
   // The CLI a successful `npm --force` install would leave in place (used by npmForce worlds only).
-  writeFileSync(join(bin, "rulemux-installed"), cliScript("0.4.7"));
+  writeFileSync(join(bin, "rulemux-installed"), cliScript("0.5.0"));
 
   // Guard rails: an unsatisfied CLI is upgraded with pnpm, then npm, then npm --force. Stub the package
   // managers so a test that exercises the upgrade path can never reach the network or touch the real
@@ -81,6 +84,7 @@ async function world({ injectExit = 0, rules = RULES, version = "0.4.7", npmForc
   process.env.STUB_LOG = log;
   process.env.STUB_RULES = rules;
   process.env.STUB_INJECT_EXIT = String(injectExit);
+  process.env.STUB_SYNC_EXIT = String(syncExit);
   process.env.STUB_BIN = bin;
   process.env.PATH = `${bin}:${process.env.PATH}`;
 
@@ -94,6 +98,10 @@ async function world({ injectExit = 0, rules = RULES, version = "0.4.7", npmForc
   });
 
   const agent = { session: { header: { id: `s${caseNo}`, cwd: ws } } };
+  /** Fire agent/session-start exactly as the host would when the session opens. */
+  const sessionStart = () => {
+    for (const fn of handlers.get("agent/session-start") ?? []) fn({ agent });
+  };
   /** Drive one pre-step: the host offers a turn carrying user input; we return what comes back. */
   const turn = async () => {
     const decision = {
@@ -105,11 +113,12 @@ async function world({ injectExit = 0, rules = RULES, version = "0.4.7", npmForc
     return fn({ agent }, async () => decision);
   };
 
-  return { tmp, home, ws, log, turn, calls: () => (existsSync(log) ? readFileSync(log, "utf8") : "") };
+  return { tmp, home, ws, log, turn, sessionStart, calls: () => (existsSync(log) ? readFileSync(log, "utf8") : "") };
 }
 
-test("asks the CLI for the rules, injects them once, and writes nothing", async () => {
+test("asks the CLI for the rules, injects them once, and syncs the skills — writing nothing itself", async () => {
   const w = await world();
+  w.sessionStart();
 
   const first = await w.turn();
   assert.equal(first.messages.length, 2, "the first turn must carry one injected block");
@@ -118,12 +127,13 @@ test("asks the CLI for the rules, injects them once, and writes nothing", async 
   assert.equal(block.source.kind, "plugin:rulemux");
   assert.equal(block.source.form, "recall");
 
-  // The whole point of this change: no middleman on disk.
-  assert.deepEqual(readdirSync(w.ws), [], "the plugin must not write anything into the workspace");
+  // The plugin itself writes nothing — the CLI does the writing (the stub writes nothing, so the
+  // workspace stays empty). That is the discipline: no middleman owned by the plugin.
+  assert.deepEqual(readdirSync(w.ws), [], "the plugin itself must not write anything into the workspace");
 
   const calls = w.calls();
   assert.match(calls, /inject --agent dsh/, "the plugin must ask the CLI for the rules");
-  assert.doesNotMatch(calls, /sync/, "the plugin must not sync (nothing to sync any more)");
+  assert.match(calls, /sync --hook --agent dsh/, "the plugin must ask the CLI to sync the skills");
 
   // Readiness still ran its two workspace-independent steps through the CLI.
   assert.match(calls, /--version/);
@@ -144,6 +154,29 @@ test("injects once per session: a silent host never gets a second copy", async (
 
   const injects = w.calls().split("\n").filter((l) => l.startsWith("inject ")).length;
   assert.equal(injects, 1, "the CLI must be asked exactly once per session");
+
+  const syncs = w.calls().split("\n").filter((l) => l.startsWith("sync ")).length;
+  assert.equal(syncs, 1, "the CLI must be asked to sync exactly once per session");
+});
+
+test("a failing sync is logged, not fatal: the session continues, rules still get in", async () => {
+  const w = await world({ syncExit: 3 });
+
+  const decision = await w.turn();
+  assert.equal(decision.messages.length, 2, "a failed sync must not cost the session its rules");
+  assert.match(w.calls(), /sync --hook --agent dsh/, "the CLI must still have been asked to sync");
+});
+
+test("a CLI that knows dsh but predates skills (0.4.7) is not trusted: readiness fails loudly", async () => {
+  // 0.4.7 parses our config and would inject the rules fine — but its `sync` skipped dsh wholesale
+  // (Tier-2 was skipped unconditionally before 0.5.0), so skills would silently never land: rules
+  // delivered, skills missing, not a word about it. The stub pnpm/npm refuse to install, so the
+  // upgrade cannot happen and readiness MUST fail — a visible session error — rather than half-work.
+  const w = await world({ version: "0.4.7" });
+
+  await assert.rejects(() => w.turn(), /rulemux-dsh/);
+  assert.doesNotMatch(w.calls(), /inject --agent dsh/, "an unusable CLI must never be asked for rules");
+  assert.doesNotMatch(w.calls(), /sync/, "…and never asked to sync either");
 });
 
 test("a failing inject is logged, not fatal: the session continues without a block", async () => {

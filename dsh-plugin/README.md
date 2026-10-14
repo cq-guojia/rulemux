@@ -8,8 +8,16 @@ CLI for the rules rendered for the current workspace (`rulemux inject --agent ds
 text into the session once, at the first user turn — the same rules, the same token cost as a host
 that reads a rules directory natively, because it is the same renderer.
 
-**Nothing is written into your workspace.** No `.dsh/rules`, no copies, no residue to clean up: the
-rules travel from your source files straight into the session.
+**For rules, nothing is written into your workspace** — no `.dsh/rules`, no copies, no residue to
+clean up: the rules travel from your source files straight into the session.
+
+**Skills are the one exception (since plugin 0.5.0 / CLI 0.5.0).** dsh has a native skills
+subsystem, and skills load progressively (name+description at session start, full text only when
+called by name) — so, unlike rules, they cannot be injected: they must exist as real files. The
+plugin therefore runs `rulemux sync --hook --agent dsh` when a session starts, and copies land as
+`__rulemux__<skill-name>/` in `<git-root>/.dsh/skills` (workspace scope) and/or `~/.dsh/skills`
+(user scope). Your own skills are never touched, and `.agents/skills` (a cross-framework convention
+dir) is never written. A failed sync is logged and the session continues — rules are unaffected.
 
 ## Install
 
@@ -56,8 +64,8 @@ npm run typecheck
 ```bash
 dsh plugin --profile <p> add "github:cq-guojia/rulemux#path:/dsh-plugin"
 # restart dsh              → ~/.rulemux/config.toml now exists (see below)
-# edit it                  → add your [[source]] entries
-# open ONE session         → the rules are injected
+# edit it                  → add your [[source]] / [[skill_source]] entries
+# open ONE session         → the rules are injected, the skills synced
 ```
 
 No throwaway "chat once so it can create the config" session: readiness starts at load, before any
@@ -104,12 +112,17 @@ readiness failure: it has no bearing on the three steps above.
 ## What it does
 
 - At load (dsh startup) → starts the three-step readiness chain, so `~/.rulemux/config.toml` is there
-  before you need it. At `agent/session-start` → makes sure that chain has run before the first turn.
-- `agent/pre-step` → on the first turn that carries user input, runs `rulemux inject --agent dsh` and
-  injects its stdout as recalled material. It asks **once** per session and only re-asks if a later
-  compaction provably dropped the block — never every turn.
-- It writes nothing anywhere, so there is no per-workspace state to keep in sync — and nothing left
-  behind when you stop using it.
+  before you need it. At `agent/session-start` → makes sure that chain has run before the first turn,
+  and starts the one-per-session skills sync.
+- `agent/pre-step` → on the first turn that carries user input, awaits the skills sync (so the first
+  model step sees the skills on disk), then runs `rulemux inject --agent dsh` and injects its stdout
+  as recalled material. It asks **once** per session and only re-asks if a later compaction provably
+  dropped the block — never every turn.
+- **Skills** → one `rulemux sync --hook --agent dsh` per session; real copies into
+  `<git-root>/.dsh/skills` / `~/.dsh/skills` as `__rulemux__<skill-name>/`; a failed sync is logged,
+  never fatal. For **rules** it still writes nothing anywhere, so there is no per-workspace state to
+  keep in sync — and nothing left behind when you stop using it (skill copies are converged by
+  `rulemux uninstall`, exactly like every other agent).
 
 ## Requirements
 

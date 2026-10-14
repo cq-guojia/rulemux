@@ -50,6 +50,12 @@ type Agent struct {
 	// 例：codebuddy 为 ".codebuddy/skills"（bundle getProjectSkillsDir，2026-10-12 代码级坐实，
 	// 见 docs/design/external/agent-rules-dirs.md §5.5）。
 	SkillsDir string
+	// WorkspaceIsGitRoot 表示该宿主把「项目根」定为**最近的 .git 祖先**，而不是会话 cwd
+	// 本身（dsh 的 findProjectRoot 即此，2026-10-14 源码级坐实，见
+	// docs/design/external/skill-ecosystem.md §三·再续）。为 true 时，sync 在未显式给
+	// --workspace 的前提下先把 ws 解析到 git 根再同步 —— 否则会话开在仓库子目录，文件会
+	// 落进宿主根本不扫的位置，而失败是静默的。false = ws 就是钩子载荷/命令行给的那个目录。
+	WorkspaceIsGitRoot bool
 	// UserRulesDirs 是用户级（全局）规则目录（可含 ~，经 ExpandHome 展开）；空 = 不投用户级 rules。
 	// 例：codebuddy 家族 {"~/.codebuddy/rules", "~/.workbuddy/rules"} —— 用户级要覆盖两家必须
 	// 双写（CodeBuddy 读 ~/.codebuddy/rules，WorkBuddy 读自己的 ~/.workbuddy/rules，
@@ -223,7 +229,7 @@ var registry = []Agent{
 		// directory on its own — so it takes no rules directory at all and is delivered by
 		// INJECTION, exactly like codex / opencode: the repo sub-package `dsh-plugin/` (npm name
 		// `rulemux-dsh`) asks the CLI for the rendered rules (`rulemux inject --agent dsh`) on the
-		// first user turn and injects that stdout. Nothing is written into the workspace.
+		// first user turn and injects that stdout. Nothing is written into the workspace for RULES.
 		//
 		// 2026-10-14 用户拍板：原本的 WRITE half（sync 真实拷贝进 <workspace>/.dsh/rules、插件读回）
 		// 作废 —— 那个目录宿主根本不认，只是两边之间的交接物；忘了清理就永久留在用户盘上，
@@ -231,6 +237,10 @@ var registry = []Agent{
 		// 也就没有东西需要保持同步、没有残渣需要清理。
 		// rulemux does NOT install the plugin ⇒ Style "external": init/doctor print the install hint,
 		// uninstall leaves the host config alone.
+		//
+		// ⚠ skills 与 rules 相反：dsh **有**原生 skills 子系统（2026-10-14 源码级坐实，
+		// deepseek-ai/deepseek-harness@master，见 docs/design/external/skill-ecosystem.md §三·再续）
+		// ⇒ skills 走真实拷贝，由同一插件在会话启动时触发 `rulemux sync --hook --agent dsh` 落盘。
 		ID:       "dsh",
 		Aliases:  []string{"deepseek", "deepseek-harness"},
 		Tier:     Tier2,
@@ -238,7 +248,25 @@ var registry = []Agent{
 		// 旧交接目录：2026-10-14 前的设计往这里写真实拷贝。现在只用于 uninstall 时报一句
 		// 「这里还有旧文件，rulemux 不再写它了」——不删（那只目录不是 rulemux 的）。
 		LegacyRulesDir: ".dsh/rules",
-		Style:          "external",
+		// skills 双域（2026-10-14 用户拍板）：dsh 多根扫描、rank 小者胜 —— 工作区
+		// .dsh/skills=100（最高）、.agents/skills=200；用户级 ~/.dsh/skills=400、
+		// ~/.agents/skills=500。只写 rank 最高的 dsh 专属目录：
+		//   ① 托管拷贝（__rulemux__ 前缀）稳定压过用户手工放在 .agents/skills（200）的同名技能；
+		//   ② .agents/skills 是跨框架公约目录（npx skills 的 canonical store 就在那），
+		//      rulemux 的托管内容不伸进公共区管事，且 rank 更低、写了也无收益。
+		// ⚠ dsh 的项目根按「从 cwd 向上找最近的 .git」定位（findProjectRoot），不是 cwd 本身
+		//    ⇒ sync 侧对 dsh 做 git 根对齐（internal/cmd），否则子目录会话里技能写进没人扫的
+		//    位置，静默不生效。
+		// ⚠ dsh 只校验 frontmatter 的 name（^[a-z0-9]+(?:-[a-z0-9]+)*$）、不校验目录名
+		//    ⇒ __rulemux__ 前缀安全；非递归扫描 ⇒ 引擎只写顶层前缀目录，天然兼容（引擎零改动）。
+		// ⚠ DSH_HOME 可挪走用户级根（默认 ~/.dsh）：本条目写死 ~，与 codebuddy 的
+		//   CODEBUDDY_CONFIG_DIR 同类，先文档标注（external §六），有需求再跟随 env。
+		SkillsDir:      ".dsh/skills",
+		UserSkillsDirs: []string{"~/.dsh/skills"},
+		// 宿主按 .git 定项目根（findProjectRoot）：sync 侧据此把 ws 解析到 git 根，
+		// 与宿主扫描位置对齐（子目录会话静默不生效的防线）。
+		WorkspaceIsGitRoot: true,
+		Style:              "external",
 		// 2026-10-10 先行开放；同日容器内真机 canary 通过（装载期生成配置、首轮注入一次成功、
 		// token 成本与宿主原生读文件字节一致 ⇒ 见 worklog 202610/10-0000-dsh-adapter-9f1e.md）。
 		// ⚠ 2026-10-14 交付改为纯注入（不再有 .dsh/rules），该 canary 结论需按新链路重跑。
@@ -246,7 +274,7 @@ var registry = []Agent{
 		// 插件每会话首轮现取现注入 ⇒ 无 CodeBuddy 式「差一拍」，不需要变化提示。
 		SessionHint:  false,
 		HintProtocol: "",
-		Note:         "Plugin-first host (no hook binary, and no rules directory at all): delivery is injection. The repo sub-package `dsh-plugin/` (npm name `rulemux-dsh`) is installed through the dsh plugin command (`dsh plugin --profile <p> add github:cq-guojia/rulemux#path:/dsh-plugin`, or npm) and asks the CLI for the workspace's rules (`rulemux inject --agent dsh`) on the first user turn — rulemux does not install it (Style \"external\"), and nothing is written into the workspace. Canary passed 2026-10-10 on a real dsh in a container (load-time config generation, one successful first-turn injection, token cost byte-identical to the host reading files natively) — see docs/worklog/202610/10-0000-dsh-adapter-9f1e.md; that was the directory hand-off, so it needs re-running for the injection-only delivery of 2026-10-14. Uninstalling rulemux cannot remove the host-side plugin, and it cannot stop it either: the plugin keeps calling `rulemux inject --agent dsh` in every session, so `uninstall --agent dsh` says exactly that (disable the plugin row in the profile's cordis.patch.yml, or remove it with dsh's own plugin command).",
+		Note:         "Plugin-first host (no hook binary, and no rules directory at all): delivery is injection. The repo sub-package `dsh-plugin/` (npm name `rulemux-dsh`) is installed through the dsh plugin command (`dsh plugin --profile <p> add github:cq-guojia/rulemux#path:/dsh-plugin`, or npm) and asks the CLI for the workspace's rules (`rulemux inject --agent dsh`) on the first user turn — rulemux does not install it (Style \"external\"), and nothing is written into the workspace for rules. Canary passed 2026-10-10 on a real dsh in a container (load-time config generation, one successful first-turn injection, token cost byte-identical to the host reading files natively) — see docs/worklog/202610/10-0000-dsh-adapter-9f1e.md; that was the directory hand-off, so it needs re-running for the injection-only delivery of 2026-10-14. Uninstalling rulemux cannot remove the host-side plugin, and it cannot stop it either: the plugin keeps calling `rulemux inject --agent dsh` in every session, so `uninstall --agent dsh` says exactly that (disable the plugin row in the profile's cordis.patch.yml, or remove it with dsh's own plugin command). SKILLS (2026-10-14, source-verified against deepseek-ai/deepseek-harness@master, external/skill-ecosystem.md section 3-cont): dsh DOES have a native skills subsystem, so unlike rules, skills are REAL COPIES — workspace scope lands in <git-root>/.dsh/skills (rank 100, the highest) and user scope in ~/.dsh/skills (rank 400), both written by the same plugin at session start via `rulemux sync --hook --agent dsh`. .agents/skills (a cross-framework convention dir) is never written. The workspace root is the nearest .git ancestor of the session cwd, not the cwd itself, so the CLI resolves the git root for this agent; a skill whose frontmatter name fails dsh's check (^[a-z0-9]+(?:-[a-z0-9]+)*$) or uses the legacy camelCase invocation keys is silently dropped by dsh (rulemux never rewrites skill content).",
 	},
 }
 

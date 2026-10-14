@@ -2,8 +2,10 @@
 
 > **状态**：🟢 **v1 已实现**（2026-10-12，`internal/engine/skill.go` + registry 双域字段 +
 > `[[skill_source]]`/`scope` 配置 + sync/uninstall 编排；`go build/vet/test` + `scripts/smoke.sh` 20 项全绿）。
-> 范围：**仅 codebuddy / workbuddy**；**仅本地源**；用户级（全局）双域同版交付。
-> 剩余 canary 待办见 §五。
+> **v2 已拍板**（2026-10-14，用户定序 Trae → DeepSeek harness，dsh 先行）：dsh 接入方案见 §七，
+> 外部事实源码级坐实见 [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md) §三·再续。
+> 范围：v1 = **仅 codebuddy / workbuddy**；v2 = **+ dsh**（trae 仍下轮）；**仅本地源**；用户级（全局）双域同版交付。
+> 剩余 canary 待办见 §四/§七。
 > **配套**：[`../requirements.md`](../requirements.md) §六（需求与验收判据）· [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md)（上游事实：各家 skills 目录、市场格局）· [`dir-sync.md`](dir-sync.md)（规则同步主方案，本篇沿用其哲学）· [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §5.5（双品牌同源模型）
 
 ## 一、与规则同步的相同与不同
@@ -28,7 +30,8 @@
 2. **适配器（`internal/agents/registry.go`）**：Agent 增加 `SkillsDir`（工作区）/
    `UserSkillsDirs` / `UserRulesDirs`（用户级，`~` 走 `ExpandHome`）。codebuddy 与 workbuddy 填同值：
    `SkillsDir=".codebuddy/skills"`；用户级 skills/rules 各**双目录**（`~/.codebuddy/…` + `~/.workbuddy/…`）
-   —— 用户级要覆盖两家必须双写（§一证据同前）。其余 agent 三字段留空 ⇒ 天然不参与（trae/dsh 下轮）。
+   —— 用户级要覆盖两家必须双写（§一证据同前）。dsh 于 v2 填入 `.dsh/skills` + `~/.dsh/skills`（§七）；
+   trae 三字段仍留空（下轮）⇒ 天然不参与。
    共享判定 `SharingSkillsDir` / `SharingUserDirs` 与 rules 侧 `SharingRulesDir` 同规律。
 3. **共享目录**：工作区级 skills 与 rules 同规律——两家共用 `.codebuddy/skills`，同步按并集
    （`unionSkillIDs`），谁跑都不删别人的。用户级不共享且方向不对称 ⇒ 按品牌各写各的，
@@ -55,7 +58,7 @@
 ## 四、剩余 canary 待办（🔴，需真机会话；全部来自 `external/skill-ecosystem.md` §六）
 
 1. WorkBuddy skills 两级**装载** Mac canary（落点已代码级确定：用户级 `~/.workbuddy/skills`、工作区级 `.codebuddy/skills`）+ 用户级 rules `~/.workbuddy/rules` 装载；
-2. dsh skills 目录（`.dsh/skills` / `.agents/skills`、不递归）官方文档复核 + 用户级落点；
+2. ~~dsh skills 目录（`.dsh/skills` / `.agents/skills`、不递归）官方文档复核 + 用户级落点~~ —— 2026-10-14 **源码级坐实**（external §三·再续），落点判据已足；装机装载 canary 转 §七-5；
 3. Trae 工作区 `.trae/skills` 本机 canary + intl `~/.trae/skills` 探测；
 4. skills 加载行为 canary（渐进式披露 / `skills-changed` 是否热重载 / 要不要「新开会话」提示）；
 5. CodeBuddy 用户级 rules `~/.codebuddy/rules` 装载 canary（落点已代码级坐实，验合并加载与 frontmatter 语义）。
@@ -102,3 +105,69 @@
   `internal/config/config_test.go`（组展开 / 工作数组 / `~` 展开 / 三类错误）；
   `internal/cmd/init.go`（示例配置补 `[[skill_group]]` 与字段说明）；README 中英双份 §5.1 / §5.4 / §5.5
   （§5.5 收录完整带注释的默认配置）。
+
+## 七、dsh 接入（v2，2026-10-14 用户拍板）
+
+外部事实（源码级，`deepseek-ai/deepseek-harness@master`，2026-10-14）见
+[`../external/skill-ecosystem.md`](../external/skill-ecosystem.md) §三·再续；此处只记「我方怎么落」。
+
+### 7.1 落点（用户 2026-10-14 逐条拍板）
+
+| 域 | 落点 | 宿主 rank | 依据 |
+|---|---|---|---|
+| 工作区 | `<git根>/.dsh/skills` | 100（最高） | dsh 专属目录；托管拷贝（`__rulemux__` 前缀）稳定压过用户手工放在 `.agents/skills`（200）的同名技能 |
+| 用户级 | `~/.dsh/skills` | 400 | 全局根，所有 dsh 会话/工作区都加载（`skipSystem` 仅跳过 `.system` 条目） |
+| **不写** | `.agents/skills`（项目 200 / 用户 500） | — | 跨框架公约目录（npx skills canonical store 所在），只读不碰；rank 也更低，写了无收益 |
+
+dsh 维持 **Tier-2 / `RulesDir` 空**（规则仍是纯插件注入，不动）；skills 是独立通道，
+`SkillsDir` 非空即参与 skill 同步 —— `sync` 主循环的跳过条件相应从「Tier-2 全跳过」改为
+「Tier-2 且无 skills 目录才跳过」（codex/opencode 三字段为空 ⇒ 行为逐字节不变）。
+
+### 7.2 项目根对齐（git 根）
+
+dsh 的「工作区」= 从会话 cwd 逐级向上找最近的 `.git`（`findProjectRoot`），而 rulemux 的 sync
+按 cwd/hook 载荷定位（`internal/cmd/flags.go`）。用户在仓库**子目录**里开 dsh 会话时，两边会错位：
+技能写进 `<子目录>/.dsh/skills`，dsh 永远扫不到 —— **静默失败**。故 CLI 侧对 dsh 增加
+git 根对齐（标准库 `os`/`filepath` 自实现，约 15 行，放 `internal/cmd`）：从 ws 逐级向上找
+`.git`，找到则以其为同步根，找不到回退 ws。与宿主同构、可单测；不把宿主逻辑复制进插件 JS。
+
+### 7.3 触发（插件充当 dsh 的 SessionStart）
+
+dsh 没有 hook 系统，skills 落盘只能由插件触发。`dsh-plugin/index.mjs`：
+
+- `agent/session-start`：发起（不 await）`rulemux sync --hook --agent dsh`（cwd = 会话工作区）；
+- 首个 `agent/pre-step`：await 同一 Promise 兜底，保证首轮模型步之前文件已落盘；
+- 失败只 `console.error` 记日志、会话继续（与 rules 注入同哲学，不进 readiness 三步）；
+- `--hook` 是**必需的**：目录创建权只在 hook 路径发放（`sync.go` createAgent 门禁），
+  不带则 create=false、首跑目录不存在 ⇒ 技能永远落不了地；插件 spawn 时 stdin 为 /dev/null，
+  载荷解析自动落败回退 cwd，语义正确；
+- `REQUIRED_CLI` 抬至首个带 dsh skills 能力的发布版（发版时定值），理由按既有注释纪律写清。
+
+### 7.4 引擎与配置面零改动
+
+- `internal/engine/skill.go` **不动**：dsh 发现名取自 frontmatter `name`、目录名不校验 ⇒
+  `__rulemux__<技能名>/` 前缀安全；非递归扫描天然兼容（引擎只写顶层前缀目录）。
+- 配置面 `[[skill_source]]` 的 `agents = ["dsh"]` / `scope` / groups 全部现成，无新键。
+
+### 7.5 frontmatter 差异警示（只写文档，不改写内容）
+
+| 差异 | 后果 |
+|---|---|
+| `name` 须匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$` | 不合规（大写/下划线等）的技能在 dsh **静默消失**，CodeBuddy 不报错 |
+| 旧式驼峰调用键（`disableModelInvocation` 等） | dsh **丢弃整个技能**（CodeBuddy 接受） |
+| CodeBuddy 市场扩展字段（`display_name`/`description_zh`/`version`/`allowed-tools`） | 被 dsh 忽略，无害 |
+
+rulemux 只做字节拷贝、不改内容 ⇒ 上述差异是用户写技能时的约束，进 README 与外部事实文档警示。
+
+### 7.6 剩余 canary（🔴，真机 dsh，挂 v2 任务）
+
+1. `__rulemux__` 前缀目录真被装载（源码级高可信，仍建议验一次）；
+2. 会话中 sync 落盘的热重载时序（watcher `depth:1` 对嵌套 `SKILL.md` 变更的覆盖）；
+3. `~/.dsh/skills` 用户级装载；
+4. `DSH_HOME` 被设置时 rulemux 写死 `~/.dsh` 的错位（与 codebuddy 的 `CODEBUDDY_CONFIG_DIR` 同类；
+   shortcut：先文档标注，有需求再按 env 跟随）。
+
+### 7.7 发布配对（AGENTS.md §5）
+
+`REQUIRED_CLI` 抬版 = 改了「CLI 获取 / 版本判定」逻辑 ⇒ CLI 发 `vX.Y.Z` 与插件发 `dsh-vX.Y.Z`
+**必须同批**；只发 CLI 推不动已装旧插件的机器。

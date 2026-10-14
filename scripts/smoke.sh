@@ -8,7 +8,9 @@
 # codebuddy (hook ~/.codebuddy/settings.json, rules .codebuddy/rules),
 # workbuddy (hook ~/.workbuddy/settings.json, rules .codebuddy/rules — SHARED
 # with codebuddy since the 2026-10-09 probe), trae (hook ~/.trae-cn/hooks.json,
-# rules .trae/rules) and dsh (plugin-first: no hook, rules .dsh/rules).
+# rules .trae/rules) and dsh (plugin-first: no hook; RULES are injection-only
+# since 2026-10-14 — nothing on disk; SKILLS are real copies into .dsh/skills
+# since 2026-10-14, synced by the plugin's session-start `sync --hook --agent dsh`).
 # Agents such as claude / codex / opencode are registered but NOT verified yet,
 # so they are deliberately excluded here - their coverage arrives with their
 # adapter.
@@ -412,29 +414,52 @@ HOME="$D3_HOME" RULEMUX_STATE_DIR="$D3_HOME/.rulemux" \
 [ -d "$TMP/d3ws/.trae" ] || fail "uninstall deleted above the leaf dir"
 ok "uninstall removes the emptied rules dir (D3)"
 
-# 26b. dsh is injection-only (2026-10-14): `sync --hook --agent dsh` writes NOTHING
-# (a leftover .dsh/rules is neither rewritten nor deleted), `inject --agent dsh` is the
-# delivery path, and uninstall only *reports* the legacy residue plus the fact that the
-# host-side plugin keeps calling inject.
+# 26b. dsh split delivery (2026-10-14): RULES are injection-only — `sync --hook --agent dsh`
+# writes no rules (a leftover .dsh/rules is neither rewritten nor deleted) — but SKILLS are
+# real copies (source-verified against deepseek-ai/deepseek-harness): the same sync creates
+# .dsh/skills / ~/.dsh/skills and drops __rulemux__* skill trees there, never .agents/skills.
+# `inject --agent dsh` stays the rules delivery path; uninstall reports the legacy residue,
+# converges the skills dirs, and warns that the host-side plugin keeps calling BOTH.
 DSH_HOME="$TMP/dsh-home"
 mkdir -p "$DSH_HOME" "$TMP/dshws/.dsh/rules"
 printf 'leftover\n' > "$TMP/dshws/.dsh/rules/__rulemux__a.md"
+mkdir -p "$TMP/dsh-skills/demo-skill"
+printf 'name: demo\n' > "$TMP/dsh-skills/demo-skill/SKILL.md"
+cat > "$TMP/dsh.toml" <<EOF
+[[source]]
+path = ["$TMP/src/a.md"]
+
+[[skill_source]]
+path = ["$TMP/dsh-skills"]
+agents = ["dsh"]
+
+[[skill_source]]
+path = ["$TMP/dsh-skills"]
+agents = ["dsh"]
+scope = "user"
+EOF
 HOME="$DSH_HOME" RULEMUX_STATE_DIR="$DSH_HOME/.rulemux" \
-  "$BIN" sync --hook --agent dsh --config "$CFG" --workspace "$TMP/dshws" >/dev/null 2>&1 \
+  "$BIN" sync --hook --agent dsh --config "$TMP/dsh.toml" --workspace "$TMP/dshws" >/dev/null 2>&1 \
   || fail "sync --hook --agent dsh exited non-zero"
-grep -q 'leftover' "$TMP/dshws/.dsh/rules/__rulemux__a.md" || fail "sync --hook --agent dsh rewrote the legacy dir"
+grep -q 'leftover' "$TMP/dshws/.dsh/rules/__rulemux__a.md" || fail "sync --hook --agent dsh rewrote the legacy rules dir"
+[ -f "$TMP/dshws/.dsh/skills/__rulemux__demo-skill/SKILL.md" ] || fail "dsh skills did not land in .dsh/skills"
+[ -f "$DSH_HOME/.dsh/skills/__rulemux__demo-skill/SKILL.md" ] || fail "dsh user-level skills did not land in ~/.dsh/skills"
+[ ! -e "$TMP/dshws/.agents/skills" ] || fail "dsh wrote .agents/skills (cross-framework convention dir, must not be touched)"
 HOME="$DSH_HOME" RULEMUX_STATE_DIR="$DSH_HOME/.rulemux" \
-  "$BIN" inject --agent dsh --config "$CFG" --workspace "$TMP/dshws" >"$TMP/dsh-inject.log" 2>&1 \
+  "$BIN" inject --agent dsh --config "$TMP/dsh.toml" --workspace "$TMP/dshws" >"$TMP/dsh-inject.log" 2>&1 \
   || fail "inject --agent dsh exited non-zero"
 grep -q 'rulemux:managed' "$TMP/dsh-inject.log" || fail "inject --agent dsh printed no rendered rules"
 HOME="$DSH_HOME" RULEMUX_STATE_DIR="$DSH_HOME/.rulemux" \
-  "$BIN" uninstall --agent dsh --config "$CFG" --workspace "$TMP/dshws" --yes >"$TMP/dsh-uninstall.log" 2>&1 \
+  "$BIN" uninstall --agent dsh --config "$TMP/dsh.toml" --workspace "$TMP/dshws" --yes >"$TMP/dsh-uninstall.log" 2>&1 \
   || fail "uninstall --agent dsh exited non-zero"
 grep -q 'inject --agent dsh' "$TMP/dsh-uninstall.log" || fail "uninstall did not warn that the plugin keeps calling inject"
+grep -q 'sync --hook --agent dsh' "$TMP/dsh-uninstall.log" || fail "uninstall did not warn that the plugin keeps syncing skills"
 grep -q 'disabled: true' "$TMP/dsh-uninstall.log" || fail "uninstall did not print the documented way to disable the plugin"
 grep -q 'leftover' "$TMP/dsh-uninstall.log" || fail "uninstall did not report the legacy .dsh/rules residue"
 [ -f "$TMP/dshws/.dsh/rules/__rulemux__a.md" ] || fail "uninstall deleted a legacy file it no longer owns"
-ok "dsh is injection-only: sync writes nothing, inject delivers, uninstall reports (D1+D3+R1)"
+[ ! -e "$TMP/dshws/.dsh/skills/__rulemux__demo-skill" ] || fail "uninstall left dsh skills residue in the workspace"
+[ ! -e "$DSH_HOME/.dsh/skills/__rulemux__demo-skill" ] || fail "uninstall left user-level dsh skills residue"
+ok "dsh: rules injection-only, skills real copies, uninstall converges both (D1+D3+R1)"
 
 # 27. D3 boundaries: a dir that is not truly empty is kept — the user's own file,
 # a prefixed subdir, or a symlink all count as "not empty".

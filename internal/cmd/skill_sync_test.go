@@ -174,6 +174,66 @@ func TestSyncSkillsOnlyChangeNoNotice(t *testing.T) {
 	}
 }
 
+// TestSyncSkillsDshTier2：dsh 是 Tier-2（规则纯注入、无规则目录），但 skills 有原生目录
+// ⇒ hook 路径下 [[skill_source]]（agents=["dsh"]）照样落进 <ws>/.dsh/skills；用户级
+// （scope=user）落 ~/.dsh/skills；.codebuddy/.agents 目录与 .dsh/rules 一律不出现。
+// 2026-10-14 用户拍板 + 源码级坐实（deepseek-ai/deepseek-harness@master，
+// 见 docs/design/external/skill-ecosystem.md §三·再续）。
+func TestSyncSkillsDshTier2(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	skillSrc := filepath.Join(tmp, "skills")
+	for _, d := range []string{home, ws, skillSrc} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+
+	mkTestSkill(t, skillSrc, "alpha")
+	cfgPath := writeConfig(t, tmp,
+		"[[skill_source]]\npath = [\""+skillSrc+"\"]\nagents = [\"dsh\"]\n\n"+
+			"[[skill_source]]\npath = [\""+skillSrc+"\"]\nagents = [\"dsh\"]\nscope = \"user\"\n")
+
+	Sync([]string{"--config", cfgPath, "--workspace", ws, "--hook", "--agent", "dsh"})
+
+	// 工作区级：dsh 的 .dsh/skills（不是 .codebuddy/skills，更不是 .agents/skills）
+	if _, err := os.Stat(filepath.Join(ws, ".dsh", "skills", "__rulemux__alpha", "SKILL.md")); err != nil {
+		t.Fatalf("dsh skills 未落盘: %v", err)
+	}
+	for _, bad := range []string{
+		filepath.Join(ws, ".codebuddy", "skills"),
+		filepath.Join(ws, ".agents", "skills"),
+		filepath.Join(ws, ".dsh", "rules"),
+	} {
+		if _, err := os.Stat(bad); !os.IsNotExist(err) {
+			t.Fatalf("不该出现 %s（dsh 不写 codebuddy/.agents 目录，规则纯注入不落盘）", bad)
+		}
+	}
+	// 用户级：~/.dsh/skills（不写 ~/.agents/skills——跨框架公约目录）
+	if _, err := os.Stat(filepath.Join(home, ".dsh", "skills", "__rulemux__alpha", "SKILL.md")); err != nil {
+		t.Fatalf("dsh 用户级 skills 未落盘: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills")); !os.IsNotExist(err) {
+		t.Fatal("不该写 ~/.agents/skills（跨框架公约目录）")
+	}
+
+	// create 门禁：裸 --agent（无 --hook）⇒ 目录不存在时不建，什么都不写
+	tmp2 := t.TempDir()
+	ws2 := filepath.Join(tmp2, "ws")
+	if err := os.MkdirAll(ws2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(tmp2, "home"))
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp2, "state"))
+	Sync([]string{"--config", cfgPath, "--workspace", ws2, "--agent", "dsh"})
+	if _, err := os.Stat(filepath.Join(ws2, ".dsh", "skills")); !os.IsNotExist(err) {
+		t.Fatal("裸 --agent（无 --hook）不该创建 .dsh/skills 目录（create 门禁）")
+	}
+}
+
 // TestUninstallPrunesUserDirs：卸载后用户级目录里的 __rulemux__ 前缀内容被清掉，
 // 目录本身与用户自己的文件保留。
 func TestUninstallPrunesUserDirs(t *testing.T) {

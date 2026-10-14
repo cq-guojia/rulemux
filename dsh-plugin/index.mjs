@@ -1,18 +1,30 @@
 /**
  * rulemux-dsh — a native Cordis plugin for DeepSeek Harness (dsh).
  *
- * The read half, and the only half: on the first user turn we ask the `rulemux` CLI for this
- * workspace's rules (`rulemux inject --agent dsh`) and inject that stdout into the session ONCE as
- * recalled material. The very same text, hence the same token cost, as a host that scans a rules
- * directory natively — it is literally the same renderer the Tier-2 agents get.
+ * The read half for RULES, and the one write half for SKILLS: on the first user turn we ask the
+ * `rulemux` CLI for this workspace's rules (`rulemux inject --agent dsh`) and inject that stdout into
+ * the session ONCE as recalled material. The very same text, hence the same token cost, as a host
+ * that scans a rules directory natively — it is literally the same renderer the Tier-2 agents get.
  *
- * WHY INJECTION AND NOT FILES: dsh scans no rules directory of its own, so the older hand-off
- * ("rulemux syncs real copies into <workspace>/.dsh/rules, the plugin reads them back") needed a
- * directory that belongs to neither side: the host never reads it, and whatever rulemux did not
- * clean up there stayed on disk for good. Asking the CLI for the text removes the middleman — this
- * plugin writes NOTHING to the workspace, so there is nothing to keep in sync and nothing to clean
- * up. (`rulemux inject` is the long-standing rulemux path for agents that cannot take a rules
- * directory.)
+ * SKILLS ARE THE DELIBERATE EXCEPTION — they are written to disk (since plugin 0.5.0 / CLI 0.5.0).
+ * Unlike rules, dsh DOES have a native skills subsystem (workspace <git-root>/.dsh/skills, user-level
+ * ~/.dsh/skills — source-verified against deepseek-ai/deepseek-harness@master), and skills cannot be
+ * injected the way rules are: they load progressively (name+description at session start, full text
+ * only when the model calls them by name), so they must exist as real files in the host's skills
+ * dirs. This plugin therefore runs `rulemux sync --hook --agent dsh` once per session — started at
+ * session-start, awaited before the first model step — and real copies land there as
+ * `__rulemux__<skill-name>/` (the host's own skills are never touched; `.agents/skills`, a
+ * cross-framework convention dir, is never written). A failed sync is logged, never thrown: it must
+ * not kill the session, exactly like a failed rules ask. Rules themselves stay injection-only —
+ * nothing is written for them.
+ *
+ * WHY INJECTION AND NOT FILES (for rules): dsh scans no rules directory of its own, so the older
+ * hand-off ("rulemux syncs real copies into <workspace>/.dsh/rules, the plugin reads them back")
+ * needed a directory that belongs to neither side: the host never reads it, and whatever rulemux did
+ * not clean up there stayed on disk for good. Asking the CLI for the text removes the middleman — for
+ * rules this plugin writes NOTHING to the workspace, so there is nothing to keep in sync and nothing
+ * to clean up. (`rulemux inject` is the long-standing rulemux path for agents that cannot take a
+ * rules directory.)
  *
  * READINESS is exactly THREE steps, and every one of them must hold:
  *   ① the `rulemux` CLI is resolvable AND its version satisfies REQUIRED_CLI. "It is installed" is
@@ -75,8 +87,8 @@ const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() 
 // this". Either way an unsatisfied version is upgraded, then re-checked, and failing that we throw.
 //
 // ⚠ It must be the FIRST RELEASED version that can do the WHOLE job: a version floor only means
-// anything if everything below it genuinely cannot. Two capabilities are required, and the LATER of
-// the two sets the floor:
+// anything if everything below it genuinely cannot. Three capabilities are required, and the LATER
+// of them sets the floor:
 //   • `inject --agent dsh` — the dsh adapter, which landed AFTER v0.3.0 (npm's 0.3.0 and older, e.g.
 //     0.2.7, answer "unknown agent dsh"), so 0.3.1 is the first whose `--help` lists `dsh`.
 //   • a config parser that accepts the config we ship — line-trailing `#` comments on every
@@ -85,9 +97,14 @@ const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() 
 //     error at `inject` time. It must be upgraded, never accepted — exactly the trap a
 //     `knowsDsh`-only check fell into: those versions list `dsh` in --help, looked capable, were
 //     never upgraded, and then failed to inject on every turn (see cliOk).
-// Hence 0.4.2. It also decides what we upgrade *to* (see installTarget), so it is bumped in the same
+//   • dsh SKILLS support — the dsh skills dirs in the registry (`.dsh/skills` / `~/.dsh/skills`),
+//     the `sync` path that accepts a Tier-2 agent which has a skills dir, and the git-root
+//     alignment all landed in v0.5.0. A CLI in 0.4.2–0.4.x still SKIPS dsh wholesale in `sync`
+//     (Tier-2 was skipped unconditionally, and dsh had no skills dirs), so `sync --hook --agent dsh`
+//     would exit 0 having written nothing — skills silently never land. Hence 0.5.0.
+// Hence 0.5.0. It also decides what we upgrade *to* (see installTarget), so it is bumped in the same
 // change that cuts the release, never afterwards.
-const REQUIRED_CLI = ">=0.4.2";
+const REQUIRED_CLI = ">=0.5.0";
 
 const INSTALL_TIMEOUT_MS = 120_000; // global install / sync: generous, but never hang forever
 const PROBE_TIMEOUT_MS = 15_000; // resolving / probing the CLI
@@ -404,7 +421,27 @@ async function rulesFromCli(root, cli) {
     return "";
   }
   return r.out.trim();
-}
+  }
+
+  /**
+  * Sync this workspace's skills — the one thing this plugin WRITES (see the file header: rules are
+  * injected, skills must exist as real files because the host loads them progressively, by name).
+  * `--hook` is what unlocks directory creation — the same gate every hooked agent gets — and our
+  * stdin is /dev/null, so the payload parse fails and the workspace falls back to the cwd passed
+  * here. A non-zero exit is logged (with the CLI's own stderr) and the session carries on: rules are
+  * unaffected either way. Never throws.
+  */
+  async function syncSkillsFromCli(root, cli) {
+  const r = await run(cli.cmd, [...cli.args, "sync", "--hook", "--agent", AGENT], { cwd: root });
+  if (r.code !== 0) {
+  	console.error(
+  		`rulemux-dsh: \`rulemux sync --hook --agent ${AGENT}\` failed in ${root} ` +
+  			`(exit ${r.code ?? "n/a"}). Skills are not synced; rules are unaffected.\n` +
+  			`  ${tail(r.err || r.out) || r.error?.message || "no output"}`,
+  	);
+  }
+  return r.code === 0;
+  }
 
 /** The directory a session is working in (dsh records it on the session header). */
 function workspaceRoot(agent) {
@@ -443,17 +480,23 @@ function stillInContext(session) {
 }
 
 /** Per-session state, built once per session id (one dsh process serves many sessions). */
-const sessions = new Map(); // sessionId -> { root, ready, injected, observed }
+const sessions = new Map(); // sessionId -> { root, ready, injected, observed, skillsSync }
 
 function stateFor(agent) {
-  const id = agent?.session?.header?.id;
-  if (!id) return undefined;
-  let s = sessions.get(id);
-  if (!s) {
-    s = { root: workspaceRoot(agent), ready: null, injected: false, observed: false };
-    sessions.set(id, s);
-  }
-  return s;
+	const id = agent?.session?.header?.id;
+	if (!id) return undefined;
+	let s = sessions.get(id);
+	if (!s) {
+		s = {
+			root: workspaceRoot(agent),
+			ready: null,
+			injected: false,
+			observed: false,
+			skillsSync: null, // one skills sync per session (started at session-start)
+		};
+		sessions.set(id, s);
+	}
+	return s;
 }
 
 /**
@@ -463,11 +506,24 @@ function stateFor(agent) {
  * first pre-step.
  */
 function startReady(state) {
-  if (!state.ready) {
-    state.ready = provisionOnce();
-    state.ready.catch(() => {});
-  }
-  return state.ready;
+	if (!state.ready) {
+		state.ready = provisionOnce();
+		state.ready.catch(() => {});
+	}
+	return state.ready;
+}
+
+/**
+ * Kick off (or reuse) the one-per-session skills sync. Unlike readiness it never rejects: a failed
+ * sync is logged inside syncSkillsFromCli and resolves false, so the catch here is a pure backstop.
+ * The copy started at session-start is awaited at the first turn — that is what makes "the first
+ * model step sees the skills" deterministic instead of racy.
+ */
+function startSkillsSync(state, cli) {
+	if (!state.skillsSync) {
+		state.skillsSync = syncSkillsFromCli(state.root, cli).catch(() => false);
+	}
+	return state.skillsSync;
 }
 
 // TEMP canary — drop once the dsh integration is confirmed on a real machine. It answers the one
@@ -495,9 +551,14 @@ export function apply(ctx) {
   });
 
   ctx.on("agent/session-start", ({ agent }) => {
-    loadCanary("agent/session-start");
-    const state = stateFor(agent);
-    if (state) startReady(state); // fallback (if apply was never called): readiness ahead of turn 1
+  	loadCanary("agent/session-start");
+  	const state = stateFor(agent);
+  	if (!state) return;
+  	startReady(state); // fallback (if apply was never called): readiness ahead of turn 1
+  	// Skills sync starts as soon as readiness resolves — fire-and-forget here; the first
+  	// pre-step awaits the very same promise. If readiness fails there is no usable CLI to sync
+  	// with either, and the pre-step surfaces that error exactly as it always did.
+  	startReady(state).then(({ cli }) => startSkillsSync(state, cli));
   });
 
   ctx.on("agent/pre-step", async ({ agent, signal }, next) => {
@@ -528,6 +589,10 @@ export function apply(ctx) {
     // The three readiness steps are a hard prerequisite. A rejection here is meant to surface as a
     // visible session error (see the file header) — so it is deliberately not caught.
     const { cli } = await startReady(state);
+
+    // Skills must be on disk before the first model step reads them; the sync usually finished
+    // during session-start already — awaiting here is the backstop, and a no-op when it did.
+    await startSkillsSync(state, cli);
 
     const text = await rulesFromCli(state.root, cli);
     if (!text) {

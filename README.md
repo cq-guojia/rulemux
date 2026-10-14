@@ -122,26 +122,32 @@ directory and hook location have been confirmed by a real canary test. Today:
 | **trae** (Trae CN) | Tier-1 (real copy) | `.trae/rules/` | not yet | ✅ **Verified — installable** (2026-10-09 canary: user-level hook `~/.trae-cn/hooks.json`; the international `~/.trae` build is not wired yet) |
 | codex | Tier-2 (injection) | none — injects into context | not yet | ⚠️ registered, **not verified yet** |
 | opencode | Tier-2 (injection) | none — injects into context | not yet | ⚠️ registered, **not verified yet** |
-| **dsh** (DeepSeek Harness) | Tier-2 (injection) | none — injects into context | not yet | ✅ **Verified — installable**; delivery is a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only renders the text with `inject`, and writes nothing into your workspace) |
+| **dsh** (DeepSeek Harness) | Tier-2 (injection) | none — injects into context | `.dsh/skills/`; user-level `~/.dsh/skills/` | ✅ **Verified — installable**; rules are delivered by a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only renders the text with `inject`, and writes nothing into your workspace for rules). Skills are real copies into the native skills dirs, synced by the same plugin at session start (2026-10-14, source-verified against `deepseek-ai/deepseek-harness`) |
 
 - `rulemux init` **refuses** any agent that is not verified — it will not half-install an adapter
   whose behaviour has not been proven. `rulemux doctor` marks unverified agents with ⚠.
-- **Skill injection (shipped 2026-10-12, codebuddy / workbuddy only)**: declare local skill directories
-  with `[[skill_source]]`; they are really copied into `.codebuddy/skills/` (as
-  `__rulemux__<skill-name>/` — your own skills are never touched). With `scope = "user"` they land in
-  the **user-level (global)** directories. Rules and skills both support the dual scope; see §5.4.
-  trae / dsh / claude / codex / opencode do not take skills yet.
+- **Skill injection (shipped 2026-10-12, codebuddy / workbuddy; dsh added 2026-10-14)**: declare local
+  skill directories with `[[skill_source]]`; they are really copied into the agent's native skills
+  directory (as `__rulemux__<skill-name>/` — your own skills are never touched). With `scope = "user"`
+  they land in the **user-level (global)** directories. Rules and skills both support the dual scope;
+  see §5.4. trae / claude / codex / opencode do not take skills yet.
 - **Tier-2 is a deliberate downgrade** for agents that have no rules directory (they only read a
   single `AGENTS.md`). It injects via the session hook and never touches your own `AGENTS.md`, but
   it cannot satisfy the "never fades out" bar. See
   [design/features/hook-injection.md](docs/design/features/hook-injection.md).
-- **dsh is plugin-delivered, and nothing lands on disk**: it has no hook file and no rules directory,
-  so rulemux never writes into your workspace for it. A **separate plugin package** in this repo
+- **dsh is plugin-delivered: for rules nothing lands on disk, for skills real copies land in
+  `.dsh/skills/`**: it has no hook file and no rules directory, so rulemux never writes into your
+  workspace for rules. A **separate plugin package** in this repo
   ([`dsh-plugin/`](dsh-plugin/)) — on npm as `rulemux-dsh` — asks the CLI for the rules rendered for
   the session's workspace (`rulemux inject --agent dsh`) and injects that text once, on the first
   user turn. Install it the normal dsh way — `dsh plugin --profile web add rulemux-dsh` (or straight
   from git: `add "github:cq-guojia/rulemux#path:/dsh-plugin"`); `rulemux init --agent dsh` installs
   nothing — it just prints that command.
+  **Skills (2026-10-14)**: dsh does have a native skills subsystem (`.dsh/skills` in the workspace,
+  `~/.dsh/skills` user-level — both source-verified against `deepseek-ai/deepseek-harness`), so the
+  same plugin also runs `rulemux sync --hook --agent dsh` when a session starts and real copies land
+  there as `__rulemux__<skill-name>/`. Nothing else is written, and `.agents/skills` (a cross-framework
+  convention dir) is never touched.
   The plugin then **sets itself up as dsh starts** (restart dsh after installing): readiness is three
   steps and **all of them must hold** — the `rulemux` CLI is resolved *and* its version satisfies the
   plugin's minimum (an older one is upgraded with pnpm/npm and re-checked — never accepted as-is),
@@ -364,17 +370,25 @@ path = ["~/react-skills", "~/css-skills"]
   bundling keys `groups` (→ `[[skill_group]]`) and `workspace_groups` (→ `[[workspace_group]]`).
   `[[skill_group]]` bundles several skill root directories (`name` / `path` / `use`); nesting and
   cycle detection work exactly like file groups.
-- **Where they land (codebuddy / workbuddy only)**: workspace scope → `<workspace>/.codebuddy/skills/`
-  (shared by both apps); user scope → `~/.codebuddy/skills/` **and** `~/.workbuddy/skills/`
-  (both written, so both apps see it). Rules work the same way: `[[source]]` also accepts
-  `scope = "user"`, landing in `~/.codebuddy/rules/` + `~/.workbuddy/rules/`.
+- **Where they land**: workspace scope → the agent's native skills dir — `<workspace>/.codebuddy/skills/`
+  (shared by codebuddy and workbuddy) or `<git根>/.dsh/skills/` (dsh); user scope → `~/.codebuddy/skills/`
+  **and** `~/.workbuddy/skills/` (both written, so both apps see it) or `~/.dsh/skills/` (dsh).
+  Rules work the same way: `[[source]]` also accepts `scope = "user"`, landing in
+  `~/.codebuddy/rules/` + `~/.workbuddy/rules/`.
 - **Same discipline as rules**: the target is `__rulemux__<skill-name>/`; your own skills
   (no prefix) are never touched; removing a source removes its copies on the next sync; sources
   are only ever read.
 - **Local sources only in this version**; remote / git sources (tracking upstream updates) come later.
-- trae / dsh / claude / codex / opencode do not take skills yet.
+- trae / claude / codex / opencode do not take skills yet.
 - Skill add/change does **not** trigger the "start a new session" notice (hot-reload is still
   being verified); rule behaviour is unchanged.
+- **dsh skill frontmatter quirks** (2026-10-14, source-verified): dsh requires the frontmatter
+  `name` to match `^[a-z0-9]+(?:-[a-z0-9]+)*$` and rejects the legacy camelCase invocation keys
+  (`disableModelInvocation` / `modelInvocable` / `userInvocable`) by dropping the whole skill —
+  CodeBuddy accepts both. rulemux copies skills byte-for-byte and never rewrites content, so a
+  skill that loads in CodeBuddy may silently not load in dsh. CodeBuddy marketplace extras
+  (`display_name` / `description_zh` / `version` / `allowed-tools`) are simply ignored by dsh.
+  dsh also finds project skills relative to the **git root** (nearest `.git`), not your cwd.
 
 ### 5.5 The complete default config (annotated)
 
@@ -451,12 +465,16 @@ reproduced here one-to-one so you can read the whole thing before editing your c
 #     workspace_groups  Reference [[workspace_group]] bundles (workspaces are shared with rules).
 #     scope             Same as [[source]]: "workspace" (default) or "user".
 #
-#   Where they land (2026-10-12, verified against the CodeBuddy bundle):
+#   Where they land (dsh added 2026-10-14, verified against the deepseek-ai/deepseek-harness source):
 #     workspace scope → <ws>/.codebuddy/skills   (shared by codebuddy + workbuddy)
+#                      or <git-root>/.dsh/skills  (dsh; the git root, not your cwd)
 #     user scope      → ~/.codebuddy/skills AND ~/.workbuddy/skills (both written)
+#                      or ~/.dsh/skills           (dsh)
 #   Skills land as __rulemux__<skill-name>/ directories; your own skills are never
 #   touched, and removing a source removes its copies on the next sync.
-#   Other agents (trae / dsh / claude / codex / opencode) do not take skills yet.
+#   dsh never reads .agents/skills from rulemux — that dir is a cross-framework
+#   convention and stays untouched.
+#   Other agents (trae / claude / codex / opencode) do not take skills yet.
 #
 # --- Advanced: bundle things into "groups" to avoid repetition -------------------
 # Once you have many files, bundle your common files / workspaces into groups and
@@ -593,18 +611,22 @@ Run `rulemux` with no arguments for the full help.
 ## 8. Scope
 
 **The agent set is frozen.** rulemux supports exactly four agents, all confirmed by a real canary
-run: **codebuddy**, **workbuddy**, **trae** (Tier-1 — real copies) and **dsh** (Tier-2 — injection,
-delivered by its own plugin, nothing written into the workspace). `claude`, `codex` and `opencode`
+run: **codebuddy**, **workbuddy**, **trae** (Tier-1 — real copies) and **dsh** (Tier-2 rules —
+injection, delivered by its own plugin; Tier-1-style skills — real copies into `.dsh/skills`,
+synced by the same plugin). `claude`, `codex` and `opencode`
 stay registered but unverified, which is why `rulemux init` refuses them; there is no plan to finish
 them. (The checklist for adding an agent is kept for reference:
 [design/features/agent-onboarding.md](docs/design/features/agent-onboarding.md).)
 
 - **Distribution** — done: GitHub Actions cross-compiles the binaries and attaches them to a GitHub
   Release; the npm package is published **by hand** (see §9).
-- **Skill injection scope** (2026-10-12): **codebuddy / workbuddy only** — their skills directories
-  (workspace `.codebuddy/skills`, user-level `~/.codebuddy/skills` + `~/.workbuddy/skills`) are
-  confirmed against the shipped bundle plus live inspection; trae / dsh / claude / codex / opencode
-  skills directories are not verified yet, so they **do not take skills** — each opens up once proven.
+- **Skill injection scope** (2026-10-12 codebuddy / workbuddy; 2026-10-14 dsh): codebuddy /
+  workbuddy directories (workspace `.codebuddy/skills`, user-level `~/.codebuddy/skills` +
+  `~/.workbuddy/skills`) are confirmed against the shipped bundle plus live inspection; dsh
+  directories (`<git根>/.dsh/skills`, `~/.dsh/skills`) are confirmed source-level against
+  `deepseek-ai/deepseek-harness` (load canary pending on a real dsh). trae / claude / codex /
+  opencode skills directories are not verified yet, so they **do not take skills** — each opens up
+  once proven.
 - Rule content transformation, templating, and automatic self-update are **explicitly out of scope**
   ([design/requirements.md](docs/design/requirements.md) §五).
 - Remote / git skill sources (tracking upstream updates) and a `rulemux skill` subcommand —

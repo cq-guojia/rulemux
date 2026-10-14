@@ -813,10 +813,15 @@ func TestSyncBareReportListsOnlyInUseUninitialized(t *testing.T) {
 	}
 }
 
-// TestSyncHookTier2AgentWritesNothing 锁住 dsh 改注入后最关键的一条：`sync --hook --agent dsh`
-// 不再往工作区写任何东西——旧的 .dsh/rules 残留既不被改写也不被删（那段设计已作废，
-// 残留不强制清除），账本也不会记它（它不再靠目录型交付）。
-func TestSyncHookTier2AgentWritesNothing(t *testing.T) {
+// TestSyncHookDshWritesNoRulesButSkillsDir 锁 dsh hook sync（插件每会话触发）的双通道边界：
+//   - **规则侧零写入**：旧的 .dsh/rules 残留既不被改写也不被删（目录交接设计已作废，
+//     残留不强制清除），也没有任何新规则文件落进 .dsh/rules；
+//   - **skills 侧建目录**：.dsh/skills / ~/.dsh/skills 被建出来（无 skill 源时是空目录，
+//     与 codebuddy 同规律——hook 点名的 agent 可建自己的目录），账本记「落过盘」。
+//
+// 2026-10-14：规则改纯注入后本用例曾锁「什么都不写」；skills 通道落地后，规则侧结论不变、
+// skills 侧按新设计更新（外部事实见 docs/design/external/skill-ecosystem.md §三·再续）。
+func TestSyncHookDshWritesNoRulesButSkillsDir(t *testing.T) {
 	tmp := t.TempDir()
 	ws := filepath.Join(tmp, "ws")
 	legacy := filepath.Join(ws, ".dsh", "rules")
@@ -827,7 +832,8 @@ func TestSyncHookTier2AgentWritesNothing(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("stale\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	home := filepath.Join(tmp, "home")
+	t.Setenv("HOME", home)
 	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
 
 	src := filepath.Join(tmp, "a.md")
@@ -838,9 +844,11 @@ func TestSyncHookTier2AgentWritesNothing(t *testing.T) {
 
 	_ = captureStdout(t, func() {
 		if code := Sync([]string{"--hook", "--agent", "dsh", "--config", cfgPath, "--workspace", ws}); code != 0 {
-			t.Fatalf("sync --hook --agent dsh 应安静成功（什么也不做），实得 %d", code)
+			t.Fatalf("sync --hook --agent dsh 应安静成功，实得 %d", code)
 		}
 	})
+
+	// 规则侧：旧残留一个字节不动，.dsh/rules 里也不该有新文件
 	b, err := os.ReadFile(stale)
 	if err != nil {
 		t.Fatalf("旧残留文件不该被删：%v", err)
@@ -848,9 +856,78 @@ func TestSyncHookTier2AgentWritesNothing(t *testing.T) {
 	if strings.TrimSpace(string(b)) != "stale" {
 		t.Fatalf("旧残留文件不该被改写，实得 %q", b)
 	}
-	if got := state.Load().AgentsFor(ws); len(got) != 0 {
-		t.Fatalf("Tier-2 注入型不该进账本，实得 %v", got)
+	if entries, err := os.ReadDir(legacy); err != nil || len(entries) != 1 {
+		t.Fatalf(".dsh/rules 里只该有那条旧残留，实得 %v (err=%v)", entries, err)
 	}
+	// skills 侧：双域目录被建（无 skill 源 ⇒ 空目录），与 codebuddy 同规律
+	mustExist(t, filepath.Join(ws, ".dsh", "skills"))
+	mustExist(t, filepath.Join(home, ".dsh", "skills"))
+	// skills 落过盘 ⇒ 账本记 dsh（uninstall 回访清理的依据）
+	if got := state.Load().AgentsFor(ws); len(got) != 1 || got[0] != "dsh" {
+		t.Fatalf("dsh skills 落盘后应进账本，实得 %v", got)
+	}
+}
+
+// TestSyncDshGitRootAlignment 校验 dsh 的 git 根对齐：宿主按「最近的 .git」定项目根
+// （findProjectRoot，源码级见 docs/design/external/skill-ecosystem.md §三·再续）⇒
+// 会话开在仓库子目录时，sync 必须把 skills 落到 **git 根**的 .dsh/skills；写进子目录
+// 宿主永远扫不到，且失败是静默的。非 git 目录回退原样。
+// 插件 spawn 时不传 --workspace（cwd=会话目录），故本用例同样不传，靠 Getwd 定位。
+func TestSyncDshGitRootAlignment(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")        // git 根
+	sub := filepath.Join(repo, "src", "deep") // 会话开在子目录
+	plain := filepath.Join(tmp, "plain")      // 非 git 工作区
+	for _, d := range []string{sub, plain} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(tmp, "home")
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+
+	skillSrc := filepath.Join(tmp, "skills")
+	if err := os.MkdirAll(skillSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mkTestSkill(t, skillSrc, "alpha")
+	cfgPath := writeConfig(t, tmp, "[[skill_source]]\npath = [\""+skillSrc+"\"]\nagents = [\"dsh\"]\n")
+
+	// 会话开在 git 仓库的子目录 ⇒ 落到 git 根的 .dsh/skills，子目录什么都不写。
+	// 插件 spawn 时不传 --workspace（cwd=会话目录），故本用例同样不传，靠 Getwd 定位
+	// （module 是 go1.22，没有 t.Chdir，用 os.Chdir + Cleanup 恢复）。
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	if err := os.Chdir(sub); err != nil {
+		t.Fatal(err)
+	}
+	_ = captureStdout(t, func() {
+		if code := Sync([]string{"--config", cfgPath, "--hook", "--agent", "dsh"}); code != 0 {
+			t.Fatalf("sync 应成功，实得 %d", code)
+		}
+	})
+	mustExist(t, filepath.Join(repo, ".dsh", "skills", "__rulemux__alpha", "SKILL.md"))
+	if _, err := os.Stat(filepath.Join(sub, ".dsh")); !os.IsNotExist(err) {
+		t.Fatalf("子目录不该被写（宿主按 git 根扫描），stat err=%v", err)
+	}
+
+	// 非 git 目录 ⇒ 回退原样（cwd 即落点）
+	if err := os.Chdir(plain); err != nil {
+		t.Fatal(err)
+	}
+	_ = captureStdout(t, func() {
+		if code := Sync([]string{"--config", cfgPath, "--hook", "--agent", "dsh"}); code != 0 {
+			t.Fatalf("sync 应成功，实得 %d", code)
+		}
+	})
+	mustExist(t, filepath.Join(plain, ".dsh", "skills", "__rulemux__alpha", "SKILL.md"))
 }
 
 // notInitLine 从 sync 报告里抽出「not initialized:」那一行（测试辅助）。
