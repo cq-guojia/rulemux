@@ -109,7 +109,7 @@ rulemux **每个 agent 一套适配器**；只有「规则目录 + 钩子落点�
 | **trae**（Trae CN） | Tier-1（真实拷贝） | `.trae/rules/` | 暂不支持 | ✅ **已验证，可安装**（2026-10-09 canary 坐实：用户级钩子 `~/.trae-cn/hooks.json`；国际版目录 `~/.trae` 尚未接入） |
 | codex | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
 | opencode | Tier-2（注入） | 无 —— 注入上下文 | 暂不支持 | ⚠️ 已注册，**尚未验证** |
-| **dsh**（DeepSeek Harness） | Tier-2（注入） | 无 —— 注入上下文 | `.dsh/skills/`；用户级 `~/.dsh/skills/` | ✅ **已验证，可安装**；规则由**独立的 dsh 插件**交付 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责用 `inject` 渲染文本，规则零产物）。skill 是真实拷贝进原生 skills 目录，由同一插件在会话启动时同步（2026-10-14，对 `deepseek-ai/deepseek-harness` 源码级坐实） |
+| **dsh**（DeepSeek Harness） | Tier-2（注入） | 无 —— 注入上下文 | `.dsh/skills/`；用户级 `~/.dsh/skills/` | ✅ **已验证，可安装**；规则由**独立的 dsh 插件**交付 —— 用 `dsh plugin --profile <p> add rulemux-dsh` 安装（rulemux 只负责用 `inject` 渲染文本，规则零产物）。skill 是真实拷贝进原生 skills 目录，由同一插件在会话启动时同步（2026-10-14 对 `deepseek-ai/deepseek-harness` 源码级坐实，2026-10-15 真机验收通过） |
 
 - `rulemux init` **会拒绝**未验证的 agent —— 不会给你装一个行为未经验证的半成品。
   `rulemux doctor` 会给未验证的 agent 标 ⚠。
@@ -561,9 +561,9 @@ skill 副本则照常收敛（只删 `__rulemux__` 前缀内容，目录保留�
 - **skill 注入的支持范围**（2026-10-12 codebuddy / workbuddy；2026-10-14 dsh）：codebuddy /
   workbuddy 的 skills 目录（工作区 `.codebuddy/skills`、用户级 `~/.codebuddy/skills` +
   `~/.workbuddy/skills`）已经 bundle 代码级 + 本机实测坐实；dsh 的 skills 目录
-  （`<git根>/.dsh/skills`、`~/.dsh/skills`）已对 `deepseek-ai/deepseek-harness` 源码级坐实
-  （真机装载 canary 待补）；trae / claude / codex / opencode 的 skills 目录尚未实测，
-  **暂不支持**，坐实一家开一家。
+  （`<git根>/.dsh/skills`、`~/.dsh/skills`）已对 `deepseek-ai/deepseek-harness` 源码级坐实，
+  **2026-10-15 真机验收通过**（用户实测：前缀技能落盘即装载）；trae / claude / codex / opencode
+  的 skills 目录尚未实测，**暂不支持**，坐实一家开一家。
 - **分发** —— 已完成：GitHub Actions 交叉编译二进制并挂到 GitHub Release；npm 包随 tag **自动发布**（见 §9）。
 - 规则内容改写 / 模板渲染、以及自动自我更新，**明确不做**
   （[`docs/design/requirements.md`](docs/design/requirements.md) §五）。

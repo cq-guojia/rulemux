@@ -122,7 +122,7 @@ directory and hook location have been confirmed by a real canary test. Today:
 | **trae** (Trae CN) | Tier-1 (real copy) | `.trae/rules/` | not yet | ✅ **Verified — installable** (2026-10-09 canary: user-level hook `~/.trae-cn/hooks.json`; the international `~/.trae` build is not wired yet) |
 | codex | Tier-2 (injection) | none — injects into context | not yet | ⚠️ registered, **not verified yet** |
 | opencode | Tier-2 (injection) | none — injects into context | not yet | ⚠️ registered, **not verified yet** |
-| **dsh** (DeepSeek Harness) | Tier-2 (injection) | none — injects into context | `.dsh/skills/`; user-level `~/.dsh/skills/` | ✅ **Verified — installable**; rules are delivered by a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only renders the text with `inject`, and writes nothing into your workspace for rules). Skills are real copies into the native skills dirs, synced by the same plugin at session start (2026-10-14, source-verified against `deepseek-ai/deepseek-harness`) |
+| **dsh** (DeepSeek Harness) | Tier-2 (injection) | none — injects into context | `.dsh/skills/`; user-level `~/.dsh/skills/` | ✅ **Verified — installable**; rules are delivered by a **separate dsh plugin** — install it with `dsh plugin --profile <p> add rulemux-dsh` (rulemux only renders the text with `inject`, and writes nothing into your workspace for rules). Skills are real copies into the native skills dirs, synced by the same plugin at session start (source-verified 2026-10-14 against `deepseek-ai/deepseek-harness`, verified on a real dsh 2026-10-15) |
 
 - `rulemux init` **refuses** any agent that is not verified — it will not half-install an adapter
   whose behaviour has not been proven. `rulemux doctor` marks unverified agents with ⚠.
@@ -623,10 +623,10 @@ them. (The checklist for adding an agent is kept for reference:
 - **Skill injection scope** (2026-10-12 codebuddy / workbuddy; 2026-10-14 dsh): codebuddy /
   workbuddy directories (workspace `.codebuddy/skills`, user-level `~/.codebuddy/skills` +
   `~/.workbuddy/skills`) are confirmed against the shipped bundle plus live inspection; dsh
-  directories (`<git根>/.dsh/skills`, `~/.dsh/skills`) are confirmed source-level against
-  `deepseek-ai/deepseek-harness` (load canary pending on a real dsh). trae / claude / codex /
-  opencode skills directories are not verified yet, so they **do not take skills** — each opens up
-  once proven.
+  directories (`<git-root>/.dsh/skills`, `~/.dsh/skills`) are confirmed source-level against
+  `deepseek-ai/deepseek-harness` **and verified on a real dsh 2026-10-15** (user acceptance:
+  prefixed skills land and load). trae / claude / codex / opencode skills directories are not
+  verified yet, so they **do not take skills** — each opens up once proven.
 - Rule content transformation, templating, and automatic self-update are **explicitly out of scope**
   ([design/requirements.md](docs/design/requirements.md) §五).
 - Remote / git skill sources (tracking upstream updates) and a `rulemux skill` subcommand —

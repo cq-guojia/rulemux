@@ -1,5 +1,6 @@
 # 20261013-1133-v2-trae-dsh-skill-注入-剩余-canary-git-skill-eec8：v2：Trae/dsh skill 注入 + 剩余 canary + git skill 源
 
+> **✅ 完成封卷**：2026-10-15 00:05:48（@GuoJia-Agent）
 > **创建**：2026-10-13 11:33:51（@GuoJia-Agent）
 
 ## 背景
@@ -31,11 +32,12 @@ codebuddy/workbuddy 装载逻辑同类；规则侧才是纯插件注入。用户
 - [x] 发版配对（2026-10-14）：CLI `v0.5.0` + 插件 `dsh-v0.5.0` 双 tag 已推（AGENTS.md §5，
       commit `30a281c`）。CI 发布后：`npm i -g rulemux@0.5.0`，插件装 `rulemux-dsh@0.5.0`
       （旧版插件会把 CLI 自动升到 latest；新版插件地板 `>=0.5.0`）
-- [ ] **待用户验收（真机 dsh）**：装 CLI 0.5.0 + 插件 0.5.0，配 `[[skill_source]]`（agents=["dsh"]），
-      开会话看 `<git根>/.dsh/skills` 是否出现 `__rulemux__<技能名>/` 且 `/` 面板 Skills 分组可见
-- [ ] 真机 canary 四项（verification.md「skill 装载 canary（dsh）」）：① `__rulemux__` 前缀目录真装载；
-      ② 会话中 sync 的热重载时序；③ `~/.dsh/skills` 用户级装载；④ `DSH_HOME` 错位
-- [ ] Trae skills 接入（本任务另一条线，未排期）
+- [x] **用户验收（2026-10-15，真机 dsh）**：装 CLI 0.5.0 + 插件 0.5.0，配 `[[skill_source]]`
+      （agents=["dsh"]）开会话，`<git根>/.dsh/skills` 落 `__rulemux__<技能名>/` 且被装载。
+      用户原话：「测了，目前看应该没问题」
+- [ ] 真机 canary 细分项（仍未单独验证）：② 会话中 sync 的热重载时序；③ `~/.dsh/skills`
+      用户级装载；④ `DSH_HOME` 错位（已知限制，已文档标注）
+- [ ] Trae skills 接入（未排期，移交后续任务）
 - [ ] git/远程 skill 源（S3）与 `rulemux skill` 子命令（后续版本）
 
 ## 下一步
@@ -78,9 +80,16 @@ codebuddy/workbuddy 装载逻辑同类；规则侧才是纯插件注入。用户
   插件宿主测试 `node --test` 7/7。基础代码检查：本环境未装 koc-codelint skill，
   按同等口径手工过（bash -n / node --check / gofmt -l / go vet / 缓存残留 / 疑似密钥扫描）。
 
-### 三、canary 结果（待用户真机测试后回填）
+### 三、canary 结果（2026-10-15 用户真机验收）
 
-<!-- 四项 canary 的实测结果写这里：通过/失败 + 证据（会话截图/目录列表/dsh 日志行） -->
+| 项 | 结果 |
+|---|---|
+| ① `__rulemux__` 前缀目录真装载 | ✅ **通过**（2026-10-15）：CLI 0.5.0 + 插件 0.5.0，`[[skill_source]]`（agents=["dsh"]）开会话，`<git根>/.dsh/skills` 出现 `__rulemux__<技能名>/`，`/` 面板 Skills 分组可见。用户验收原话：「测了，目前看应该没问题」 |
+| ② 会话中 sync 的热重载时序 | 🔴 未单独验证（基本链路已覆盖「落盘即装载」；精确认知需专门一测） |
+| ③ `~/.dsh/skills` 用户级装载 | 🔴 未单独实测（落点源码级坐实，用户验收走的是工作区级链路） |
+| ④ `DSH_HOME` 错位 | 🔴 未验证（已知限制，已文档标注，未修） |
+
+②③④ 的判据与后果见 docs/design/features/verification.md「skill 装载 canary（dsh）」。
 
 ## 结论
 
@@ -93,9 +102,11 @@ codebuddy/workbuddy 装载逻辑同类；规则侧才是纯插件注入。用户
    CLI 侧 git 根对齐消除「子目录会话静默不生效」。
 4. 文档全部回写（外部事实源码级 + 设计 + canary + README 中英）。
 
-**留的坑（移交用户验收 / 后续）**：
+**留的坑（移交后续）**：
 
-- 真机 canary 四项未做（见「下一步」）；`DSH_HOME` 覆盖时 rulemux 写死 `~/.dsh` 会错位
-  （与 codebuddy `CODEBUDDY_CONFIG_DIR` 同类，已文档标注，未修）。
+- 真机 canary 细分项：② 会话中 sync 的热重载时序、③ `~/.dsh/skills` 用户级装载未单独验证；
+  ④ `DSH_HOME` 覆盖时 rulemux 写死 `~/.dsh` 会错位（与 codebuddy `CODEBUDDY_CONFIG_DIR`
+  同类，已文档标注，未修）。
 - dsh frontmatter 比 CodeBuddy 严（name 正则、旧驼峰调用键丢整个技能）——只警示、不改写内容。
-- Trae skills 接入、git/远程 skill 源（S3）、`rulemux skill` 子命令：后续版本。
+- **Trae skills 接入、git/远程 skill 源（S3）、`rulemux skill` 子命令未包含在本包**
+  （本任务标题含这三项，但用户 2026-10-15 验收范围仅为 dsh skills）⇒ 需另立任务续做。

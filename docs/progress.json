@@ -1,14 +1,3 @@
 {
-  "tasks": {
-    "20261013-1133-v2-trae-dsh-skill-注入-剩余-canary-git-skill-eec8": {
-      "created": "2026-10-13 11:33:51",
-      "creator": "GuoJia-Agent",
-      "finished": null,
-      "owner": "GuoJia-Agent",
-      "started": "2026-10-13 11:33:51",
-      "status": "doing",
-      "title": "v2：Trae/dsh skill 注入 + 剩余 canary + git skill 源",
-      "worklog": "worklog/202610/13-1133-v2-trae-dsh-skill-注入-剩余-canary-git-skill-eec8.md"
-    }
-  }
+  "tasks": {}
 }

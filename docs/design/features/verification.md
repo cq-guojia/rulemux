@@ -34,12 +34,17 @@ name+description、按名调用才读全文），验证法不同 —— dsh 以�
    （`SKILL.md` frontmatter 带暗号 description），新开会话输入 `/` 看命令面板 Skills 分组里
    有没有它、按名调用后模型能否念出暗号。源码级判据：发现名取自 frontmatter `name`、目录名不校验
    （`isSkillName`，external/skill-ecosystem.md §三·再续）⇒ 预期通过，此步是坐实而非证伪。
+   ✅ **2026-10-15 真机通过（用户验收）**：CLI 0.5.0 + 插件 0.5.0，配 `[[skill_source]]`
+   （agents=["dsh"]）开会话，`<git根>/.dsh/skills` 落 `__rulemux__<技能名>/` 且被装载。
 2. **会话中落盘的热重载时序**：会话开始后再触发一次 `rulemux sync --hook --agent dsh`
    （新增/改一个 `__rulemux__` 技能），不问重启、看本会话能否发现。依据：dsh 每根挂 chokidar
    watcher（`depth:1`）；嵌套 `SKILL.md` 变更的覆盖深度是待验点。
+   🔴 未单独验证（基本链路已覆盖「落盘即装载」；精确认知需专门一测）。
 3. **用户级装载**：`~/.dsh/skills` 放技能，任意工作区会话都能看到（rank 400 全局根）。
+   🔴 未单独验证（落点源码级坐实；用户验收走的是工作区级链路）。
 4. **`DSH_HOME` 错位**：设了 `DSH_HOME` 时 rulemux 仍写 `~/.dsh/skills` ⇒ 预期**看不到**。
    若坐实，按 codebuddy `CODEBUDDY_CONFIG_DIR` 的先例决定是否让 dsh 用户级目录跟随 env。
+   🔴 未验证（已知限制，已文档标注：external/skill-ecosystem.md §六、skill-sync.md §7.6）。
 
 > 通过标准：1/3 不过 ⇒ 落点判据有错，回 external 文档复核；2 不过 ⇒ 技能变更需要「重启 dsh」
 > 提示（当前 skill 变化不提示的 shortcut 按 per-agent 判据补）；4 不过 ⇒ 记录为已知限制（先不修）。

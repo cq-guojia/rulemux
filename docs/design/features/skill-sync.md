@@ -161,11 +161,12 @@ rulemux 只做字节拷贝、不改内容 ⇒ 上述差异是用户写技能时�
 
 ### 7.6 剩余 canary（🔴，真机 dsh，挂 v2 任务）
 
-1. `__rulemux__` 前缀目录真被装载（源码级高可信，仍建议验一次）；
-2. 会话中 sync 落盘的热重载时序（watcher `depth:1` 对嵌套 `SKILL.md` 变更的覆盖）；
-3. `~/.dsh/skills` 用户级装载；
+1. ~~`__rulemux__` 前缀目录真被装载~~ —— ✅ **2026-10-15 真机通过（用户验收）**：CLI 0.5.0 +
+   插件 0.5.0，`[[skill_source]]`（agents=["dsh"]）开会话，前缀技能落盘即装载；
+2. 会话中 sync 落盘的热重载时序（watcher `depth:1` 对嵌套 `SKILL.md` 变更的覆盖）——🔴 未单独验证；
+3. `~/.dsh/skills` 用户级装载——🔴 未单独实测（落点源码级坐实）；
 4. `DSH_HOME` 被设置时 rulemux 写死 `~/.dsh` 的错位（与 codebuddy 的 `CODEBUDDY_CONFIG_DIR` 同类；
-   shortcut：先文档标注，有需求再按 env 跟随）。
+   shortcut：先文档标注，有需求再按 env 跟随）——🔴 未验证，已知限制。
 
 ### 7.7 发布配对（AGENTS.md §5）
 
