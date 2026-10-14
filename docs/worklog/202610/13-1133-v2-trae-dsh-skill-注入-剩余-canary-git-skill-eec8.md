@@ -27,16 +27,20 @@ codebuddy/workbuddy 装载逻辑同类；规则侧才是纯插件注入。用户
       features/verification.md（dsh canary 四项）、README 中英双份（矩阵/§2/§5.4/§5.5/§8）
 - [x] 代码：registry.go dsh 双域落点 + 注释；sync.go 放开 Tier-2 skills + git 根对齐；
       dsh-plugin sync 触发 + REQUIRED_CLI 抬版 + README 改口
-- [x] 测试：registry/skill_sync/sync 单测 + smoke.sh dsh 步骤；go build/vet/test + smoke 全绿
-- [ ] 发版配对：CLI `v0.5.0` + 插件 `dsh-v0.5.0`（AGENTS.md §5；用户 2026-10-14 指指令发 tag 后由用户测试）
-- [ ] 真机 canary 四项（用户机器/容器 dsh）：① `__rulemux__` 前缀目录真装载；
+- [x] 测试：registry/skill_sync/sync 单测 + git 根解析用例 + smoke.sh dsh 步骤；go build/vet/test + smoke 全绿
+- [x] 发版配对（2026-10-14）：CLI `v0.5.0` + 插件 `dsh-v0.5.0` 双 tag 已推（AGENTS.md §5，
+      commit `30a281c`）。CI 发布后：`npm i -g rulemux@0.5.0`，插件装 `rulemux-dsh@0.5.0`
+      （旧版插件会把 CLI 自动升到 latest；新版插件地板 `>=0.5.0`）
+- [ ] **待用户验收（真机 dsh）**：装 CLI 0.5.0 + 插件 0.5.0，配 `[[skill_source]]`（agents=["dsh"]），
+      开会话看 `<git根>/.dsh/skills` 是否出现 `__rulemux__<技能名>/` 且 `/` 面板 Skills 分组可见
+- [ ] 真机 canary 四项（verification.md「skill 装载 canary（dsh）」）：① `__rulemux__` 前缀目录真装载；
       ② 会话中 sync 的热重载时序；③ `~/.dsh/skills` 用户级装载；④ `DSH_HOME` 错位
 - [ ] Trae skills 接入（本任务另一条线，未排期）
 - [ ] git/远程 skill 源（S3）与 `rulemux skill` 子命令（后续版本）
 
 ## 下一步
 
-1. 用户已在真机 dsh 测试：装 `rulemux-dsh@0.5.0` + CLI 0.5.0，配 `[[skill_source]]`（agents=["dsh"]），
+1. **待用户在真机 dsh 验收**：装 `rulemux-dsh@0.5.0` + CLI 0.5.0，配 `[[skill_source]]`（agents=["dsh"]），
    开会话看 `<git根>/.dsh/skills` 是否出现 `__rulemux__<技能名>/` 且 `/` 面板 Skills 分组可见；
 2. canary 四项按 verification.md「skill 装载 canary（dsh）」逐项过，结果回填本文件「过程」§三；
 3. Trae 线：`.trae/skills` 工作区 canary + intl `~/.trae/skills` 探测（external/skill-ecosystem.md §六-3）。
@@ -70,7 +74,9 @@ codebuddy/workbuddy 装载逻辑同类；规则侧才是纯插件注入。用户
   （rules 零写入不变，skills 落 `.dsh/skills`/`~/.dsh/skills`）。
 - 测试：registry 断言 dsh 双域；skill_sync 加「Tier-2 + SkillsDir 落盘」与 create 门禁用例；
   sync 加 git 根解析用例（仓库根/子目录/非 git 回退）；smoke.sh 加 dsh skills 端到端步。
-- 验证：`go build ./...` / `go vet ./...` / `go test ./...` / `scripts/smoke.sh` 全绿；koc-codelint 通过。
+- 验证：`go build ./...` / `go vet ./...` / `go test ./...` / `scripts/smoke.sh` 全绿；
+  插件宿主测试 `node --test` 7/7。基础代码检查：本环境未装 koc-codelint skill，
+  按同等口径手工过（bash -n / node --check / gofmt -l / go vet / 缓存残留 / 疑似密钥扫描）。
 
 ### 三、canary 结果（待用户真机测试后回填）
 
@@ -78,4 +84,18 @@ codebuddy/workbuddy 装载逻辑同类；规则侧才是纯插件注入。用户
 
 ## 结论
 
-<!-- 结案时填：做成了什么、留了什么坑 -->
+**已交付（2026-10-14，commit `30a281c`，双 tag `v0.5.0` / `dsh-v0.5.0` 已推）**：
+
+1. dsh skills 通道落地：工作区 `<git根>/.dsh/skills`（rank 100）、用户级 `~/.dsh/skills`（400），
+   不写 `.agents/skills`；规则侧维持 Tier-2 纯注入（零写入）——两条通道互不影响。
+2. 引擎零改动：`__rulemux__` 前缀在 dsh 下安全（发现名取自 frontmatter name，目录名不校验）。
+3. 触发：插件 session-start 发起 + 首轮 pre-step await 兜底 `sync --hook --agent dsh`；
+   CLI 侧 git 根对齐消除「子目录会话静默不生效」。
+4. 文档全部回写（外部事实源码级 + 设计 + canary + README 中英）。
+
+**留的坑（移交用户验收 / 后续）**：
+
+- 真机 canary 四项未做（见「下一步」）；`DSH_HOME` 覆盖时 rulemux 写死 `~/.dsh` 会错位
+  （与 codebuddy `CODEBUDDY_CONFIG_DIR` 同类，已文档标注，未修）。
+- dsh frontmatter 比 CodeBuddy 严（name 正则、旧驼峰调用键丢整个技能）——只警示、不改写内容。
+- Trae skills 接入、git/远程 skill 源（S3）、`rulemux skill` 子命令：后续版本。
