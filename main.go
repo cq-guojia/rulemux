@@ -38,6 +38,7 @@ USAGE:
   rulemux doctor    [--config <path>] [--workspace <dir>]                  Environment self-check
   rulemux verify    [--agent <id>] [--clean] [--config <path>] [--workspace <dir>]  Canary acceptance test
   rulemux uninstall --agent <id[,id...]> | --off | --all [--yes]           Remove rulemux hooks and synced files
+  rulemux skill      list | update [<key>|--all]                           Manage staged skill sources (git/npm)
 
 `)
 	fmt.Fprint(os.Stderr, "SUPPORTED AGENTS (only these can be installed):\n")
@@ -89,6 +90,8 @@ func main() {
 		os.Exit(cmd.Verify(args[1:]))
 	case "uninstall":
 		os.Exit(cmd.Uninstall(args[1:]))
+	case "skill":
+		os.Exit(cmd.Skill(args[1:]))
 	default:
 		fmt.Fprintf(os.Stderr, "rulemux: unknown subcommand %q\n\n", args[0])
 		usage()

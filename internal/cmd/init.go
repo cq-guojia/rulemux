@@ -79,7 +79,8 @@ const exampleConfig = `# rulemux configuration file
 #   [[skill_source]] fields:
 #     path              Skill root directory(ies) — every child directory that contains a
 #                       SKILL.md is one skill (a path that itself contains SKILL.md is
-#                       treated as a single skill). Local paths only in this version.
+#                       treated as a single skill). A local dir, gh:owner/repo or a full git
+#                       URL (cloned to ~/.rulemux/skills/ on first sync), or npm:<package>.
 #     agents            Same as [[source]]: omitted = every supported agent.
 #     workspace         Same as [[source]] (workspace scope only; ignored when scope="user").
 #     groups            Reference [[skill_group]] bundles (same idea as [[source]].groups):
@@ -173,6 +174,14 @@ const exampleConfig = `# rulemux configuration file
 # path = ["/abs/path/to/global-skills"]
 # scope = "user"                       # user-level (global): lands in ~/.codebuddy/skills
 #                                       # and ~/.workbuddy/skills, in every workspace
+
+# [[skill_source]]                      # remote source: fetched once on first sync
+# path = ["gh:anthropics/skills"]       # GitHub shorthand (HTTPS); also a full git URL
+#                                       # (git@host:owner/repo.git = SSH) or npm:<package>
+# agents = ["codebuddy", "trae"]
+
+# fetch_timeout = "30s"                 # top-level: max time a remote fetch may take on the
+#                                       # first sync before it warns and skips (hook path)
 
 # [[skill_group]]                      # bundle skill roots so several sources can reuse them
 # name = "frontend"

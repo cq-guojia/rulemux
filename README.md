@@ -379,7 +379,14 @@ path = ["~/react-skills", "~/css-skills"]
 - **Same discipline as rules**: the target is `__rulemux__<skill-name>/`; your own skills
   (no prefix) are never touched; removing a source removes its copies on the next sync; sources
   are only ever read.
-- **Local sources only in this version**; remote / git sources (tracking upstream updates) come later.
+- **Remote / market sources** (`path` takes more than a local dir): `gh:owner/repo` or a full git URL
+  (`git@host:owner/repo.git` = SSH, `https://…` = HTTPS) is `git clone`d into
+  `~/.rulemux/skills/<owner>-<repo>/` on the first sync; `npm:<package>` is `npm pack`ed and unpacked
+  there. After the first fetch it is treated as a local dir (zero network on later syncs). Transport
+  (SSH vs HTTPS) is whatever the URL you wrote implies — rulemux never picks for you. Inspect with
+  `rulemux skill list`; upgrade with `rulemux skill update <key>` / `--all` (git pull / npm re-pack, in
+  place — manual only, never in the hook). Top-level `fetch_timeout = "30s"` caps how long a first-time
+  fetch may run before it warns and skips on the hook path.
 - claude / codex / opencode do not take skills yet; trae takes skills (CN).
 - Skill add/change does **not** trigger the "start a new session" notice (hot-reload is still
   being verified); rule behaviour is unchanged.
@@ -458,7 +465,8 @@ reproduced here one-to-one so you can read the whole thing before editing your c
 #   [[skill_source]] fields:
 #     path              Skill root directory(ies) — every child directory that contains a
 #                       SKILL.md is one skill (a path that itself contains SKILL.md is
-#                       treated as a single skill). Local paths only in this version.
+#                       treated as a single skill). A local dir, gh:owner/repo or a full git
+#                       URL (cloned to ~/.rulemux/skills/ on first sync), or npm:<package>.
 #     agents            Same as [[source]]: omitted = every supported agent.
 #     workspace         Same as [[source]] (workspace scope only; ignored when scope="user").
 #     groups            Reference [[skill_group]] bundles (same idea as [[source]].groups):
@@ -555,6 +563,14 @@ reproduced here one-to-one so you can read the whole thing before editing your c
 # path = ["/abs/path/to/global-skills"]
 # scope = "user"                       # user-level (global): lands in ~/.codebuddy/skills
 #                                       # and ~/.workbuddy/skills, in every workspace
+
+# [[skill_source]]                      # remote source: fetched once on first sync
+# path = ["gh:anthropics/skills"]       # GitHub shorthand (HTTPS); or a full git URL
+#                                       # (git@host:owner/repo.git = SSH) / npm:<package>
+# agents = ["codebuddy", "trae"]
+
+# fetch_timeout = "30s"                 # top-level: max time a first-time remote fetch may run
+#                                       # before it warns and skips (hook path)
 
 # [[skill_group]]                      # bundle skill roots so several sources can reuse them
 # name = "frontend"

@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cq-guojia/rulemux/internal/agents"
 )
@@ -114,8 +115,25 @@ type Config struct {
 	FileGroups      []FileGroup
 	WorkspaceGroups []WorkspaceGroup
 	SkillGroups     []SkillGroup
+	// FetchTimeout 是远程 skill 源（git/npm）抓取超时，形如 "30s"；空 = 默认 30s。
+	FetchTimeout string
 	// File 是本次实际读取的配置文件路径。
 	File string
+}
+
+// DefaultFetchTimeout 是远程 skill 源抓取的默认超时（config.fetch_timeout 未配 / 非法时回退）。
+const DefaultFetchTimeout = 30 * time.Second
+
+// FetchTimeoutDuration 返回远程抓取超时；未配 / 解析失败 / 非正 ⇒ 回退默认值。
+func (c *Config) FetchTimeoutDuration() time.Duration {
+	if c.FetchTimeout == "" {
+		return DefaultFetchTimeout
+	}
+	d, err := time.ParseDuration(c.FetchTimeout)
+	if err != nil || d <= 0 {
+		return DefaultFetchTimeout
+	}
+	return d
 }
 
 // DefaultPath 返回默认配置路径 ~/.rulemux/config.toml。
@@ -334,7 +352,11 @@ func (p *tomlParser) parse(c *Config) error {
 			default:
 				return p.errf("unknown key %q in [[skill_group]]", key)
 			}
-			// curNone（普通表 / 未知表 / 任何表之前）的键值不属于已知数组表，忽略。
+		case curNone:
+			// 顶层（任何表之前 / 未知普通表）键：只认 fetch_timeout，其余静默忽略（向后兼容）。
+			if key == "fetch_timeout" && !isArray {
+				c.FetchTimeout = items[0]
+			}
 		}
 	}
 }

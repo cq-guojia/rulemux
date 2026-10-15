@@ -151,7 +151,7 @@ func Sync(args []string) int {
 		createAgent = requestedID
 	}
 
-	run := newSyncRun(cfg, ws, createAgent)
+	run := newSyncRun(cfg, ws, createAgent, hook)
 	run.wsList = append(run.wsList, ws)
 	for _, a := range targets {
 		if a.Tier == agents.Tier2 && a.SkillsDir == "" {
@@ -217,14 +217,18 @@ type syncRun struct {
 	// createAgent 是「允许创建目录」的 agent（只有 hook 路径被 --agent 点名的那一个）；
 	// 空 = 谁都不建（手动 sync / cascade / sync --all 一律只写已存在目录）。
 	createAgent string
-	doneDirs    map[string]bool // 工作区目录（rules + skills）去重
-	doneUser    map[string]bool // 用户级目录去重（全局，跨工作区只跑一次）
-	changed     bool            // rules 变化（含用户级 rules；skills 不计入）
-	failed      bool            // 任一路径出错（抬退出码）
-	landed      []landedEntry   // 落过盘的（工作区, agent），供账本记账
-	lines       []*syncLine     // 报告行（按出现顺序）
-	lineIdx     map[string]*syncLine
-	wsList      []string // 本轮处理过的工作区（按顺序，含无落盘的）
+	// hook 是否 hook 路径——决定远程 skill 源抓取失败的处置（hook：警告跳过；手动：报错）。
+	hook     bool
+	staged   map[string]string // spec → 已解析本地根（本轮缓存，避免重复抓取）
+	stageErr map[string]error  // spec → 抓取失败（本轮缓存，避免重试）
+	doneDirs map[string]bool   // 工作区目录（rules + skills）去重
+	doneUser map[string]bool   // 用户级目录去重（全局，跨工作区只跑一次）
+	changed  bool              // rules 变化（含用户级 rules；skills 不计入）
+	failed   bool              // 任一路径出错（抬退出码）
+	landed   []landedEntry     // 落过盘的（工作区, agent），供账本记账
+	lines    []*syncLine       // 报告行（按出现顺序）
+	lineIdx  map[string]*syncLine
+	wsList   []string // 本轮处理过的工作区（按顺序，含无落盘的）
 }
 
 // landedEntry 是一条「在某个工作区落过盘」的记录（账本 key）。
@@ -233,11 +237,14 @@ type landedEntry struct {
 	id string
 }
 
-func newSyncRun(cfg *config.Config, ws, createAgent string) *syncRun {
+func newSyncRun(cfg *config.Config, ws, createAgent string, hook bool) *syncRun {
 	return &syncRun{
 		cfg:         cfg,
 		ws:          ws,
 		createAgent: createAgent,
+		hook:        hook,
+		staged:      map[string]string{},
+		stageErr:    map[string]error{},
 		doneDirs:    map[string]bool{},
 		doneUser:    map[string]bool{},
 		lineIdx:     map[string]*syncLine{},
@@ -317,7 +324,13 @@ func (r *syncRun) syncFiles(a agents.Agent, dir string, srcs []config.Source, fr
 // syncSkillDirs 同步一个 skills 目录（工作区或用户级）。与 syncFiles 同构：
 // 一个 skill 树算一个单位（与旧输出 "1 file(s)" 同口径）。
 func (r *syncRun) syncSkillDirs(a agents.Agent, dir string, srcs []config.SkillSource, create, userLevel bool) {
-	res, err := engine.SyncSkills(dir, srcs, create)
+	resolved, ok := r.resolveSkillSources(srcs)
+	if !ok {
+		// 有远程源抓取失败：跳过本次同步，绝不清残留——否则一次网络抖动会把上次
+		// 已同步的 skill 当「无源」删掉。落空的源下轮抓成功再补。
+		return
+	}
+	res, err := engine.SyncSkills(dir, resolved, create)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rulemux: failed to sync %s: %v\n", a.ID, err)
 		r.failed = true
@@ -337,6 +350,58 @@ func (r *syncRun) syncSkillDirs(a agents.Agent, dir string, srcs []config.SkillS
 	// shortcut: skills 变化不计入 changed（不触发「新开会话」提示）——skills 是否热重载
 	// 待 canary（docs/design/external/skill-ecosystem.md §六-4）；坐实后再按 per-agent 判据补。
 	r.landed = append(r.landed, landedEntry{ws: r.ws, id: a.ID})
+}
+
+// resolveSkillSources 把每个 skill 源的 path 解析成本地目录：本地路径原样保留；
+// 远程源（gh: / git URL / npm:）经 engine.EnsureStaged 抓取进 staging。
+// 返回 ok=false 表示有远程源抓取失败——调用方必须跳过本次同步（绝不能把「抓取失败」
+// 当成「无源」而去清残留，否则网络抖动会删掉上次已同步的 skill）。
+func (r *syncRun) resolveSkillSources(srcs []config.SkillSource) ([]config.SkillSource, bool) {
+	out := make([]config.SkillSource, 0, len(srcs))
+	ok := true
+	for _, s := range srcs {
+		ns := s
+		ns.Paths = nil
+		for _, p := range s.Paths {
+			if kind, _, _ := engine.ClassifySource(p); kind == engine.SourceLocal {
+				ns.Paths = append(ns.Paths, p) // 本地：原样（BuildSkillPlan 照旧记 missing）
+				continue
+			}
+			root, err := r.resolveRoot(p)
+			if err != nil {
+				if r.hook {
+					fmt.Fprintf(os.Stderr, "rulemux: warning: skill source %q unavailable (%v); skipping it this run\n", p, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "rulemux: skill source %q failed: %v\n", p, err)
+				}
+				ok = false
+				continue
+			}
+			ns.Paths = append(ns.Paths, root)
+		}
+		if len(ns.Paths) > 0 {
+			out = append(out, ns)
+		}
+	}
+	return out, ok
+}
+
+// resolveRoot 解析一个远程源 spec 到本地 staging 根；本轮内按 spec 缓存结果与错误
+// （同一源被工作区 / 用户级 / 多 agent 复用只抓一次，失败也只报一次）。
+func (r *syncRun) resolveRoot(spec string) (string, error) {
+	if root, ok := r.staged[spec]; ok {
+		return root, nil
+	}
+	if err, ok := r.stageErr[spec]; ok {
+		return "", err
+	}
+	root, err := engine.EnsureStaged(spec, r.cfg.FetchTimeoutDuration())
+	if err != nil {
+		r.stageErr[spec] = err
+		return "", err
+	}
+	r.staged[spec] = root
+	return root, nil
 }
 
 // cascade 顺手同步该工作区历史上用过的**其它** Tier-1 agent。
@@ -449,7 +514,7 @@ func syncAll(cfg *config.Config) int {
 
 	exit := 0
 	var gone []string
-	run := newSyncRun(cfg, "", "") // createAgent 空 ⇒ 一律只写已存在目录
+	run := newSyncRun(cfg, "", "", false) // createAgent 空 ⇒ 一律只写已存在目录
 	for _, ws := range workspaces {
 		if _, err := os.Stat(ws); err != nil {
 			if os.IsNotExist(err) {
