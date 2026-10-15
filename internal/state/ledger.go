@@ -13,8 +13,10 @@
 // 注意：这不是 T5 否掉的那份「文件清单」。T5 否的是「用 manifest 记录同步了哪些文件」
 // （已改用 __rulemux__ 前缀就地解决）；本账本记的是「同步过哪些工作区 / 用过哪些 agent」。
 //
-// 结构版本见 Version：v1 只有 workspaces；v2 追加 agents（工作区 → 该工作区用过的 agent）。
-// v1 → v2 迁移**绝不丢条目**：老条目的 agents 用哨兵 AnyAgent 占位（表示「未知 / 全部已支持」）。
+// 结构版本见 Version：v1 只有 workspaces；v2 追加 agents（工作区 → 该工作区用过的 agent）；
+// v3 追加 Seen（每个「工作区 × agent」条目的 lastSeen 时间戳，支撑过期门禁）。
+// v1 → v2 / v2 → v3 迁移**绝不丢条目**：老条目沿用旧语义、Seen 缺失即视为「在用」（保守）。
+// Load 不按版本分支（老文件无缝），Version 只作诚实标注。
 package state
 
 import (
@@ -34,8 +36,8 @@ const FileName = "workspaces.json"
 // EnvStateDir 可覆盖账本所在目录（测试/CI 用，避免污染真实 ~/.rulemux）。
 const EnvStateDir = "RULEMUX_STATE_DIR"
 
-// Version 是当前账本结构版本。
-const Version = 2
+// Version 是当前账本结构版本（v3 起含 Seen 时间戳）。
+const Version = 3
 
 // AnyAgent 是「该工作区用过哪些 agent」的哨兵值，表示「未知 / 全部已支持 agent」。
 //
@@ -75,6 +77,10 @@ type Ledger struct {
 	// 展开哨兵 * 与例行输出（sync 汇总未初始化名单 / doctor）时减去它 ⇒ 已卸
 	// agent 对用户不可见（卸载即断联）。缺省空 = 没有卸载记录。
 	Off []string `json:"off,omitempty"`
+	// Seen 记录每个「工作区 × agent」条目的最近活动时间戳（unix 秒，omitempty）。
+	// 仅在该 agent 的钩子被触发、用户在该工作区手动 sync、或 init 时刷新；例行
+	// sync --all 不刷新（否则过期门禁失效）。缺失（老账本 / 未观测）＝保守：视为在用。
+	Seen map[string]map[string]int64 `json:"seen,omitempty"`
 }
 
 // Load 读取账本。文件不存在、为空或损坏时返回空账本而非报错——
@@ -94,6 +100,7 @@ func Load() Ledger {
 	}
 	l.Workspaces = raw.Workspaces
 	l.Off = append([]string(nil), raw.Off...)
+	l.Seen = raw.Seen
 	if raw.Agents != nil {
 		l.Agents = raw.Agents
 		return l
@@ -120,9 +127,59 @@ func Record(ws, agent string) error {
 	}
 	return UpdateLedger(func(l *Ledger) error {
 		l.add(ws, agent)
+		l.see(ws, agent) // 钩子触发 / 手动 sync / init ⇒ 刷新在用时间
 		return nil
 	})
 }
+
+// Touch 只保账本成员、不刷新 Seen：供 sync --all 落盘点使用，避免例行同步把 lastSeen
+// 永久续命、使过期门禁失效。真正的「在用」信号（钩子触发 / 手动 sync / init）仍走 Record。
+func Touch(ws, agent string) error {
+	ws = resolveWS(ws)
+	if ws == "" {
+		return nil
+	}
+	return UpdateLedger(func(l *Ledger) error {
+		l.add(ws, agent)
+		return nil
+	})
+}
+
+// see 把 (ws, agent) 的 lastSeen 刷成 now（agent 为空 / 哨兵时跳过）。
+func (l *Ledger) see(ws, agent string) {
+	if agent == "" || agent == AnyAgent {
+		return
+	}
+	if l.Seen == nil {
+		l.Seen = map[string]map[string]int64{}
+	}
+	if l.Seen[ws] == nil {
+		l.Seen[ws] = map[string]int64{}
+	}
+	l.Seen[ws][agent] = time.Now().Unix()
+}
+
+// IsStale 报告 (ws, agent) 是否超过 StaleAfter 未活动。
+// 缺 Seen / 缺条目 / 哨兵 ⇒ false（保守：视为在用，不误杀老账本与未观测条目）。
+func (l Ledger) IsStale(ws, agent string) bool {
+	ws = resolveWS(ws)
+	if l.Seen == nil || ws == "" || agent == "" || agent == AnyAgent {
+		return false
+	}
+	m := l.Seen[ws]
+	if m == nil {
+		return false
+	}
+	ts, ok := m[agent]
+	if !ok {
+		return false
+	}
+	return time.Since(time.Unix(ts, 0)) > StaleAfter
+}
+
+// StaleAfter 是账本条目的过期阈值：lastSeen 距今超过它，就视为「该工作区不再用此 agent」，
+// 在裸 sync / sync --all / 顺手同步中跳过该条目（条目保留供 uninstall 回访）。默认 30 天。
+const StaleAfter = 30 * 24 * time.Hour
 
 // UpdateLedger 是全项目唯一的账本写入口：持锁 load → mutate → 原子 save。
 // mutate 里只改内存中的账本，返回 error 则不动盘。Record / Prune / uninstall
@@ -157,6 +214,24 @@ func (l *Ledger) ForgetAgent(ws string, ids ...string) {
 			continue
 		}
 		l.Agents[key] = removeStrings(list, ids)
+		l.forgetSeen(key, ids)
+	}
+}
+
+// forgetSeen 同步删除 (ws, ids) 的 lastSeen 记录。
+func (l *Ledger) forgetSeen(ws string, ids []string) {
+	if l.Seen == nil {
+		return
+	}
+	m := l.Seen[ws]
+	if m == nil {
+		return
+	}
+	for _, id := range ids {
+		delete(m, id)
+	}
+	if len(m) == 0 {
+		delete(l.Seen, ws)
 	}
 }
 
@@ -267,6 +342,30 @@ func (l Ledger) Save() error {
 		out.Agents[ws] = vals
 	}
 
+	// Seen 随清理后的 Agents 重建：ws / agent 不在 Agents 里的条目丢弃，避免孤儿时间戳。
+	if l.Seen != nil {
+		for ws, agents := range out.Agents {
+			byAgent := l.Seen[ws]
+			if byAgent == nil {
+				continue
+			}
+			for _, a := range agents {
+				if a == AnyAgent {
+					continue
+				}
+				if ts, ok := byAgent[a]; ok && ts > 0 {
+					if out.Seen == nil {
+						out.Seen = map[string]map[string]int64{}
+					}
+					if out.Seen[ws] == nil {
+						out.Seen[ws] = map[string]int64{}
+					}
+					out.Seen[ws][a] = ts
+				}
+			}
+		}
+	}
+
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return err
@@ -306,6 +405,7 @@ func Prune(workspaces []string) error {
 		for k := range l.Agents {
 			if drop[resolveWS(k)] {
 				delete(l.Agents, k)
+				delete(l.Seen, k)
 			}
 		}
 		return nil

@@ -56,8 +56,8 @@ func setupSharedDir(t *testing.T) (cfgPath, ws, dir string) {
 			"[[source]]\npath = \""+paths["c"]+"\"\n")
 
 	// 两个 agent 都装着钩子
-	installHook(t, home, ".workbuddy", "workbuddy")
-	installHook(t, home, ".codebuddy", "codebuddy")
+	installHook(t, "workbuddy")
+	installHook(t, "codebuddy")
 
 	// 先同步一次，三个文件都落盘
 	_ = captureStdout(t, func() {

@@ -173,8 +173,17 @@ func Sync(args []string) int {
 	// 才算「用过」。记的是「工作区 × agent」；一个 agent 本轮同步多个目录只记一次。
 	// 钩子是全局的，但规则文件落在各工作区本地；卸载时要靠这份账本逐一回访清理，
 	// 否则钩子一去、残留将永无机会被自动删除。
+	//
+	// 钩子点名的那个 agent（含裸 sync 全量）刷新 Seen；cascade 顺手带的其它 agent
+	// 只保成员、不刷新——否则 A 开会话会把已停用的 B 的 lastSeen 续命，过期门禁失效。
 	for _, e := range run.landed {
-		if err := state.Record(e.ws, e.id); err != nil {
+		var err error
+		if requestedID == "" || e.id == requestedID {
+			err = state.Record(e.ws, e.id)
+		} else {
+			err = state.Touch(e.ws, e.id)
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
 		}
 	}
@@ -345,7 +354,7 @@ func (r *syncRun) cascade() {
 			done[e.id] = true
 		}
 	}
-	for _, a := range agentsFromLedger(l.AgentsFor(r.ws), l.Off, r.ws) {
+	for _, a := range agentsFromLedger(l, r.ws) {
 		if done[a.ID] || a.Tier != agents.Tier1 {
 			continue
 		}
@@ -452,14 +461,15 @@ func syncAll(cfg *config.Config) int {
 		}
 		run.ws = ws
 		run.wsList = append(run.wsList, ws)
-		for _, a := range agentsFromLedger(l.AgentsFor(ws), l.Off, ws) {
+		for _, a := range agentsFromLedger(l, ws) {
 			run.agent(a)
 		}
 	}
 
 	// 记账：只记确实落过盘的（工作区 × agent）；一个 agent 同步多个目录只记一次。
+	// sync --all 只保成员、不刷新 Seen——否则过期门禁会被例行同步永久续命。
 	for _, e := range run.landed {
-		if err := state.Record(e.ws, e.id); err != nil {
+		if err := state.Touch(e.ws, e.id); err != nil {
 			fmt.Fprintf(os.Stderr, "rulemux: warning: failed to write the workspace ledger: %v\n", err)
 		}
 	}
@@ -491,7 +501,15 @@ func syncAll(cfg *config.Config) int {
 //   - 其它值按注册表解析（认别名）；查不到、未验证、或**不是 Tier-1** 的跳过
 //     （条目保留，等将来就绪）。Tier-2 注入型即使被账本记着也不进这张表：
 //     它没有目录可写，进了只会污染裸 sync 的 targets 与「未初始化」名单。
-func agentsFromLedger(ids, off []string, ws string) []agents.Agent {
+//
+// 两个门禁（仅作用于「账本派生的非哨兵条目」）：
+//   - C（钩子门禁）：该 agent 的钩子已不在（全局卸载）⇒ 跳过——钩子是 user 级全局
+//     文件，与具体工作区无关，不会因「某工作区未装」误杀，只有 agent 真被全局卸载才触发；
+//   - A（过期门禁）：lastSeen 距今超过 StaleAfter ⇒ 跳过（条目保留，uninstall 仍能回访）。
+//     钩子触发自身（sync --hook 点名的那个 agent）不走这里，故不受门禁影响。
+func agentsFromLedger(l state.Ledger, ws string) []agents.Agent {
+	ids := l.AgentsFor(ws)
+	off := l.Off
 	if len(ids) == 0 {
 		return nil
 	}
@@ -518,6 +536,13 @@ func agentsFromLedger(ids, off []string, ws string) []agents.Agent {
 				continue
 			}
 			seen[a.ID] = true
+			if !hookInstalled(a, ws) { // C：钩子已卸 ⇒ 跳过
+				continue
+			}
+			if l.IsStale(ws, a.ID) { // A：超过阈值无活动 ⇒ 跳过（条目保留）
+				fmt.Fprintf(os.Stderr, "rulemux: skip %s in %s: not active for %s (stale)\n", a.ID, ws, state.StaleAfter)
+				continue
+			}
 			base = append(base, a)
 		}
 	}
@@ -546,7 +571,7 @@ func bareTargets(cfg *config.Config, ws string) []agents.Agent {
 			out = append(out, a)
 		}
 	}
-	for _, a := range agentsFromLedger(l.AgentsFor(ws), l.Off, ws) {
+	for _, a := range agentsFromLedger(l, ws) {
 		add(a)
 	}
 	for _, a := range configExplicitAgents(cfg, ws) {

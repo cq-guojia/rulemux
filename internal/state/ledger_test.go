@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestLoadMigratesV1WithoutLosingEntries 校验 v1 → v2 迁移**绝不丢条目**：
@@ -96,6 +97,53 @@ func TestSaveIsAtomicAndValid(t *testing.T) {
 	}
 	if l.Version != Version {
 		t.Fatalf("落盘应带 version=%d，实得 %d", Version, l.Version)
+	}
+}
+
+// TestLedgerSeenTouchStale 校验 lastSeen 的写入规则：
+//   - Record 刷新 Seen；刚记录的不是 stale；
+//   - Touch 只保成员、不刷新 Seen（sync --all 用它避免续命）；
+//   - 回拨超过 StaleAfter 后 IsStale 为真；未知 agent 永远不 stale（保守）。
+func TestLedgerSeenTouchStale(t *testing.T) {
+	t.Setenv(EnvStateDir, t.TempDir())
+	ws := "/proj/a"
+	key := resolveWS(ws)
+
+	if err := Record(ws, "codebuddy"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Load().Seen[key]["codebuddy"]; !ok {
+		t.Fatal("Record 应写入 Seen")
+	}
+	if Load().IsStale(ws, "codebuddy") {
+		t.Fatal("刚记录的条目不应是 stale")
+	}
+
+	// 回拨 Seen，Touch 不应刷新
+	back := time.Now().Add(-(StaleAfter + time.Hour)).Unix()
+	if err := UpdateLedger(func(l *Ledger) error {
+		l.Seen[key]["codebuddy"] = back
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Touch(ws, "codebuddy"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Seen[key]["codebuddy"]; got != back {
+		t.Fatalf("Touch 不应刷新 Seen，got %d want %d", got, back)
+	}
+
+	// Record 重新刷新
+	if err := Record(ws, "codebuddy"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().Seen[key]["codebuddy"]; got <= back {
+		t.Fatalf("Record 应刷新 Seen，got %d", got)
+	}
+
+	if Load().IsStale(ws, "ghost") {
+		t.Fatal("未知 agent 不应是 stale（保守）")
 	}
 }
 

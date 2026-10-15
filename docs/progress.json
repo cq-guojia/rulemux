@@ -1,4 +1,28 @@
 {
+  "未决项": {
+    "20261015-0916-停用工作区仍被持续同步-账本过期与判据补强-85c8": [
+      {
+        "item": "WorkBuddy（Mac）是否同构 CodeBuddy 的 genie-history，及其 server data 目录真实路径",
+        "status": "🔴 待 Mac canary",
+        "来源": "docs/design/external/agent-workspace-lists.md §一/§四"
+      },
+      {
+        "item": "VSCode 标准 state.vscdb（SQLite）在本类环境为何缺失，是否需要/能读取「最近打开」",
+        "status": "🔴 待核实",
+        "来源": "docs/design/external/agent-workspace-lists.md §二"
+      },
+      {
+        "item": "~/.codebuddy/projects 目录语义（registry 有 getCodeBuddyProjectsDir 但本环境不存在），是否「当前工作区列表」真源",
+        "status": "🔴 待核实",
+        "来源": "docs/design/external/agent-workspace-lists.md §四"
+      },
+      {
+        "item": "Trae memory/projects 的 --p2-<hash> hash 算法（用于 slug 歧义路径的精确还原）",
+        "status": "🔴 待核实",
+        "来源": "docs/design/external/agent-workspace-lists.md §一/§四"
+      }
+    ]
+  },
   "tasks": {
     "20261015-0033-git-和远程-skill-源-s3-4417": {
       "created": "2026-10-15 00:33:47",
@@ -19,6 +43,16 @@
       "status": "doing",
       "title": "Trae skills 接入",
       "worklog": "worklog/202610/15-0033-trae-skills-接入-aa84.md"
+    },
+    "20261015-0916-停用工作区仍被持续同步-账本过期与判据补强-85c8": {
+      "created": "2026-10-15 09:16:55",
+      "creator": "GuoJia-Agent",
+      "finished": null,
+      "owner": "GuoJia-Agent",
+      "started": "2026-10-15 09:16:55",
+      "status": "doing",
+      "title": "停用工作区仍被持续同步：账本过期与判据补强",
+      "worklog": "worklog/202610/15-0916-停用工作区仍被持续同步-账本过期与判据补强-85c8.md"
     }
   }
 }

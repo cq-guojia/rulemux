@@ -23,6 +23,7 @@ func verifySetup(t *testing.T) (cfgPath, ws string) {
 	}
 	t.Setenv("HOME", filepath.Join(tmp, "home"))
 	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	installHook(t, "codebuddy") // C 门禁要求钩子已装，否则裸 verify 会把 codebuddy 当未卸载跳过
 	if err := state.Record(ws, "codebuddy"); err != nil {
 		t.Fatal(err)
 	}

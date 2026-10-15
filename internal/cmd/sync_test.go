@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cq-guojia/rulemux/internal/agents"
 	"github.com/cq-guojia/rulemux/internal/state"
@@ -346,9 +347,16 @@ func TestCascadeNeverCreatesDirs(t *testing.T) {
 
 // installHook 在假 HOME 下为指定 agent 写一条 rulemux SessionStart 钩子，
 // 使 hookInstalled(...) 判定为「已装」。返回写入的文件路径。
-func installHook(t *testing.T, home, dirName, agentID string) string {
+func installHook(t *testing.T, agentID string) string {
 	t.Helper()
-	p := filepath.Join(home, dirName, "settings.json")
+	a, ok := agents.Get(agentID)
+	if !ok {
+		t.Fatalf("unknown agent %s", agentID)
+	}
+	p := a.HookFileAbs("")
+	if p == "" {
+		t.Fatalf("agent %s has no hook file", agentID)
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -390,8 +398,8 @@ func TestSyncSharedRulesDir_NoMutualDeletion(t *testing.T) {
 		"[[source]]\npath = \""+a+"\"\nagents = [\"workbuddy\"]\n\n"+
 			"[[source]]\npath = \""+b+"\"\nagents = [\"codebuddy\"]\n")
 
-	installHook(t, home, ".workbuddy", "workbuddy")
-	installHook(t, home, ".codebuddy", "codebuddy")
+	installHook(t, "workbuddy")
+	installHook(t, "codebuddy")
 
 	dir := filepath.Join(ws, ".codebuddy", "rules")
 	fa := filepath.Join(dir, "__rulemux__a.md")
@@ -492,6 +500,7 @@ func TestSyncBareLedgerRestrictsTargets(t *testing.T) {
 	}
 	t.Setenv("HOME", filepath.Join(tmp, "home"))
 	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	installHook(t, "codebuddy") // C 门禁要求钩子已装，否则裸 sync 不会落该 agent
 	if err := state.Record(ws, "codebuddy"); err != nil {
 		t.Fatal(err)
 	}
@@ -583,6 +592,15 @@ func TestSyncBareConfigExplicitAgentStillSyncs(t *testing.T) {
 // nil/空 = 无 agent（不再是「全部」）；显式列表跳过未知/未验证，同样减 off。
 // （哨兵 `*` 的收紧见 TestAgentsFromLedgerSentinel —— 它依赖钩子状态。）
 func TestAgentsFromLedger(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	// C 门禁依赖钩子状态：非哨兵分支会跳过「未装钩子」的 agent。
+	installHook(t, "codebuddy")
+	installHook(t, "trae")
+
 	cases := []struct {
 		name string
 		ids  []string
@@ -597,11 +615,46 @@ func TestAgentsFromLedger(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := agentIDs(agentsFromLedger(c.ids, c.off, ""))
+			l := state.Ledger{Agents: map[string][]string{ws: c.ids}, Off: c.off}
+			got := agentIDs(agentsFromLedger(l, ws))
 			if strings.Join(got, ",") != strings.Join(c.want, ",") {
 				t.Fatalf("want %v, got %v", c.want, got)
 			}
 		})
+	}
+}
+
+// TestAgentsFromLedgerSkipsStaleOrUnhooked 校验 A/C 门禁：
+//   - 未装钩子的账本 agent（全局卸载）⇒ C 跳过；
+//   - 钩子仍在但 lastSeen 超过阈值 ⇒ A 跳过（条目保留）；
+//   - Seen 缺失（老账本 / 未观测）⇒ 保守保留，不误杀。
+func TestAgentsFromLedgerSkipsStaleOrUnhooked(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	ws := filepath.Join(tmp, "ws")
+	t.Setenv("HOME", home)
+	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	installHook(t, "codebuddy")
+
+	// trae 未装钩子 ⇒ C 跳过；codebuddy 装了且新鲜 ⇒ 保留。
+	l := state.Ledger{Agents: map[string][]string{ws: {"codebuddy", "trae"}}}
+	if got := strings.Join(agentIDs(agentsFromLedger(l, ws)), ","); got != "codebuddy" {
+		t.Fatalf("未装钩子的 trae 应被 C 跳过，实得 %q", got)
+	}
+
+	// 钩子仍在但 lastSeen 超过阈值 ⇒ A 跳过（条目保留）。
+	back := time.Now().Add(-(state.StaleAfter + time.Hour)).Unix()
+	stale := state.Ledger{
+		Agents: map[string][]string{ws: {"codebuddy"}},
+		Seen:   map[string]map[string]int64{ws: {"codebuddy": back}},
+	}
+	if got := agentIDs(agentsFromLedger(stale, ws)); len(got) != 0 {
+		t.Fatalf("超过阈值无活动的 codebuddy 应被 A 跳过，实得 %v", got)
+	}
+
+	// Seen 缺失 ⇒ 保守保留（不误杀老账本 / 未观测条目）。
+	if got := agentIDs(agentsFromLedger(state.Ledger{Agents: map[string][]string{ws: {"codebuddy"}}}, ws)); len(got) != 1 {
+		t.Fatalf("Seen 缺失应保守保留 codebuddy，实得 %v", got)
 	}
 }
 
@@ -623,15 +676,15 @@ func TestAgentsFromLedgerSentinel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := agentIDs(agentsFromLedger([]string{"*"}, nil, ws)); len(got) != 0 {
+	if got := agentIDs(agentsFromLedger(state.Ledger{Agents: map[string][]string{ws: {"*"}}}, ws)); len(got) != 0 {
 		t.Fatalf("没有任何钩子时哨兵不该展开出任何 agent（含 dsh），实得 %v", got)
 	}
 
-	installHook(t, home, ".codebuddy", "codebuddy")
-	if got := agentIDs(agentsFromLedger([]string{"*"}, nil, ws)); strings.Join(got, ",") != "codebuddy" {
+	installHook(t, "codebuddy")
+	if got := agentIDs(agentsFromLedger(state.Ledger{Agents: map[string][]string{ws: {"*"}}}, ws)); strings.Join(got, ",") != "codebuddy" {
 		t.Fatalf("哨兵应只展开有钩子在用的 agent，实得 %v", got)
 	}
-	if got := agentIDs(agentsFromLedger([]string{"*"}, []string{"codebuddy"}, ws)); len(got) != 0 {
+	if got := agentIDs(agentsFromLedger(state.Ledger{Agents: map[string][]string{ws: {"*"}}, Off: []string{"codebuddy"}}, ws)); len(got) != 0 {
 		t.Fatalf("哨兵展开后仍要减 off，实得 %v", got)
 	}
 }
@@ -772,6 +825,7 @@ func TestSyncBareReportListsOnlyInUseUninitialized(t *testing.T) {
 	}
 	t.Setenv("HOME", filepath.Join(tmp, "home"))
 	t.Setenv("RULEMUX_STATE_DIR", filepath.Join(tmp, "state"))
+	installHook(t, "codebuddy") // C 门禁要求钩子已装，否则裸 sync 不把 codebuddy 列入「在用」
 	if err := state.Record(ws, "codebuddy"); err != nil {
 		t.Fatal(err)
 	}
