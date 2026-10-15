@@ -488,6 +488,12 @@ ok "uninstall keeps non-empty / subdir-bearing / symlinked rules dirs (D3)"
 # bare --clean is a superset (removes every canary, in use or not).
 R4_HOME="$TMP/r4-home"
 mkdir -p "$R4_HOME" "$TMP/r4ws/.codebuddy/rules" "$TMP/r4ws/.dsh/rules" "$TMP/r4ws/.trae/rules"
+# Real usage installs the hook (init) before the session fires sync; the hook-gate
+# (aba8440) counts an agent as in-use only when its hook is present, so install it
+# here too (isolated temp HOME — never touches the real ~/.codebuddy).
+HOME="$R4_HOME" RULEMUX_STATE_DIR="$R4_HOME/.rulemux" \
+  "$BIN" init --agent codebuddy --config "$CFG" --workspace "$TMP/r4ws" >/dev/null 2>&1 \
+  || fail "R4: init (hook install) failed"
 HOME="$R4_HOME" RULEMUX_STATE_DIR="$R4_HOME/.rulemux" \
   "$BIN" sync --hook --agent codebuddy --config "$CFG" --workspace "$TMP/r4ws" >/dev/null 2>&1
 HOME="$R4_HOME" RULEMUX_STATE_DIR="$R4_HOME/.rulemux" \
@@ -550,6 +556,13 @@ path = ["$TMP/src/a.md"]
 [[skill_source]]
 path = ["$TMP/trae-skills"]
 agents = ["trae"]
+
+# user-level ~/.trae-cn/skills is fed by a scope="user" source (same model as
+# codebuddy's user.toml above) — a workspace-scope source never lands user-level.
+[[skill_source]]
+path = ["$TMP/trae-skills"]
+agents = ["trae"]
+scope = "user"
 EOF
 "$BIN" sync --hook --agent trae --config "$TMP/trae.toml" --workspace "$WS" >"$TMP/trae-skill.log" 2>&1 || fail "trae skill sync exited non-zero"
 [ -f "$WS/.trae/skills/__rulemux__trae-demo/SKILL.md" ] || fail "trae workspace skills not synced"

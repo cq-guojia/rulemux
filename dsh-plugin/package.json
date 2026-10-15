@@ -1,6 +1,6 @@
 {
   "name": "rulemux-dsh",
-  "version": "0.5.0",
+  "version": "0.5.3",
   "icon": "./icon.svg",
   "description": "rulemux rules inside DeepSeek Harness (dsh): asks the rulemux CLI for the rules it renders for this workspace and injects them into the session once, on the first turn (nothing written to disk for rules). Also syncs skills into the native skills dirs (.dsh/skills / ~/.dsh/skills) at session start.",
   "type": "module",
