@@ -104,7 +104,7 @@ const CONFIG_REL = [".rulemux", "config.toml"]; // mirrors config.DefaultPath() 
 //     would exit 0 having written nothing — skills silently never land. Hence 0.5.0.
 // Hence 0.5.0. It also decides what we upgrade *to* (see installTarget), so it is bumped in the same
 // change that cuts the release, never afterwards.
-const REQUIRED_CLI = ">=0.5.0";
+const REQUIRED_CLI = ">=0.5.1";
 
 const INSTALL_TIMEOUT_MS = 120_000; // global install / sync: generous, but never hang forever
 const PROBE_TIMEOUT_MS = 15_000; // resolving / probing the CLI
