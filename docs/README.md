@@ -8,9 +8,6 @@
 | 槽位 | 本项目落点 | 说明 |
 |---|---|---|
 | 文档规范 | `docs/README.md` | 本文件 |
-| 状态表 | `docs/progress.json` | 在办任务状态表（结构化索引） |
-| 已结案 | `docs/PROGRESS-HISTORY.md` | — |
-| 过程叙事 | `docs/worklog/<年月>/` | 按月归档（<年月> 取任务创建月份）；文件名由过程文档建档机制生成，实际路径以状态表 `worklog` 字段为准，命名规则不在此复制 |
 | 运行逻辑 | `docs/design/architecture.md` | — |
 | 功能总索引 | `docs/design/features.md` | — |
 | 各功能 | `docs/design/features/` | 含 `config-groups.md` 等 |
