@@ -4,7 +4,8 @@
 > `[[skill_source]]`/`scope` 配置 + sync/uninstall 编排；`go build/vet/test` + `scripts/smoke.sh` 20 项全绿）。
 > **v2 已拍板**（2026-10-14，用户定序 Trae → DeepSeek harness，dsh 先行）：dsh 接入方案见 §七，
 > 外部事实源码级坐实见 [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md) §三·再续。
-> 范围：v1 = **仅 codebuddy / workbuddy**；v2 = **+ dsh**（2026-10-14）+ **trae**（2026-10-15，CN 双域：工作区 `.trae/skills` 🔴 待 canary、用户级 `~/.trae-cn/skills` 已坐实）；**仅本地源**；用户级（全局）双域同版交付。
+> 范围：v1 = **仅 codebuddy / workbuddy**；v2 = **+ dsh**（2026-10-14）+ **trae**（2026-10-15，CN 双域：工作区 `.trae/skills` 🔴 待 canary、用户级 `~/.trae-cn/skills` 已坐实）；用户级（全局）双域同版交付。
+> **S3 远程 / 市场源**：2026-10-15 用户拍板走「嫁接」——`[[skill_source]]` 的 `path` 多态（本地目录 / `gh:owner/repo` / git URL / `npm:pkg`），首次 sync 惰性 clone 进 `~/.rulemux/skills/<key>/`、hook 阻塞带 `fetch_timeout` 超时警告跳过、升级仅显式 `rulemux skill update`（原地 `git pull`）。方案见 §八（**已定稿，未实现**）。
 > 剩余 canary 待办见 §四/§七。
 > **配套**：[`../requirements.md`](../requirements.md) §六（需求与验收判据）· [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md)（上游事实：各家 skills 目录、市场格局）· [`dir-sync.md`](dir-sync.md)（规则同步主方案，本篇沿用其哲学）· [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §5.5（双品牌同源模型）
 
@@ -52,8 +53,9 @@
 
 - 不自建市场服务端；不做 skill 内容生成/改写；不做 lockfile 版本锁定。
 - 不做 Tier-2 式 hook 注入 skills（破坏渐进式披露，B2 不满足）。
-- **第一版只支持本地 skill 源**；远程 / git 源（S3「跟进上游」）与 `rulemux skill list/update`
-  子命令留待后续版本。
+- **不自建市场 / 不做市场索引**（§八：抓取与市场发现交给 git / npm / SkillHub 等外部，rulemux 只做分发）；
+- 远程源**不做成市场客户端**、不做 lockfile 版本锁定、不做自动升级检查（§八 8.5）；
+- `rulemux skill list` / 市场索引接入不做；zip/tar 直链 YAGNI（§八 8.7）。
 
 ## 四、剩余 canary 待办（🔴，需真机会话；全部来自 `external/skill-ecosystem.md` §六）
 
@@ -79,7 +81,7 @@
 
 **shortcut 清单**（已知限制，升级时机）：
 
-- skill 源**仅本地目录**；git/远程源 = v2（S3）。
+- skill 源默认**本地目录**；远程源（git/npm）见 §八——**clone 一次、不自动升级、不 lockfile**；本轮 git 优先，`npm:` 为 follow-up。
 - skills 变化**不触发**「新开会话」提示 = 待 §四-4 热重载 canary 后按 per-agent 判据补。
 - 符号链接不同步（只同步真实文件）= 有需求再处理。
 - 用户级目录只在 hook 路径创建（被 `--agent` 点名时）；手动 sync / `--all` 只写已存在目录 = 与 rules 同一条铁律。
@@ -172,3 +174,63 @@ rulemux 只做字节拷贝、不改内容 ⇒ 上述差异是用户写技能时�
 
 `REQUIRED_CLI` 抬版 = 改了「CLI 获取 / 版本判定」逻辑 ⇒ CLI 发 `vX.Y.Z` 与插件发 `dsh-vX.Y.Z`
 **必须同批**；只发 CLI 推不动已装旧插件的机器。
+
+---
+
+## 八、远程 / 市场源（S3，2026-10-15 用户拍板）
+
+> **状态**：🟢 **方案已定稿，未实现**。用户 2026-10-15 连续拍板：否决「rulemux 自建 fetch 市场客户端」（所谓「方向 1」）；不等市场开放「装到任意目录」（`npx skills` Issue #130 明确不支持、SkillHub 只往 agent 目录装，短期无望）；走「嫁接」——**外部负责抓取，rulemux 只负责分发**。
+
+### 8.1 定位与边界
+
+- **rulemux 干分发不干安装**：skill 的「市场发现 / 下载 / 版本 / 更新」交给外部（`git` / `npm` / 市场如 SkillHub / ClawHub），rulemux 只做「拉到本地 staging + 选择性 fan-out」。
+- **否决**：① rulemux 自己实现 git/tarball fetch、自建市场客户端（重造轮子还要维护）；② 等市场开放任意目标目录开关。
+- **采纳**：**配置驱动 + 惰性 clone + 委派 git/npm 二进制**。`git` 近乎必有；只 spawn 外部命令、不引 Go 库 ⇒ 保持**零第三方 Go 依赖**不变。
+- **real-copy 底线不变**：远程源同样真实拷贝，不走 npx skills 的 symlink canonical 模式。
+- **不加新配置键**：沿用 `[[skill_source]]` 的 `path`，类型在**源根解析层**按字符串特征判定（不引新键，`agents`/`workspace`/`scope`/groups 语义全不变）。
+
+### 8.2 `[[skill_source]]` 的 `path` 多态解析
+
+一个 `path` 承载三种源，**按字符串特征自动分流，用户不显式选类型**：
+
+| `path` 写法 | 识别 | 落点 `<key>` | 抓取 |
+|---|---|---|---|
+| `/abs`、`~/x`、`./x`、磁盘上真实存在的目录 | 本地目录 | 不 clone，直接用 | — |
+| `gh:owner/repo`（或 `github:owner/repo`） | GitHub 仓库 | `owner-repo` | `git clone https://github.com/owner/repo.git`（HTTPS 默认） |
+| 完整 git URL：`git@github.com:owner/repo.git` / `https://gitlab.com/x/y` / `git://…` | 任意 git 仓库 | 取末两段 `owner-repo` | **原样 clone**，SSH / HTTPS 由 URL 决定 |
+| `npm:pkg` | npm 包 | `npm-pkg` | `npm pack` 取包解包（follow-up） |
+
+- 类型前缀用 `gh:` / `npm:`，**刻意避开与 SSH 传输符 `git@` 撞车**（`git@` 只在完整 URL 里出现，原样克隆）。
+- 裸 `owner/repo`（无协议无冒号）默认按 GitHub 处理；仍有歧义时提示补前缀。
+
+### 8.3 staging 落点
+
+- 统一落 `~/.rulemux/skills/<key>/`，`<key>` 由 URL **确定性派生**（可读、可排重）：`gh:owner/repo` → `owner-repo`；`npm:pkg` → `npm-pkg`。
+- **clone 根即 skill 源根**：仓库下每个含 `SKILL.md` 的子目录是一个 skill（一仓多 skill 也支持，契合「目录即源」）；仓库根自带 `SKILL.md` 即单 skill。
+- 本地路径源不 clone、不进 staging。
+
+### 8.4 拉取时机与超时
+
+- **日常 `sync`**：staging 已有该 `<key>` ⇒ 当本地源用，**零网络**。
+- **首次 `sync`**：本地无 ⇒ 按类型抓取（`git clone` / `npm pack`）。
+- **hook 模式（`--hook`）**：抓取**阻塞等落盘**（hooks 已配就必须等），但加 `fetch_timeout`（默认 30s，可配）；超时 / 出错 / 网络失败 ⇒ stderr 一条警告（与现有 sync 警告同格式），**本轮跳过该源、继续同步别的，下回再试**；绝不无限卡住 agent 启动。
+- **手动 `sync`**：同样阻塞、报完整错误（用户正盯着，慢可接受）。
+
+### 8.5 升级语义（clone 一次 + 显式 update，不自动、不叠加）
+
+- **不自动升级**：日常 sync **绝不**重新抓取，`fetch_timeout` 只在首次可能命中 ⇒ hook 保持飞快。不引入「每次执行查新版」的网络开销。
+- **显式 `rulemux skill update <key>`**：git → 在已存在的 `~/.rulemux/skills/<key>` 里**原地 `git pull`**（或 `git fetch` + `reset --hard origin/<ref>`）；npm → 原地重新取包覆盖。**不删重克、不叠加。**
+- **上游删文件能传导**：pull 后 checkout 删除该文件，下次 sync 复用引擎现有 prune（§二「计划内目录多出的文件删除 / 变空子目录清理」）把它从各家 agent 目录一并清掉。
+- **兜底**：`git pull` 失败 / 仓库损坏 ⇒ `rm -rf` 该 `<key>` 目录再重新 clone（唯一会删目录的路径）。
+
+### 8.6 信任边界（不许砍）
+
+- 下载大小 / 解压后大小 / 文件数上限（借鉴 npx skills：≤10 MiB 下载 / ≤25 MiB 解压 / ≤1000 文件）。
+- **路径穿越（zip slip / tar 绝对路径）防护**：解包时拒绝越出目标目录的条目。
+- **私有仓库凭据**：走本机 `git` / `npm` 配置（SSH key、`gh`、`GITHUB_TOKEN`/`GH_TOKEN`）；**rulemux 绝不落盘明文**，只 spawn 外部命令借本机凭据。
+
+### 8.7 范围与后续
+
+- **本轮**：git（GitHub / 任意 git URL）+ `npm:` **两种源同批**——同一套「spawn 外部二进制 + 取回本地」；npm 走 `npm pack` 取 tarball、标准库 `archive/tar`+`compress/gzip` 解包（strip `package/`，零第三方依赖）。zip/tar 直链 YAGNI 不做。
+- **命令面**：`rulemux skill list` + `rulemux skill update [<key>|--all]` **纳入本轮**（S3「跟进上游更新」硬必需；`skill update` 与 requirements §55–57「不自动更新、手动触发」同哲学——只在显式命令跑，绝不进 hook）。仅「市场索引接入」仍不做（§三）。
+- **测试**：本地 `git init` 仓库 + `httptest`（**不打真网**）；上限 / zip slip 用例；`scripts/smoke.sh` 加「本地 git 仓库作源」端到端。
