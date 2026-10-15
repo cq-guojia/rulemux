@@ -4,7 +4,7 @@
 > `[[skill_source]]`/`scope` 配置 + sync/uninstall 编排；`go build/vet/test` + `scripts/smoke.sh` 20 项全绿）。
 > **v2 已拍板**（2026-10-14，用户定序 Trae → DeepSeek harness，dsh 先行）：dsh 接入方案见 §七，
 > 外部事实源码级坐实见 [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md) §三·再续。
-> 范围：v1 = **仅 codebuddy / workbuddy**；v2 = **+ dsh**（trae 仍下轮）；**仅本地源**；用户级（全局）双域同版交付。
+> 范围：v1 = **仅 codebuddy / workbuddy**；v2 = **+ dsh**（2026-10-14）+ **trae**（2026-10-15，CN 双域：工作区 `.trae/skills` 🔴 待 canary、用户级 `~/.trae-cn/skills` 已坐实）；**仅本地源**；用户级（全局）双域同版交付。
 > 剩余 canary 待办见 §四/§七。
 > **配套**：[`../requirements.md`](../requirements.md) §六（需求与验收判据）· [`../external/skill-ecosystem.md`](../external/skill-ecosystem.md)（上游事实：各家 skills 目录、市场格局）· [`dir-sync.md`](dir-sync.md)（规则同步主方案，本篇沿用其哲学）· [`../external/agent-rules-dirs.md`](../external/agent-rules-dirs.md) §5.5（双品牌同源模型）
 
@@ -31,7 +31,7 @@
    `UserSkillsDirs` / `UserRulesDirs`（用户级，`~` 走 `ExpandHome`）。codebuddy 与 workbuddy 填同值：
    `SkillsDir=".codebuddy/skills"`；用户级 skills/rules 各**双目录**（`~/.codebuddy/…` + `~/.workbuddy/…`）
    —— 用户级要覆盖两家必须双写（§一证据同前）。dsh 于 v2 填入 `.dsh/skills` + `~/.dsh/skills`（§七）；
-   trae 三字段仍留空（下轮）⇒ 天然不参与。
+   trae 于 2026-10-15 接入 CN 双域：`SkillsDir=".trae/skills"` + `UserSkillsDirs=["~/.trae-cn/skills"]`；工作区级 🔴 待真机 canary 坐实（社区文档一致），用户级已本机坐实（见 agent-rules-dirs.md §二·续）。
    共享判定 `SharingSkillsDir` / `SharingUserDirs` 与 rules 侧 `SharingRulesDir` 同规律。
 3. **共享目录**：工作区级 skills 与 rules 同规律——两家共用 `.codebuddy/skills`，同步按并集
    （`unionSkillIDs`），谁跑都不删别人的。用户级不共享且方向不对称 ⇒ 按品牌各写各的，
@@ -59,7 +59,7 @@
 
 1. WorkBuddy skills 两级**装载** Mac canary（落点已代码级确定：用户级 `~/.workbuddy/skills`、工作区级 `.codebuddy/skills`）+ 用户级 rules `~/.workbuddy/rules` 装载；
 2. ~~dsh skills 目录（`.dsh/skills` / `.agents/skills`、不递归）官方文档复核 + 用户级落点~~ —— 2026-10-14 **源码级坐实**（external §三·再续），落点判据已足；装机装载 canary 转 §七-5；
-3. Trae 工作区 `.trae/skills` 本机 canary + intl `~/.trae/skills` 探测；
+3. Trae 工作区 `.trae/skills` 本机 canary（**进行中 2026-10-15**：registry 已接双域、verify 已能种技能探针，待用户真机开 Trae 会话验收装载）+ intl `~/.trae/skills` 探测（未做）；
 4. skills 加载行为 canary（渐进式披露 / `skills-changed` 是否热重载 / 要不要「新开会话」提示）；
 5. CodeBuddy 用户级 rules `~/.codebuddy/rules` 装载 canary（落点已代码级坐实，验合并加载与 frontmatter 语义）。
 

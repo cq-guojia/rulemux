@@ -194,3 +194,25 @@ func TestVerifyBareNothingInUse(t *testing.T) {
 		}
 	}
 }
+
+// TestVerifySkillsCanary 校验 verify 对「支持 skills 的 agent」在工作区 skills 目录也种一颗
+// 技能探针，且 --clean 对称清理（含空父目录）。用 trae 当样本（它的 SkillsDir 已声明）。
+func TestVerifySkillsCanary(t *testing.T) {
+	cfgPath, ws := verifySetup(t)
+	if code := Verify([]string{"--agent", "trae", "--config", cfgPath, "--workspace", ws}); code != 0 {
+		t.Fatalf("verify 应成功，实得 %d", code)
+	}
+	mustExist(t, filepath.Join(ws, ".trae", "skills", engine.SkillCanaryDirName, "SKILL.md"))
+
+	if code := Verify([]string{"--agent", "trae", "--config", cfgPath, "--workspace", ws, "--clean"}); code != 0 {
+		t.Fatalf("verify --clean 应成功，实得 %d", code)
+	}
+	skillDir := filepath.Join(ws, ".trae", "skills", engine.SkillCanaryDirName)
+	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("skills canary 应被清掉（stat err=%v）", err)
+	}
+	// 空的 .trae/skills 父目录应被一并删掉（与 removeEmptyLeaf 同规）。
+	if _, err := os.Stat(filepath.Join(ws, ".trae", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("空的 .trae/skills 应被清掉（stat err=%v）", err)
+	}
+}

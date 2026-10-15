@@ -98,6 +98,7 @@
 | **规则目录（canary 2026-10-09）** | **`.trae/rules/` 会被读取**，且**递归**（子目录文件也会加载）；扩展名只认 **`.md`**（带/不带 frontmatter 都能加载），**`.mdc` 不被当作规则加载**（直接读文件才看得到，不在会话上下文） | 在 `/workspace/Temp/.trae/rules/` 放 4 份对照探针（平铺无 fm / 平铺带 fm / `.mdc` / 子目录），开新会话问暗号：前 3 类中 01/02/子目录被加载，`03-rule.mdc` 的暗号未出现在上下文 |
 | **hook 载荷回传工作区（canary 2026-10-09）** | ✅ SessionStart 载荷（stdin）含 `"cwd":"/workspace/Temp"` 与 `"workspace_roots":["/workspace/Temp"]`，`PWD` 亦为该工作区。⇒ `rulemux sync --hook` 可直接用载荷定位工作区，不必依赖 `os.Getwd()`（已落地 `cmd/flags.go::hookWorkspace`） | `/tmp/trae-hook-probe.log` 实测 |
 | 对 rulemux 的影响 | 钩子文件 = 用户级 `~/.trae-cn/hooks.json`（`HookFile` 已改为此、`HookAbs=true`、无 `HookDirEnv`）；`writeHookJSON` 对 `trae` 风格在缺 `version` 时补 `1`；规则目录 `.trae/rules` 经 canary 坐实 ⇒ `Verified=true`；`sync --hook` 优先读载荷 `cwd`/`workspace_roots` | registry.go / install.go / cmd/flags.go |
+| **skills 目录（2026-10-15 接入 rulemux）** | **用户级 `~/.trae-cn/skills/` 已坐实**（本机 `/root/.trae-cn/skills/hindsight-coding-agent/` 真实装载，与 hindsight 同源）；**工作区级 `.trae/skills/` 🔴 未本机 canary**（社区文档一致，gotocx/trae-skills 等，2026-03），待真机开 Trae 会话验收。rulemux `registry.go` 已填 `SkillsDir=".trae/skills"` + `UserSkillsDirs=["~/.trae-cn/skills"]`，sync 主循环自动双域投递；`verify` 也会在工作区 skills 目录种一颗技能探针验收装载 | registry.go:195 / external/skill-ecosystem.md §三 Trae 行 / 本机 ~/.trae-cn/skills 实测 |
 
 ---
 

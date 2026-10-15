@@ -45,3 +45,42 @@ func CleanCanary(dir string) error {
 	}
 	return err
 }
+
+// SkillCanaryDirName 是 skill canary 探针目录的名字（一个带 __rulemux__ 前缀的技能目录，
+// 内含 SKILL.md）。带前缀 ⇒ 下次 sync 会把它当残留自动清掉，不会污染 skills 目录。
+const SkillCanaryDirName = Prefix + "canary-skill"
+
+// WriteSkillCanary 在 skills 目录写入一颗技能探针（含 SKILL.md），返回探针目录路径。
+// 探针带 Anthropic 简式 frontmatter（name + description，Trae/Claude/dsh 通用），
+// description 内嵌暗号，用于验证技能「是否真被扫描并可在会话中按名调用」。
+func WriteSkillCanary(dir, token string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	p := filepath.Join(dir, SkillCanaryDirName)
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		return "", err
+	}
+	content := "---\n" +
+		"name: " + SkillCanaryDirName + "\n" +
+		"description: rulemux skill canary. If this skill appears in your skill list and can be invoked by name, the skills delivery chain works. Token: " + token + "\n" +
+		"---\n"
+	if err := os.WriteFile(filepath.Join(p, "SKILL.md"), []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
+// CleanSkillCanary 删除 skills 目录里的技能探针；目录或文件不存在视为已清理。
+// 探针清掉后若父 skills 目录变空，一并删掉（与 verify 的 removeEmptyLeaf 同规，
+// 否则「探针建出来的空目录」会留在盘上成为下次回填的位置）。
+func CleanSkillCanary(dir string) error {
+	p := filepath.Join(dir, SkillCanaryDirName)
+	if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
+		_ = os.Remove(dir)
+	}
+	return nil
+}

@@ -90,6 +90,13 @@ func Verify(args []string) int {
 			// 清完 canary 后目录若确认为空也一并删掉（与 uninstall 的 D3 同规）：
 			// 否则「探针建出来的空目录」会留在盘上，成为下次回填的位置。
 			removeEmptyLeaf(dir)
+			// skills 探针同样清理（工作区级，与写入对称）。
+			if sdir := a.SkillsDirAbs(ws); sdir != "" {
+				if err := engine.CleanSkillCanary(sdir); err != nil {
+					fmt.Fprintf(os.Stderr, "rulemux: failed to clean skill canary for %s: %v\n", a.ID, err)
+					failed = true
+				}
+			}
 			fmt.Printf("Canary cleaned: %s\n", a.ID)
 		}
 		if failed {
@@ -101,6 +108,7 @@ func Verify(args []string) int {
 	token := engine.CanaryToken()
 	fmt.Println("rulemux verify — canary acceptance")
 	fmt.Println("Token:", token)
+	fmt.Println("Probes: rules dir (always); workspace skills dir (if the agent supports skills)")
 	fmt.Println()
 	for _, a := range targets {
 		dir := a.RulesDirAbs(ws)
@@ -113,12 +121,24 @@ func Verify(args []string) int {
 			fmt.Fprintf(os.Stderr, "  %s: failed to write canary: %v\n", a.ID, err)
 			return 1
 		}
-		fmt.Printf("  %s: wrote %s\n", a.ID, p)
+		fmt.Printf("  %s (rules): wrote %s\n", a.ID, p)
+		// skills 验收：支持 skills 的 agent 在工作区级 skills 目录也种一颗技能探针
+		// （仅本工作区，不碰用户级，与 rules canary 同口径）。这颗探针会让 Trae/dsh 等
+		// 在会话里出现一个 __rulemux__canary-skill 技能，验证「推送是否真装载」。
+		if sdir := a.SkillsDirAbs(ws); sdir != "" {
+			sp, err := engine.WriteSkillCanary(sdir, token)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  %s: failed to write skill canary: %v\n", a.ID, err)
+				return 1
+			}
+			fmt.Printf("  %s (skills): wrote %s\n", a.ID, sp)
+		}
 	}
 
 	fmt.Println()
 	fmt.Println("Open a NEW session for each agent and ask it:")
-	fmt.Printf("  \"Can you see this token in your rules: %s\"\n", token)
+	fmt.Printf("  rules:  \"Can you see this token in your rules: %s\"\n", token)
+	fmt.Printf("  skills: \"Do you have a skill named %s? Can you invoke it by name?\"\n", engine.SkillCanaryDirName)
 	fmt.Println()
 	fmt.Println("How to read the result (docs/design/features/verification.md):")
 	fmt.Println("  · Recites it ⇒ the chain works: the SessionStart copy took effect in this session,")

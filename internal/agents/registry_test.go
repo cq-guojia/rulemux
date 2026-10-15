@@ -125,8 +125,13 @@ func TestSkillsDirAbs(t *testing.T) {
 		t.Fatalf("SkillsDirAbs 应拼工作区，实得 %q", got)
 	}
 	trae, _ := Get("trae")
-	if got := trae.SkillsDirAbs("/w"); got != "" {
-		t.Fatalf("未声明 SkillsDir 的 agent 应返回空，实得 %q", got)
+	if got := trae.SkillsDirAbs("/w"); got != "/w/.trae/skills" {
+		t.Fatalf("trae SkillsDirAbs 应拼工作区，实得 %q", got)
+	}
+	traeUser := trae.UserSkillsDirsAbs()
+	wantTraeUser := []string{expandHomeForTest(t) + "/.trae-cn/skills"}
+	if !equalStrings(traeUser, wantTraeUser) {
+		t.Fatalf("trae 用户级 skills 目录展开错误：%v", traeUser)
 	}
 }
 

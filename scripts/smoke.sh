@@ -540,5 +540,30 @@ for d in .codebuddy .trae; do
 done
 ok "a legacy '*' ledger entry does not authorise foreign agents (D1)"
 
+# 29. Trae skills: [[skill_source]] lands in BOTH workspace .trae/skills AND user-level ~/.trae-cn/skills
+mkdir -p "$TMP/trae-skills/trae-demo"
+printf 'name: trae-demo\n' > "$TMP/trae-skills/trae-demo/SKILL.md"
+cat > "$TMP/trae.toml" <<EOF
+[[source]]
+path = ["$TMP/src/a.md"]
+
+[[skill_source]]
+path = ["$TMP/trae-skills"]
+agents = ["trae"]
+EOF
+"$BIN" sync --hook --agent trae --config "$TMP/trae.toml" --workspace "$WS" >"$TMP/trae-skill.log" 2>&1 || fail "trae skill sync exited non-zero"
+[ -f "$WS/.trae/skills/__rulemux__trae-demo/SKILL.md" ] || fail "trae workspace skills not synced"
+[ -f "$HOME/.trae-cn/skills/__rulemux__trae-demo/SKILL.md" ] || fail "trae user-level skills not synced"
+# the user's own skill file is never touched
+echo mine > "$HOME/.trae-cn/skills/my-own.md"
+"$BIN" sync --hook --agent trae --config "$TMP/trae.toml" --workspace "$WS" >/dev/null 2>&1
+[ -f "$HOME/.trae-cn/skills/my-own.md" ] || fail "trae sync deleted the user's own skill"
+# verify also drops a skill-shaped probe into the workspace skills dir
+"$BIN" verify --agent trae --config "$TMP/trae.toml" --workspace "$WS" >"$TMP/trae-verify.log" 2>&1 || fail "trae verify exited non-zero"
+[ -f "$WS/.trae/skills/__rulemux__canary-skill/SKILL.md" ] || fail "trae verify did not write skills canary"
+"$BIN" verify --agent trae --config "$TMP/trae.toml" --workspace "$WS" --clean >/dev/null 2>&1
+[ ! -e "$WS/.trae/skills/__rulemux__canary-skill" ] || fail "trae verify did not clean skills canary"
+ok "trae: skills sync to workspace + user-level, verify probes skills"
+
 echo
 echo "ALL SMOKE TESTS PASSED"

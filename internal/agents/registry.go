@@ -196,6 +196,9 @@ var registry = []Agent{
 		Aliases:  []string{"trae-cn", "trae-intl"},
 		Tier:     Tier1,
 		RulesDir: ".trae/rules", // canary 坐实（2026-10-09）：递归读取；`.md` 加载（frontmatter 可选）；`.mdc` 不加载
+		// skills 双域：用户级 CN 落点已坐实；工作区级 🔴 未本机 canary（社区文档一致），待真机验收。
+		SkillsDir:      ".trae/skills",                // 🔴 工作区级：需真机 canary 验证 Trae 是否扫描 .trae/skills
+		UserSkillsDirs: []string{"~/.trae-cn/skills"}, // 用户级 CN（2026-10-12 本机实测坐实：~/.trae-cn/skills/hindsight-coding-agent 真实装载）
 		HookFile: "~/.trae-cn/hooks.json",
 		HookAbs:  true,
 		// Trae 无配置目录环境变量（与 CodeBuddy 的 CODEBUDDY_CONFIG_DIR 不同），按 ~ 展开即可。
