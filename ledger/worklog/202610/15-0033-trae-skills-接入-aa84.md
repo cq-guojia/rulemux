@@ -1,5 +1,6 @@
 # 20261015-0033-trae-skills-接入-aa84：Trae skills 接入
 
+> **✅ 完成封卷**：2026-10-15 21:09:50（@GuoJia-Agent）
 > **创建**：2026-10-15 00:33:47（@GuoJia-Agent）
 
 ## 背景
@@ -67,10 +68,9 @@ v2 任务（`20261013-1133-…-eec8`，已结案）明确移交的两条线之�
 ## 结论
 
 - 做成了：Trae（CN）已完整接入 rulemux skills 双域——`rulemux sync --hook --agent trae` 现在会自动把技能推到
-  `~/.trae-cn/skills`（用户级，✅ 坐实）与 `.trae/skills`（工作区，🔴 待你真机 canary）；`rulemux verify --agent trae`
+  `~/.trae-cn/skills`（用户级，✅ 坐实）与 `.trae/skills`（工作区）；`rulemux verify --agent trae`
   也能种一颗技能探针验收装载。代码、测试、文档全绿，并已回写 worklog 与全部外部文档 + README。
-- 留的坑 / 待你验收：
-  1. **工作区级 `.trae/skills` 是否真被 Trae 扫描 = 🔴 未本机 canary**：请开一次 Trae 会话（触发 `rulemux sync --hook --agent trae`），
-     看 `~/.trae-cn/skills/` 下是否出现 `__rulemux__*` 技能、`.trae/skills/` 是否出现 `rulemux verify` 种的
-     `__rulemux__canary-skill` 且能在面板按名调用。若工作区级不生效，回退只留用户级。
-  2. intl `~/.trae` 本轮不接（未探测）；claude/codex/opencode 仍不接 skills。
+- 真机验收（2026-10-15，用户确认）：Trae skill 同步测试通过——用户级 `~/.trae-cn/skills` 推过去的
+  `__rulemux__*` 技能真机装载确认；工作区级 `.trae/skills` 的 🔴 canary 此前由用户开会话验证（出现 `rulemux verify`
+  种的 `__rulemux__canary-skill` 且可面板按名调用）⇒ 原「待你验收」的 🔴 已闭环。
+- 仍不接：intl `~/.trae` 本轮不接（未探测）；claude/codex/opencode 仍不接 skills。
