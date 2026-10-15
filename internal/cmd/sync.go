@@ -363,7 +363,7 @@ func (r *syncRun) resolveSkillSources(srcs []config.SkillSource) ([]config.Skill
 		ns := s
 		ns.Paths = nil
 		for _, p := range s.Paths {
-			if kind, _, _ := engine.ClassifySource(p); kind == engine.SourceLocal {
+			if kind, _, _, _ := engine.ClassifySource(p); kind == engine.SourceLocal {
 				ns.Paths = append(ns.Paths, p) // 本地：原样（BuildSkillPlan 照旧记 missing）
 				continue
 			}

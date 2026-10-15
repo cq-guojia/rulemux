@@ -52,6 +52,50 @@ func hasSkillFile(dir string) bool {
 	return false
 }
 
+// maxSkillScanDepth 是自动探测 skill 的最大目录深度（源根自身为第 0 层）。
+// shortcut: 探到第 4 层；更深的仓库布局再抬这个常量。
+const maxSkillScanDepth = 4
+
+// discoverSkills 在一个源根下自动发现 skill（对齐 npx skills「扫仓库枚举 skill」）：
+//   - 根本身含 SKILL.md ⇒ 整个根就是一个 skill（单 skill 布局，不再下钻）；
+//   - 否则限深向下扫，遇含 SKILL.md 的目录即认定为一个 skill，并**不再往它内部钻**
+//     （其 references/scripts 是自身资源，不是独立 skill）；
+//   - 跳过 .git / node_modules 等隐藏或依赖目录，避免无谓遍历。
+//
+// 这样 `gh:anthropics/skills`（skill 埋在 skills/ 子目录）无需 `#子路径` 也能把
+// template / docx / pdf / pptx / xlsx 全部找出；`#子路径` 仍可用于精确指定起点。
+func discoverSkills(root string) []skillRef {
+	if hasSkillFile(root) {
+		return []skillRef{{Src: root, Name: filepath.Base(root)}}
+	}
+	var out []skillRef
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || p == root {
+			return nil // 根自身已在上面判定；读不了的子目录静默跳过
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasPrefix(name, ".") || name == "node_modules" {
+			return filepath.SkipDir // 不进 .git / node_modules 等
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return nil
+		}
+		if strings.Count(rel, string(filepath.Separator))+1 > maxSkillScanDepth {
+			return filepath.SkipDir
+		}
+		if hasSkillFile(p) {
+			out = append(out, skillRef{Src: p, Name: name})
+			return filepath.SkipDir // 是 skill 了，不再往它里面钻
+		}
+		return nil
+	})
+	return out
+}
+
 // BuildSkillPlan 计算 skill 同步计划。
 //
 // 每个源根目录下「含 SKILL.md 的子目录」是一个 skill；根目录自身含 SKILL.md 时，
@@ -72,25 +116,7 @@ func BuildSkillPlan(dir string, srcs []config.SkillSource) *Plan {
 				missing = append(missing, root)
 				continue
 			}
-			if hasSkillFile(root) {
-				skills = append(skills, skillRef{Src: root, Name: filepath.Base(root)})
-				continue
-			}
-			entries, err := os.ReadDir(root)
-			if err != nil {
-				missing = append(missing, root)
-				continue
-			}
-			for _, e := range entries {
-				if !e.IsDir() {
-					continue
-				}
-				child := filepath.Join(root, e.Name())
-				if hasSkillFile(child) {
-					skills = append(skills, skillRef{Src: child, Name: e.Name()})
-				}
-				// 不含 SKILL.md 的子目录不是 skill，静默跳过（用户的自建目录不该报错）
-			}
+			skills = append(skills, discoverSkills(root)...)
 		}
 	}
 	count := map[string]int{}

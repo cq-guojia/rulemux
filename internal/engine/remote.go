@@ -40,8 +40,10 @@ const (
 // keySanitize 把任意串规整成 staging 目录名可用的小写片段。
 var keySanitize = regexp.MustCompile(`[^a-z0-9]+`)
 
-// ClassifySource 判定一条 skill 源 spec 的形态、staging key 与抓取参照（ref）。
-// 本地源 key 为空、ref 为原路径；调用方据 kind 决定是否抓取。
+// ClassifySource 判定一条 skill 源 spec 的形态、staging key、抓取参照（ref）与子路径（sub）。
+// 本地源 key 为空、ref 为原路径；调用方据 kind 决定是否抓取。sub 是 `#` 后的仓库内子路径
+// （可选）：指向某容器目录或单个 skill 目录；staging key 只由 `#` 前的 base 决定，故同一 repo
+// 的多个子路径共享一次 clone。
 //
 // 识别顺序（先显式前缀，再协议，再本地，最后裸 owner/repo 兜底）：
 //   - npm:pkg / gh:owner/repo / github:owner/repo
@@ -49,28 +51,38 @@ var keySanitize = regexp.MustCompile(`[^a-z0-9]+`)
 //   - 本地路径（/、~、./、../ 开头，或磁盘上已存在）
 //   - 裸 owner/repo ⇒ 默认 GitHub
 //   - 其余 ⇒ 按本地（BuildSkillPlan 会记 missing）
-func ClassifySource(spec string) (kind SourceKind, key, ref string) {
-	s := strings.TrimSpace(spec)
+func ClassifySource(spec string) (kind SourceKind, key, ref, sub string) {
+	base, sub := splitSubpath(spec)
+	s := strings.TrimSpace(base)
 	lower := strings.ToLower(s)
 	switch {
 	case strings.HasPrefix(lower, "npm:"):
 		pkg := strings.TrimSpace(s[len("npm:"):])
-		return SourceNPM, "npm-" + sanitizeKey(pkg), pkg
+		return SourceNPM, "npm-" + sanitizeKey(pkg), pkg, sub
 	case strings.HasPrefix(lower, "gh:"):
 		repo := strings.TrimSpace(s[len("gh:"):])
-		return SourceGitHub, keyFromRepo(repo), "https://github.com/" + repo + ".git"
+		return SourceGitHub, keyFromRepo(repo), "https://github.com/" + repo + ".git", sub
 	case strings.HasPrefix(lower, "github:"):
 		repo := strings.TrimSpace(s[len("github:"):])
-		return SourceGitHub, keyFromRepo(repo), "https://github.com/" + repo + ".git"
+		return SourceGitHub, keyFromRepo(repo), "https://github.com/" + repo + ".git", sub
 	case isGitURL(s):
-		return SourceGit, keyFromURL(s), s
+		return SourceGit, keyFromURL(s), s, sub
 	case isLocalish(s):
-		return SourceLocal, "", s
+		return SourceLocal, "", s, sub
 	case isOwnerRepo(s):
-		return SourceGitHub, keyFromRepo(s), "https://github.com/" + s + ".git"
+		return SourceGitHub, keyFromRepo(s), "https://github.com/" + s + ".git", sub
 	default:
-		return SourceLocal, "", s
+		return SourceLocal, "", s, sub
 	}
+}
+
+// splitSubpath 把 spec 按 `#` 拆成 base 与子路径。`#` 在 git URL / gh: / npm: 里都不出现，
+// 故可无歧义作子路径分隔符（本地路径若含字面 `#` 需避开，属罕见）。
+func splitSubpath(spec string) (base, sub string) {
+	if i := strings.Index(spec, "#"); i >= 0 {
+		return strings.TrimSpace(spec[:i]), strings.TrimSpace(spec[i+1:])
+	}
+	return spec, ""
 }
 
 // StagingDir 返回某 staging key 对应的本地目录（~/.rulemux/skills/<key>）。
@@ -82,43 +94,47 @@ func StagingDir(key string) string {
 	return filepath.Join(base, key)
 }
 
-// EnsureStaged 把一条源解析成本地目录：本地源原样返回；远程源若尚未抓取则按 kind
-// 抓取进 staging（带 timeout），已抓取则直接返回（零网络）。
+// EnsureStaged 把一条源解析成本地目录：本地源原样返回（拼上子路径）；远程源若尚未抓取则按
+// kind 抓取进 staging（带 timeout），已抓取则直接返回（零网络）。最终源根 = staging/本地 + 子路径。
 func EnsureStaged(spec string, timeout time.Duration) (string, error) {
-	kind, key, ref := ClassifySource(spec)
+	kind, key, ref, sub := ClassifySource(spec)
+	var root string
 	if kind == SourceLocal {
-		return spec, nil
-	}
-	root := StagingDir(key)
-	if isNonEmptyDir(root) {
-		return root, nil
-	}
-	base, err := stagingBase()
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		return "", err
-	}
-	switch kind {
-	case SourceGitHub, SourceGit:
-		if err := gitClone(ref, root, timeout); err != nil {
-			return "", err
+		root = ref
+	} else {
+		root = StagingDir(key)
+		if !isNonEmptyDir(root) {
+			base, err := stagingBase()
+			if err != nil {
+				return "", err
+			}
+			if err := os.MkdirAll(base, 0o755); err != nil {
+				return "", err
+			}
+			switch kind {
+			case SourceGitHub, SourceGit:
+				if err := gitClone(ref, root, timeout); err != nil {
+					return "", err
+				}
+			case SourceNPM:
+				if err := npmFetch(ref, root, timeout); err != nil {
+					return "", err
+				}
+			default:
+				return "", fmt.Errorf("unsupported skill source %q", spec)
+			}
 		}
-	case SourceNPM:
-		if err := npmFetch(ref, root, timeout); err != nil {
-			return "", err
-		}
-	default:
-		return "", fmt.Errorf("unsupported skill source %q", spec)
+	}
+	if sub != "" {
+		root = filepath.Join(root, filepath.FromSlash(sub))
 	}
 	return root, nil
 }
 
-// UpdateStaged 对**已抓取**的远程源做一次升级：git → 原地 git pull；
-// npm → 重新 pack 覆盖。本地源无需更新（no-op）。绝不删重克、不叠加。
+// UpdateStaged 对**已抓取**的远程源做一次升级：git → 原地 git pull；npm → 重新 pack 覆盖。
+// 本地源无需更新（no-op）。升级针对整个 repo（子路径不影响，pull 一次全更）。绝不删重克、不叠加。
 func UpdateStaged(spec string, timeout time.Duration) error {
-	kind, key, ref := ClassifySource(spec)
+	kind, key, ref, _ := ClassifySource(spec)
 	if kind == SourceLocal {
 		return nil
 	}

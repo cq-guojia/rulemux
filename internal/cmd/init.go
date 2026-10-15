@@ -178,6 +178,8 @@ const exampleConfig = `# rulemux configuration file
 # [[skill_source]]                      # remote source: fetched once on first sync
 # path = ["gh:anthropics/skills"]       # GitHub shorthand (HTTPS); also a full git URL
 #                                       # (git@host:owner/repo.git = SSH) or npm:<package>
+#                                       # skills under the root are auto-discovered (no config);
+#                                       # append #subpath to pick one, e.g. gh:o/r#skills/docx
 # agents = ["codebuddy", "trae"]
 
 # fetch_timeout = "30s"                 # top-level: max time a remote fetch may take on the

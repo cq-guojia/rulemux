@@ -16,23 +16,31 @@ func TestClassifySource(t *testing.T) {
 		spec     string
 		wantKind SourceKind
 		wantKey  string
+		wantSub  string
 	}{
-		{"~/my-skills", SourceLocal, ""},
-		{"./x", SourceLocal, ""},
-		{"/abs/dir", SourceLocal, ""},
-		{"gh:owner/repo", SourceGitHub, "owner-repo"},
-		{"github:owner/repo", SourceGitHub, "owner-repo"},
-		{"owner/repo", SourceGitHub, "owner-repo"},
-		{"git@github.com:owner/repo.git", SourceGit, "owner-repo"},
-		{"https://github.com/owner/repo.git", SourceGit, "owner-repo"},
-		{"https://gitlab.com/grp/sub/proj.git", SourceGit, "sub-proj"},
-		{"npm:pkg", SourceNPM, "npm-pkg"},
-		{"npm:@scope/name", SourceNPM, "npm-scope-name"},
+		{"~/my-skills", SourceLocal, "", ""},
+		{"./x", SourceLocal, "", ""},
+		{"/abs/dir", SourceLocal, "", ""},
+		{"gh:owner/repo", SourceGitHub, "owner-repo", ""},
+		{"github:owner/repo", SourceGitHub, "owner-repo", ""},
+		{"owner/repo", SourceGitHub, "owner-repo", ""},
+		{"git@github.com:owner/repo.git", SourceGit, "owner-repo", ""},
+		{"https://github.com/owner/repo.git", SourceGit, "owner-repo", ""},
+		{"https://gitlab.com/grp/sub/proj.git", SourceGit, "sub-proj", ""},
+		{"npm:pkg", SourceNPM, "npm-pkg", ""},
+		{"npm:@scope/name", SourceNPM, "npm-scope-name", ""},
+		// 子路径（#）：base 决定 kind/key，sub 单列；staging key 忽略 sub ⇒ 同 repo 多子路径共享 clone
+		{"gh:anthropics/skills#skills", SourceGitHub, "anthropics-skills", "skills"},
+		{"gh:anthropics/skills#skills/docx", SourceGitHub, "anthropics-skills", "skills/docx"},
+		{"git@github.com:o/r.git#sub", SourceGit, "o-r", "sub"},
+		{"npm:pkg#x", SourceNPM, "npm-pkg", "x"},
+		{"/abs/dir#sub", SourceLocal, "", "sub"},
 	}
 	for _, c := range cases {
-		kind, key, _ := ClassifySource(c.spec)
-		if kind != c.wantKind || key != c.wantKey {
-			t.Errorf("ClassifySource(%q) = (%v, %q), want (%v, %q)", c.spec, kind, key, c.wantKind, c.wantKey)
+		kind, key, _, sub := ClassifySource(c.spec)
+		if kind != c.wantKind || key != c.wantKey || sub != c.wantSub {
+			t.Errorf("ClassifySource(%q) = (%v, %q, sub=%q), want (%v, %q, sub=%q)",
+				c.spec, kind, key, sub, c.wantKind, c.wantKey, c.wantSub)
 		}
 	}
 }
@@ -196,5 +204,59 @@ func TestExtractTarGzRejectsEscape(t *testing.T) {
 	tgz := makeTarGz(t, map[string]string{"package/ok.txt": "x"}, map[string]string{"package/../../evil.txt": "evil"}, nil)
 	if err := extractTarGz(tgz, dest); err == nil {
 		t.Fatal("expected path-traversal entry to be rejected")
+	}
+}
+
+func TestDiscoverSkillsNested(t *testing.T) {
+	root := t.TempDir()
+	mk := func(rel string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("name: x\ndescription: d\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("template/SKILL.md")
+	mk("template/references/notes.md") // skill 内部资源，不是 skill
+	mk("skills/docx/SKILL.md")
+	mk("skills/docx/scripts/run.py") // skill 内部资源
+	mk("skills/pdf/SKILL.md")
+	mk(".git/objects/ab/SKILL.md")  // .git 内，须跳过
+	mk("node_modules/foo/SKILL.md") // 依赖，须跳过
+	mk("a/b/c/d/e/SKILL.md")        // 第 5 层，超 maxSkillScanDepth，不探
+
+	got := map[string]bool{}
+	for _, sk := range discoverSkills(root) {
+		got[sk.Name] = true
+	}
+	for _, w := range []string{"template", "docx", "pdf"} {
+		if !got[w] {
+			t.Errorf("missing skill %q (got %v)", w, got)
+		}
+	}
+	for _, bad := range []string{"references", "scripts", "ab", "foo", "e", "a", "node_modules"} {
+		if got[bad] {
+			t.Errorf("unexpectedly discovered %q", bad)
+		}
+	}
+}
+
+func TestDiscoverSkillsRootIsSkill(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 根自身是 skill 时不再下钻：即便子目录也有 SKILL.md 也不算独立 skill。
+	if err := os.MkdirAll(filepath.Join(root, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "references", "SKILL.md"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sk := discoverSkills(root)
+	if len(sk) != 1 || sk[0].Name != filepath.Base(root) {
+		t.Fatalf("root-is-skill should yield exactly one skill named %q, got %+v", filepath.Base(root), sk)
 	}
 }

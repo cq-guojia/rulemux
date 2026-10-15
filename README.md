@@ -383,7 +383,10 @@ path = ["~/react-skills", "~/css-skills"]
   (`git@host:owner/repo.git` = SSH, `https://…` = HTTPS) is `git clone`d into
   `~/.rulemux/skills/<owner>-<repo>/` on the first sync; `npm:<package>` is `npm pack`ed and unpacked
   there. After the first fetch it is treated as a local dir (zero network on later syncs). Transport
-  (SSH vs HTTPS) is whatever the URL you wrote implies — rulemux never picks for you. Inspect with
+  (SSH vs HTTPS) is whatever the URL you wrote implies — rulemux never picks for you. Skills under the
+  source root are **auto-discovered** (bounded scan for `SKILL.md`, like `npx skills --all`), so a repo
+  that groups many skills (e.g. `gh:anthropics/skills`) works with no extra config; append `#subpath`
+  (e.g. `gh:anthropics/skills#skills/docx`) to point at one container or a single skill. Inspect with
   `rulemux skill list`; upgrade with `rulemux skill update <key>` / `--all` (git pull / npm re-pack, in
   place — manual only, never in the hook). Top-level `fetch_timeout = "30s"` caps how long a first-time
   fetch may run before it warns and skips on the hook path.
@@ -567,6 +570,8 @@ reproduced here one-to-one so you can read the whole thing before editing your c
 # [[skill_source]]                      # remote source: fetched once on first sync
 # path = ["gh:anthropics/skills"]       # GitHub shorthand (HTTPS); or a full git URL
 #                                       # (git@host:owner/repo.git = SSH) / npm:<package>
+#                                       # skills under the root are auto-discovered (no config);
+#                                       # append #subpath to pick one, e.g. gh:o/r#skills/docx
 # agents = ["codebuddy", "trae"]
 
 # fetch_timeout = "30s"                 # top-level: max time a first-time remote fetch may run

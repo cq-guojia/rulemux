@@ -7,6 +7,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cq-guojia/rulemux/internal/config"
@@ -72,10 +73,11 @@ func skillList(cfgPath string) int {
 		}
 		targets := skillTargets(s)
 		for _, p := range s.Paths {
-			kind, key, _ := engine.ClassifySource(p)
+			kind, key, ref, sub := engine.ClassifySource(p)
+			root := effectiveRoot(kind, ref, key, sub)
 			if kind == engine.SourceLocal {
 				status := "ok"
-				if _, err := os.Stat(p); err != nil {
+				if _, err := os.Stat(root); err != nil {
 					status = "missing"
 				}
 				fmt.Fprintf(os.Stderr, "  %-30s %-6s %s\n", truncateRunes(p, 30), "local",
@@ -83,11 +85,11 @@ func skillList(cfgPath string) int {
 				continue
 			}
 			status := "not staged"
-			if isStagedDir(engine.StagingDir(key)) {
+			if isStagedDir(root) {
 				status = "staged"
 			}
 			fmt.Fprintf(os.Stderr, "  %-30s %-6s %s\n", truncateRunes(p, 30), kindLabel(kind),
-				ui.Dim("→ "+ui.HomeRel(engine.StagingDir(key))+"  ["+status+"]  "+scope+"  "+targets))
+				ui.Dim("→ "+ui.HomeRel(root)+"  ["+status+"]  "+scope+"  "+targets))
 		}
 	}
 	return 0
@@ -105,15 +107,20 @@ func skillUpdate(cfgPath, key string, all bool) int {
 	}
 	timeout := cfg.FetchTimeoutDuration()
 	matched, exit := 0, 0
+	done := map[string]bool{} // 同一 repo（skey）多个子路径只升级一次（pull 一次全更）
 	for _, s := range cfg.SkillSources {
 		for _, p := range s.Paths {
-			kind, skey, _ := engine.ClassifySource(p)
+			kind, skey, _, _ := engine.ClassifySource(p)
 			if kind == engine.SourceLocal {
 				continue
 			}
 			if !all && p != key && skey != key {
 				continue
 			}
+			if done[skey] {
+				continue
+			}
+			done[skey] = true
 			matched++
 			if err := engine.UpdateStaged(p, timeout); err != nil {
 				fmt.Fprintf(os.Stderr, "rulemux: %s %s: %v\n", ui.Red(ui.GlyphFail), skey, err)
@@ -150,6 +157,18 @@ func kindLabel(k engine.SourceKind) string {
 	default:
 		return "?"
 	}
+}
+
+// effectiveRoot 算一条源的实际本地根：本地源 = ref；远程源 = staging 目录；再拼上 `#子路径`。
+func effectiveRoot(kind engine.SourceKind, ref, key, sub string) string {
+	root := ref
+	if kind != engine.SourceLocal {
+		root = engine.StagingDir(key)
+	}
+	if sub != "" {
+		root = filepath.Join(root, filepath.FromSlash(sub))
+	}
+	return root
 }
 
 func isStagedDir(dir string) bool {

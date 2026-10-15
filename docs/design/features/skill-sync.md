@@ -191,22 +191,23 @@ rulemux 只做字节拷贝、不改内容 ⇒ 上述差异是用户写技能时�
 
 ### 8.2 `[[skill_source]]` 的 `path` 多态解析
 
-一个 `path` 承载三种源，**按字符串特征自动分流，用户不显式选类型**：
+一个 `path` 承载本地 / git / npm 多类源，**按字符串特征自动分流，用户不显式选类型**（可再跟 `#子路径` 精确指定仓库内位置，见下）：
 
 | `path` 写法 | 识别 | 落点 `<key>` | 抓取 |
 |---|---|---|---|
 | `/abs`、`~/x`、`./x`、磁盘上真实存在的目录 | 本地目录 | 不 clone，直接用 | — |
 | `gh:owner/repo`（或 `github:owner/repo`） | GitHub 仓库 | `owner-repo` | `git clone https://github.com/owner/repo.git`（HTTPS 默认） |
 | 完整 git URL：`git@github.com:owner/repo.git` / `https://gitlab.com/x/y` / `git://…` | 任意 git 仓库 | 取末两段 `owner-repo` | **原样 clone**，SSH / HTTPS 由 URL 决定 |
-| `npm:pkg` | npm 包 | `npm-pkg` | `npm pack` 取包解包（follow-up） |
+| `npm:pkg` | npm 包 | `npm-pkg` | `npm pack` 取包解包 |
 
 - 类型前缀用 `gh:` / `npm:`，**刻意避开与 SSH 传输符 `git@` 撞车**（`git@` 只在完整 URL 里出现，原样克隆）。
 - 裸 `owner/repo`（无协议无冒号）默认按 GitHub 处理；仍有歧义时提示补前缀。
+- **`#子路径`（可选）**：任一路径后跟 `#仓库内子路径`，把源根精确指到某容器目录或单个 skill 目录。`gh:`/git URL/`npm:` 都不含 `#`，故无歧义；**staging key 只取 `#` 前**，同一 repo 的多个子路径共享一次 clone。例：`gh:anthropics/skills#skills/docx` 只取 docx；数组 `[…#skills/docx, …#skills/pptx]` 取两个。
 
 ### 8.3 staging 落点
 
 - 统一落 `~/.rulemux/skills/<key>/`，`<key>` 由 URL **确定性派生**（可读、可排重）：`gh:owner/repo` → `owner-repo`；`npm:pkg` → `npm-pkg`。
-- **clone 根即 skill 源根**：仓库下每个含 `SKILL.md` 的子目录是一个 skill（一仓多 skill 也支持，契合「目录即源」）；仓库根自带 `SKILL.md` 即单 skill。
+- **源根 = clone/本地根 + `#子路径`**；skill 发现为**限深自动探测**（对齐 npx skills「扫仓库枚举 skill」）：根本身含 `SKILL.md` ⇒ 单 skill；否则向下扫（默认 ≤4 层），遇含 `SKILL.md` 的目录即一个 skill 并**不再往其内部钻**（其 references/scripts 是自身资源，非独立 skill），跳过 `.git`/`node_modules`。故 `gh:anthropics/skills`（skill 埋在 `skills/` 下）**不带 `#` 也能把全部 skill 找出分发**；要精确挑选再用 `#子路径`。成本：本地限深 dirent 遍历，毫秒级（下载/解压已有 ≤25MiB/≤1000 文件上限兜底）。
 - 本地路径源不 clone、不进 staging。
 
 ### 8.4 拉取时机与超时
