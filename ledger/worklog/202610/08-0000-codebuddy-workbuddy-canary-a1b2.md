@@ -2,6 +2,7 @@
 
 > **✅ 完成封卷**：2026-10-08 00:00:00（@GuoJia-Agent）
 > **创建**：2026-10-08 00:00:00（@GuoJia-Agent）
+> **分类**：建设 ｜ **标签**：codebuddy、workbuddy、canary、rulemux、工作区
 
 ## 背景
 需在 CodeBuddy 工作区验证暗号 `RULEMUX-CANARY-43371345` 能否被念出；并确认用户提出的「workspace 数组 + all/*/unset + 合并→文件清单→增删比对」方案是否已实现。

@@ -2,6 +2,7 @@
 
 > **✅ 完成封卷**：2026-10-08 00:00:00（@GuoJia-Agent）
 > **创建**：2026-10-08 00:00:00（@GuoJia-Agent）
+> **分类**：缺陷修复 ｜ **标签**：hook、宿主、命令、codebuddy、rulemux
 
 ## 背景
 本机已装 rulemux、CodeBuddy 也显示钩子已装，但新会话里规则**从不生效**：`.codebuddy/rules` 一直是空目录。

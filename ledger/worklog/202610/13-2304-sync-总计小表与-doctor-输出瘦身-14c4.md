@@ -2,6 +2,7 @@
 
 > **✅ 完成封卷**：2026-10-14 08:18:39（@GuoJia-Agent）
 > **创建**：2026-10-13 23:04:57（@GuoJia-Agent）
+> **分类**：优化 ｜ **标签**：sync、doctor、workbuddy、skills、skill
 
 ## 背景
 

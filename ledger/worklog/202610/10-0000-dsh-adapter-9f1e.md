@@ -2,6 +2,7 @@
 
 > **✅ 完成封卷**：2026-10-10 00:00:00（@GuoJia-Agent）
 > **创建**：2026-10-10 00:00:00（@GuoJia-Agent）
+> **分类**：优化 ｜ **标签**：dsh、canary、适配器、插件、收口
 
 ## 背景
 新增 dsh（DeepSeek Harness）适配器。dsh 是 **plugin-first** 宿主（Cordis 生命周期事件）：**没有 hook binary**，也**不原生扫描规则目录**。需与已实现的 Go 同步引擎配合。

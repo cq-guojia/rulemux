@@ -2,6 +2,7 @@
 
 > **✅ 完成封卷**：2026-10-13 22:20:32（@GuoJia-Agent）
 > **创建**：2026-10-13 21:47:10（@GuoJia-Agent）
+> **分类**：优化 ｜ **标签**：sync、doctor、agent、npm、rulemux
 
 ## 背景
 

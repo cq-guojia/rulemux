@@ -2,6 +2,7 @@
 
 > **✅ 完成封卷**：2026-10-10 00:00:00（@GuoJia-Agent）
 > **创建**：2026-10-10 00:00:00（@GuoJia-Agent）
+> **分类**：文档 ｜ **标签**：dsh、设置界面、npm、插件、展示
 
 ## 背景
 `rulemux-dsh` 没有 dsh 原生设置界面，用户配置全靠手改 `~/.rulemux/config.toml`（Go CLI 配置，插件装载期用 `rulemux init --agent dsh` 生成满注释样板，再由用户填 `[[source]]`）。目标：给 rulemux-dsh 加一个 dsh 设置界面。
