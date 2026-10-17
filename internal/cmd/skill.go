@@ -75,11 +75,11 @@ func skillList(cfgPath string) int {
 		for _, p := range s.Paths {
 			kind, key, ref, sub := engine.ClassifySource(p)
 			root := effectiveRoot(kind, ref, key, sub)
-			// 主标识：远程源用 staging key（与 `skill update` 打印/可键入的一致），
-			// 本地源无 key，用路径本身；均不截断，过长整体换行到下方。
-			handle := key
-			if kind == engine.SourceLocal {
-				handle = p
+			// 主标识：远程源用对用户友好的技能名（task-ledger，而非 staging 目录名 npm-task-ledger），
+			// 本地源无此类重名风险，直接显示完整路径；源类型作为 [npm]/[git] 限定符附在名字后。
+			handle := p
+			if kind != engine.SourceLocal {
+				handle = sourceName(kind, ref)
 			}
 			status := "not staged"
 			if kind == engine.SourceLocal {
@@ -90,16 +90,16 @@ func skillList(cfgPath string) int {
 			} else if isStagedDir(root) {
 				status = "staged"
 			}
-			// 第一行：主标识 + 状态 + 类型 + 作用域/agents，不截断。
+			// 第一行：技能名 + [源类型] + [状态] + 作用域/agents，不截断。
 			fmt.Fprintf(os.Stderr, "  %s %s %s %s\n",
 				ui.Bold(handle),
+				ui.Dim("["+kindLabel(kind)+"]"),
 				ui.Dim("["+status+"]"),
-				ui.Dim(kindLabel(kind)),
 				ui.Dim(scope+"  "+targets))
-			// 远程源补两行：原始配置写法（把 npm:task-ledger 与 npm-task-ledger 对上）+ staging 根。
+			// 远程源补两行：原始配置写法 + staging 目录（解释 npm-task-ledger 这个后端路径从哪来）。
 			if kind != engine.SourceLocal {
 				fmt.Fprintf(os.Stderr, "    %s %s\n", ui.Dim("source:"), p)
-				fmt.Fprintf(os.Stderr, "    %s %s\n", ui.Dim("staged:"), ui.HomeRel(root))
+				fmt.Fprintf(os.Stderr, "    %s %s\n", ui.Dim("staging:"), ui.HomeRel(root))
 			}
 		}
 	}
@@ -121,11 +121,13 @@ func skillUpdate(cfgPath, key string, all bool) int {
 	done := map[string]bool{} // 同一 repo（skey）多个子路径只升级一次（pull 一次全更）
 	for _, s := range cfg.SkillSources {
 		for _, p := range s.Paths {
-			kind, skey, _, _ := engine.ClassifySource(p)
+			kind, skey, ref, _ := engine.ClassifySource(p)
 			if kind == engine.SourceLocal {
 				continue
 			}
-			if !all && p != key && skey != key {
+			name := sourceName(kind, ref)
+			// 可键入：原始 spec（npm:task-ledger）/ staging key（npm-task-ledger）/ 技能本名（task-ledger）。
+			if !all && p != key && skey != key && name != key {
 				continue
 			}
 			if done[skey] {
@@ -135,12 +137,12 @@ func skillUpdate(cfgPath, key string, all bool) int {
 			matched++
 			before, after, err := engine.UpdateStaged(p, timeout)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "rulemux: %s %s: %v\n", ui.Red(ui.GlyphFail), skey, err)
+				fmt.Fprintf(os.Stderr, "rulemux: %s %s: %v\n", ui.Red(ui.GlyphFail), name, err)
 				exit = 1
 				continue
 			}
-			fmt.Fprintln(os.Stderr, skillUpdateLine(skey, before, after))
-			}
+			fmt.Fprintln(os.Stderr, skillUpdateLine(name, engine.StagingDir(skey), before, after))
+		}
 	}
 	if matched == 0 {
 		if all {
@@ -153,21 +155,22 @@ func skillUpdate(cfgPath, key string, all bool) int {
 }
 
 // skillUpdateLine 渲染单条源的升级结果行：首次抓取显「fetched」、未变化显
-// 「up to date」、有变化显「old → new」。版本取自 package.json / git describe
-// （见 engine.UpdateStaged）。
-func skillUpdateLine(skey, before, after string) string {
+// 「up to date」、有变化显「old → new」。name 为用户友好的技能名（如 task-ledger），
+// root 为真实 staging 目录（含源类型前缀，如 npm-task-ledger）。版本取自 package.json /
+// git describe（见 engine.UpdateStaged）。
+func skillUpdateLine(name, root, before, after string) string {
 	switch {
 	case before == "" && after == "":
-		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), skey,
-			ui.Dim("("+ui.HomeRel(engine.StagingDir(skey))+")"))
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), name,
+			ui.Dim("("+ui.HomeRel(root)+")"))
 	case before == "":
-		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), skey,
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), name,
 			ui.Dim("fetched ")+ui.Green(after))
 	case before == after:
-		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), skey,
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), name,
 			ui.Dim("up to date ("+after+")"))
 	default:
-		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphChanged), skey,
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphChanged), name,
 			ui.Yellow(before+" → "+after))
 	}
 }
@@ -190,6 +193,23 @@ func kindLabel(k engine.SourceKind) string {
 		return "npm"
 	default:
 		return "?"
+	}
+}
+
+// sourceName 返回对用户友好的技能名：npm 取包名、git/github 取仓库末段、本地取目录名。
+// 与 staging 目录名（含源类型前缀，如 npm-task-ledger）区分开——后者只是去重用的内部
+// 路径，不应当作技能名展示给用户。
+func sourceName(kind engine.SourceKind, ref string) string {
+	switch kind {
+	case engine.SourceNPM:
+		return ref
+	case engine.SourceGitHub, engine.SourceGit:
+		u := strings.TrimSuffix(ref, ".git")
+		u = strings.TrimSuffix(u, "/")
+		parts := strings.Split(u, "/")
+		return parts[len(parts)-1]
+	default: // local
+		return filepath.Base(ref)
 	}
 }
 
