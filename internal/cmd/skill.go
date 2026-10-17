@@ -75,21 +75,32 @@ func skillList(cfgPath string) int {
 		for _, p := range s.Paths {
 			kind, key, ref, sub := engine.ClassifySource(p)
 			root := effectiveRoot(kind, ref, key, sub)
+			// 主标识：远程源用 staging key（与 `skill update` 打印/可键入的一致），
+			// 本地源无 key，用路径本身；均不截断，过长整体换行到下方。
+			handle := key
 			if kind == engine.SourceLocal {
-				status := "ok"
+				handle = p
+			}
+			status := "not staged"
+			if kind == engine.SourceLocal {
+				status = "ok"
 				if _, err := os.Stat(root); err != nil {
 					status = "missing"
 				}
-				fmt.Fprintf(os.Stderr, "  %-30s %-6s %s\n", truncateRunes(p, 30), "local",
-					ui.Dim("["+status+"]  "+scope+"  "+targets))
-				continue
-			}
-			status := "not staged"
-			if isStagedDir(root) {
+			} else if isStagedDir(root) {
 				status = "staged"
 			}
-			fmt.Fprintf(os.Stderr, "  %-30s %-6s %s\n", truncateRunes(p, 30), kindLabel(kind),
-				ui.Dim("→ "+ui.HomeRel(root)+"  ["+status+"]  "+scope+"  "+targets))
+			// 第一行：主标识 + 状态 + 类型 + 作用域/agents，不截断。
+			fmt.Fprintf(os.Stderr, "  %s %s %s %s\n",
+				ui.Bold(handle),
+				ui.Dim("["+status+"]"),
+				ui.Dim(kindLabel(kind)),
+				ui.Dim(scope+"  "+targets))
+			// 远程源补两行：原始配置写法（把 npm:task-ledger 与 npm-task-ledger 对上）+ staging 根。
+			if kind != engine.SourceLocal {
+				fmt.Fprintf(os.Stderr, "    %s %s\n", ui.Dim("source:"), p)
+				fmt.Fprintf(os.Stderr, "    %s %s\n", ui.Dim("staged:"), ui.HomeRel(root))
+			}
 		}
 	}
 	return 0
@@ -171,6 +182,8 @@ func skillTargets(s config.SkillSource) string {
 
 func kindLabel(k engine.SourceKind) string {
 	switch k {
+	case engine.SourceLocal:
+		return "local"
 	case engine.SourceGitHub, engine.SourceGit:
 		return "git"
 	case engine.SourceNPM:
@@ -195,13 +208,4 @@ func effectiveRoot(kind engine.SourceKind, ref, key, sub string) string {
 func isStagedDir(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	return err == nil && len(entries) > 0
-}
-
-// truncateRunes 按 rune 截断（避免把多字节字符切成乱码），超长以 … 收尾。
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
 }
