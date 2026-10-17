@@ -11,6 +11,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -131,27 +132,91 @@ func EnsureStaged(spec string, timeout time.Duration) (string, error) {
 	return root, nil
 }
 
-// UpdateStaged 对**已抓取**的远程源做一次升级：git → 原地 git pull；npm → 重新 pack 覆盖。
-// 本地源无需更新（no-op）。升级针对整个 repo（子路径不影响，pull 一次全更）。绝不删重克、不叠加。
-func UpdateStaged(spec string, timeout time.Duration) error {
+// UpdateStaged 对一条远程源做一次升级，返回升级前后的版本标识（见 stagedVersion）。
+// 若尚未抓取（首次）则惰性 clone / pack（等同 EnsureStaged 的首次抓取），不再报
+// 「not staged」而中断用户；已抓取则 git 原地 pull / npm 重 pack 覆盖。本地源 no-op
+// 返回空串。升级针对整个 repo（子路径不影响，pull 一次全更）。绝不删重克、不叠加。
+func UpdateStaged(spec string, timeout time.Duration) (before, after string, err error) {
 	kind, key, ref, _ := ClassifySource(spec)
 	if kind == SourceLocal {
-		return nil
+		return "", "", nil
 	}
 	root := StagingDir(key)
 	if !isNonEmptyDir(root) {
-		return fmt.Errorf("%s is not staged yet; run a sync first", key)
+		// 尚未抓取：update 顺带做首次 clone/pack（与 sync 同义），避免「not staged」报错打断用户。
+		if _, err = EnsureStaged(spec, timeout); err != nil {
+			return "", "", err
+		}
+		return "", stagedVersion(kind, root), nil
 	}
+	before = stagedVersion(kind, root)
 	switch kind {
 	case SourceGitHub, SourceGit:
-		return gitPull(root, timeout)
-	case SourceNPM:
-		if err := os.RemoveAll(root); err != nil {
-			return err
+		if err = gitPull(root, timeout); err != nil {
+			return before, before, err
 		}
-		return npmFetch(ref, root, timeout)
+	case SourceNPM:
+		if err = os.RemoveAll(root); err != nil {
+			return before, before, err
+		}
+		if err = npmFetch(ref, root, timeout); err != nil {
+			return before, before, err
+		}
 	}
-	return nil
+	after = stagedVersion(kind, root)
+	return before, after, nil
+}
+
+// stagedVersion 返回已抓取源的当前版本标识：npm 取 package.json 的 version；
+// git/github 取 git describe（见 gitDescribe）；本地源返回空串。
+func stagedVersion(kind SourceKind, root string) string {
+	switch kind {
+	case SourceNPM:
+		return npmVersion(root)
+	case SourceGitHub, SourceGit:
+		return gitDescribe(root)
+	default:
+		return ""
+	}
+}
+
+// npmVersion 读 <root>/package.json 的 version 字段；文件或字段缺失返回空串。
+func npmVersion(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return ""
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return ""
+	}
+	return pkg.Version
+}
+
+// gitDescribe 返回 HEAD 的可读版本标识：优先 `git describe --tags --always`
+// （有 tag 显示 v1.2.3，无则短 hash），任一 git 调用失败兜底 `git rev-parse --short HEAD`。
+func gitDescribe(dir string) string {
+	if out, err := runGit(dir, "describe", "--tags", "--always"); err == nil && out != "" {
+		return out
+	}
+	if out, err := runGit(dir, "rev-parse", "--short", "HEAD"); err == nil {
+		return out
+	}
+	return ""
+}
+
+// runGit 在 dir 下执行 git 子命令，返回裁剪后的 stdout；超时 10s。
+func runGit(dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // ---- 抓取实现 ----

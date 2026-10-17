@@ -221,6 +221,7 @@ rulemux 只做字节拷贝、不改内容 ⇒ 上述差异是用户写技能时�
 
 - **不自动升级**：日常 sync **绝不**重新抓取，`fetch_timeout` 只在首次可能命中 ⇒ hook 保持飞快。不引入「每次执行查新版」的网络开销。
 - **显式 `rulemux skill update <key>`**：git → 在已存在的 `~/.rulemux/skills/<key>` 里**原地 `git pull`**（或 `git fetch` + `reset --hard origin/<ref>`）；npm → 原地重新取包覆盖。**不删重克、不叠加。**
+- **未抓取也能 update**：若 `~/.rulemux/skills/<key>` 尚不存在（首次），`update` 顺带做**惰性 clone / pack**（等同 §8.4「首次 sync」抓取的同一条路径），不再报 `is not staged yet; run a sync first` 而中断用户；仍**不会**自动升级 `sync` 已抓取的源（不自动、显式触发不变）。升级输出带**版本差**：npm 显示 `package.json` 的 `version`（`old → new`），git 显示 `git describe` / 短 commit hash，未变化显 `up to date`，首次抓取显 `fetched <ver>`（对齐 `git pull` 的 `a1b2c3d..e4f5g6h`、`brew upgrade` 的 `foo 1.0 -> 1.1` 风格）。
 - **上游删文件能传导**：pull 后 checkout 删除该文件，下次 sync 复用引擎现有 prune（§二「计划内目录多出的文件删除 / 变空子目录清理」）把它从各家 agent 目录一并清掉。
 - **兜底**：`git pull` 失败 / 仓库损坏 ⇒ `rm -rf` 该 `<key>` 目录再重新 clone（唯一会删目录的路径）。
 

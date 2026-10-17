@@ -122,13 +122,14 @@ func skillUpdate(cfgPath, key string, all bool) int {
 			}
 			done[skey] = true
 			matched++
-			if err := engine.UpdateStaged(p, timeout); err != nil {
+			before, after, err := engine.UpdateStaged(p, timeout)
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "rulemux: %s %s: %v\n", ui.Red(ui.GlyphFail), skey, err)
 				exit = 1
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "rulemux: %s %s updated (%s)\n", ui.Green(ui.GlyphOK), skey, ui.HomeRel(engine.StagingDir(skey)))
-		}
+			fmt.Fprintln(os.Stderr, skillUpdateLine(skey, before, after))
+			}
 	}
 	if matched == 0 {
 		if all {
@@ -138,6 +139,26 @@ func skillUpdate(cfgPath, key string, all bool) int {
 		}
 	}
 	return exit
+}
+
+// skillUpdateLine 渲染单条源的升级结果行：首次抓取显「fetched」、未变化显
+// 「up to date」、有变化显「old → new」。版本取自 package.json / git describe
+// （见 engine.UpdateStaged）。
+func skillUpdateLine(skey, before, after string) string {
+	switch {
+	case before == "" && after == "":
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), skey,
+			ui.Dim("("+ui.HomeRel(engine.StagingDir(skey))+")"))
+	case before == "":
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), skey,
+			ui.Dim("fetched ")+ui.Green(after))
+	case before == after:
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphOK), skey,
+			ui.Dim("up to date ("+after+")"))
+	default:
+		return fmt.Sprintf("rulemux: %s %s %s", ui.Green(ui.GlyphChanged), skey,
+			ui.Yellow(before+" → "+after))
+	}
 }
 
 func skillTargets(s config.SkillSource) string {

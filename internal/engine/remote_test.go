@@ -131,11 +131,59 @@ func TestUpdateStagedGitPull(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	if err := UpdateStaged(spec, 30*time.Second); err != nil {
+	before, after, err := UpdateStaged(spec, 30*time.Second)
+	if err != nil {
 		t.Fatalf("UpdateStaged: %v", err)
+	}
+	if before == after {
+		t.Errorf("expected version to change after pull, before==after==%q", before)
 	}
 	if b, _ := os.ReadFile(filepath.Join(root, "SKILL.md")); !bytes.Contains(b, []byte("v2")) {
 		t.Errorf("git pull did not propagate upstream change, got %q", b)
+	}
+}
+
+// TestUpdateStagedAutoFetch 验证：从未抓取过的源，update 应惰性 clone 而非报「not staged」。
+func TestUpdateStagedAutoFetch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	t.Setenv("HOME", t.TempDir())
+	repo := gitRepo(t, "v1\n")
+	spec := "file://" + repo
+	before, after, err := UpdateStaged(spec, 30*time.Second)
+	if err != nil {
+		t.Fatalf("UpdateStaged auto-fetch: %v", err)
+	}
+	if before != "" {
+		t.Errorf("first fetch should report empty before, got %q", before)
+	}
+	if after == "" {
+		t.Error("after-fetch version should be non-empty (git describe / short hash)")
+	}
+}
+
+// TestNpmVersionReadsPackageJSON 验证 npm 版本取自 package.json 的 version 字段。
+func TestNpmVersionReadsPackageJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "package.json"),
+		[]byte(`{"name":"x","version":"1.2.3"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := npmVersion(dir); got != "1.2.3" {
+		t.Errorf("npmVersion = %q, want 1.2.3", got)
+	}
+}
+
+// TestGitDescribe 验证给一个有效 repo 能拿到非空版本标识。
+func TestGitDescribe(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	t.Setenv("HOME", t.TempDir())
+	repo := gitRepo(t, "x\n")
+	if got := gitDescribe(repo); got == "" {
+		t.Error("gitDescribe returned empty for a valid repo")
 	}
 }
 
