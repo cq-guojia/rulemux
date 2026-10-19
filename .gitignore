@@ -16,6 +16,7 @@ dist/
 .codebuddy/
 .claude/
 .trae/
+.vscode/
 
 # rulemux / 各 agent 在工作区根目录生成的钩子配置文件（同样是本机产物，不入库）
 hooks.json
